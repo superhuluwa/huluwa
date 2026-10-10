@@ -1,0 +1,17 @@
+services:
+  huluwa:
+    image: huluwa-console:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    # Keep initial administrator setup local by default.
+    ports:
+      - "${HULUWA_BIND_ADDRESS:-127.0.0.1}:${HULUWA_PORT:-8089}:8089"
+    volumes:
+      - huluwa-data:/app/data
+
+volumes:
+  huluwa-data:

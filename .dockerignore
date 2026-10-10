@@ -1,0 +1,33 @@
+# Version control, IDE settings and local tooling
+.git
+.idea
+.vscode
+codex-launcher-check-*
+
+# Dependencies and local build outputs: rebuild them inside the image
+**/node_modules
+**/target
+**/dist
+src/main/resources/static
+output
+**/*.class
+**/*.jar
+
+# Runtime data and logs must never be baked into the image
+data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.log
+
+# Local secrets and machine-specific configuration
+**/.env
+**/.env.*
+!**/.env.example
+
+# OS metadata
+.DS_Store
+Thumbs.db
