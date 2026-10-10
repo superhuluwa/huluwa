@@ -1,0 +1,52 @@
+server:
+  port: 8089
+  address: 0.0.0.0
+
+spring:
+  application:
+    name: huluwa-console
+  datasource:
+    url: jdbc:sqlite:${huluwa.data-dir:./data}/huluwa.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+      pool-name: huluwa-pool
+      connection-init-sql: PRAGMA foreign_keys = ON
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      continue-on-error: false
+      encoding: UTF-8
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+  web:
+    resources:
+      static-locations: classpath:/static/
+      cache:
+        cachecontrol:
+          no-cache: true
+
+huluwa:
+  data-dir: ./data
+  token:
+    # 留空则首次启动自动生成并持久化到数据库
+    secret: ''
+    expire-hours: 72
+  frp:
+    # 预留：frpc 可执行文件路径，后续接入进程管理时使用
+    binary: ''
+  docker:
+    # 预留：docker 可执行文件路径，留空则自动探测 PATH
+    binary: ''
+
+logging:
+  level:
+    root: INFO
+    com.huluwa.console: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"

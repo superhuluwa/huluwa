@@ -1,0 +1,146 @@
+/* 暗夜量子设计 Token（沿用参考项目 quantum-web 的视觉体系） */
+:root {
+    --bg: #0B0F19;
+    --sider: #0E1422;
+    --card: #141C2E;
+    --card-2: #182238;
+    --line: rgba(148, 163, 184, .12);
+    --line-2: rgba(148, 163, 184, .20);
+    --accent: #0EA5E9;
+    --accent-2: #38BDF8;
+    --accent-weak: rgba(14, 165, 233, .10);
+    --text: #F8FAFC;
+    --text-2: #94A3B8;
+    --text-3: #64748B;
+    --ok: #10B981;
+    --warn: #F59E0B;
+    --danger: #F43F5E;
+    --radius: 12px;
+    --glow: 0 0 0 1px rgba(14, 165, 233, .22), 0 0 20px rgba(14, 165, 233, .10);
+}
+
+html, body {
+    -webkit-font-smoothing: antialiased;
+}
+
+.glass-card {
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, .40);
+}
+
+.filter-card {
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, .25);
+}
+
+.filter-card .n-form-item {
+    margin-bottom: 0 !important;
+}
+
+.grid-bg {
+    position: relative;
+}
+
+.grid-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 44px 44px;
+    opacity: .35;
+    mask-image: radial-gradient(1200px 800px at 50% 0%, #000 30%, transparent 100%);
+    -webkit-mask-image: radial-gradient(1200px 800px at 50% 0%, #000 30%, transparent 100%);
+    pointer-events: none;
+}
+
+.page-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.page-title .sub {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+}
+
+.pill .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+}
+
+.pill.ok { background: rgba(52, 211, 153, .12); color: var(--ok); }
+.pill.off { background: rgba(148, 163, 184, .12); color: var(--text-2); }
+.pill.warn { background: rgba(251, 191, 36, .12); color: var(--warn); }
+.pill.danger { background: rgba(248, 113, 113, .12); color: var(--danger); }
+
+.mono {
+    font-family: Consolas, "Segoe UI", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .4); }
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+}
+
+.stat-card {
+    padding: 18px;
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.stat-card .stat-label {
+    color: var(--text-2);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stat-card .stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    margin-top: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-card .stat-foot {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-3);
+}

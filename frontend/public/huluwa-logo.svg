@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="logo-title logo-description">
+  <title id="logo-title">葫芦娃 · Huluwa Console</title>
+  <desc id="logo-description">青蓝葫芦、翠绿叶冠与金色护额，搭配少年眼神和 H 字母标记。</desc>
+  <defs>
+    <linearGradient id="tile" x1="24" y1="12" x2="232" y2="248" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#172C45"/>
+      <stop offset="1" stop-color="#0C1526"/>
+    </linearGradient>
+    <linearGradient id="gourd" x1="76" y1="78" x2="181" y2="224" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="0.48" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="90" y1="30" x2="160" y2="69" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6EE7B7"/>
+      <stop offset="1" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="band" x1="101" y1="124" x2="155" y2="143" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="246" height="246" rx="62" fill="url(#tile)"/>
+  <rect x="6" y="6" width="244" height="244" rx="61" fill="none" stroke="#314A63" stroke-width="2"/>
+  <path d="M128 66C102 66 85 81 85 101C85 115 93 126 105 134C79 145 64 165 64 188C64 217 88 235 128 235C168 235 192 217 192 188C192 165 177 145 151 134C163 126 171 115 171 101C171 81 154 66 128 66Z" fill="url(#gourd)"/>
+  <path d="M128 73C128 56 135 41 147 33" fill="none" stroke="#059669" stroke-width="7" stroke-linecap="round"/>
+  <path d="M127 67C106 67 90 51 88 31C110 31 130 46 127 67Z" fill="url(#leaf)"/>
+  <path d="M129 63C130 42 147 26 170 27C170 49 152 65 129 63Z" fill="url(#leaf)"/>
+  <path d="M102 100L121 105C116 112 108 113 103 107Z" fill="#10253A"/>
+  <path d="M154 100L135 105C140 112 148 113 153 107Z" fill="#10253A"/>
+  <path d="M96 123Q128 135 160 123L153 139Q128 149 103 139Z" fill="url(#band)"/>
+  <path d="M128 127L136 135L128 143L120 135Z" fill="#FFFBEB"/>
+  <path d="M109 169V202M147 169V202M109 185H147" fill="none" stroke="#10253A" stroke-width="13" stroke-linecap="round"/>
+</svg>
