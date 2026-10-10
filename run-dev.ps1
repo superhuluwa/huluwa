@@ -8,8 +8,8 @@ foreach ($command in @('node', 'npm.cmd')) {
 }
 $javaBin = (Get-Item (Get-Command java).Source).Directory.Parent.FullName
 $env:JAVA_HOME = $javaBin
-Write-Host 'Preparing frontend assets and starting Huluwa Console...'
+Write-Host 'Preparing frontend assets and starting 葫芦娃助手...'
 & "$root\mvnw.cmd" -q -Pfrontend spring-boot:run
 if ($LASTEXITCODE -ne 0) {
-    throw "Huluwa Console stopped with exit code $LASTEXITCODE."
+    throw "葫芦娃助手 stopped with exit code $LASTEXITCODE."
 }

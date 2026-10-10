@@ -82,8 +82,8 @@ router.beforeEach(async (to) => {
 
 router.afterEach((to) => {
     document.title = to.meta && to.meta.title
-        ? `${to.meta.title} - Huluwa Console`
-        : 'Huluwa Console'
+        ? `${to.meta.title} - 葫芦娃助手`
+        : '葫芦娃助手'
     loadingBar.finish()
 })
 

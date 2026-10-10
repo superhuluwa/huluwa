@@ -4,7 +4,7 @@
             <div class="logo">
                 <img class="logo-mark" src="/huluwa-logo.svg" alt="葫芦娃 Logo" width="36" height="36" />
                 <div v-show="!collapsed" class="logo-text">
-                    <div class="logo-name">Huluwa Console</div>
+                    <div class="logo-name">葫芦娃助手</div>
                     <div class="logo-sub">OPS CONSOLE</div>
                 </div>
             </div>

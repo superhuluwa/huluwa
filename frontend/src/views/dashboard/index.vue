@@ -3,7 +3,7 @@
         <h3 class="page-title">
             <i class="fa-solid fa-gauge-high"></i>
             首页概览
-            <span class="sub">Huluwa Console 运行状态</span>
+            <span class="sub">葫芦娃助手 运行状态</span>
         </h3>
 
         <div class="stat-grid">

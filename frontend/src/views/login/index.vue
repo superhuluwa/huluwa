@@ -2,7 +2,7 @@
     <div class="login">
         <div class="login-card glass-card">
             <img class="logo-mark" src="/huluwa-logo.svg" alt="葫芦娃 Logo" width="64" height="64" />
-            <h2>Huluwa Console</h2>
+            <h2>葫芦娃助手</h2>
             <div class="sub">{{ initialized ? 'OPS CONSOLE' : 'FIRST RUN SETUP' }}</div>
 
             <div v-if="initialized" class="tip">请输入管理员账号和密码登录</div>
@@ -42,7 +42,7 @@
             </n-button>
 
             <div v-if="initialized" class="foot">
-                <span class="mono">Huluwa Console v1.0.0</span>
+                <span class="mono">葫芦娃助手 v1.0.0</span>
             </div>
         </div>
     </div>

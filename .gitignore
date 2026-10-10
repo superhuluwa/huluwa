@@ -20,3 +20,5 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+# Codex 启动器自检临时目录
+codex-launcher-check-*/

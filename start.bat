@@ -39,7 +39,7 @@ if errorlevel 1 (
     goto :failed
 )
 
-echo Preparing frontend assets and starting Huluwa Console...
+echo Preparing frontend assets and starting 葫芦娃助手...
 echo Open http://localhost:8089 after startup completes.
 echo.
 
@@ -53,7 +53,7 @@ exit /b 0
 
 :failed
 echo.
-echo [ERROR] Huluwa Console stopped with exit code %EXIT_CODE%.
+echo [ERROR] 葫芦娃助手 stopped with exit code %EXIT_CODE%.
 if not "%HULUWA_NO_PAUSE%"=="1" (
     echo Press any key to close this window...
     pause >nul

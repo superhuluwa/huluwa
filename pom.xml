@@ -15,7 +15,7 @@
     <artifactId>huluwa-console</artifactId>
     <version>1.0.0</version>
     <name>huluwa-console</name>
-    <description>Huluwa Console - 消息中心 / Frp 管理 / 推送设置 / Docker 管理</description>
+    <description>葫芦娃助手 - 消息中心 / Frp 管理 / 推送设置 / Docker 管理</description>
 
     <properties>
         <java.version>21</java.version>
