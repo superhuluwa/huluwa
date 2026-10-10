@@ -10,8 +10,19 @@ services:
     # Keep initial administrator setup local by default.
     ports:
       - "${HULUWA_BIND_ADDRESS:-127.0.0.1}:${HULUWA_PORT:-8089}:8089"
+    environment:
+      # docker-java SDK inside the container connects directly to the mounted host socket.
+      # No docker CLI is required; API version is negotiated against the host daemon at startup.
+      DOCKER_HOST: unix:///var/run/docker.sock
+    # CentOS Docker socket is usually owned by root:docker (GID 999) or root:dockerroot (GID 994).
+    # Set DOCKER_GID in .env from: stat -c '%g' /var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-0}"
     volumes:
       - huluwa-data:/app/data
+      # Manage the host Docker Engine: containers / images / networks / volumes.
+      # :z relabels for SELinux (CentOS default enforcing).
+      - /var/run/docker.sock:/var/run/docker.sock:z
 
 volumes:
   huluwa-data:

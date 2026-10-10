@@ -83,8 +83,29 @@ public class AppProperties {
     }
 
     public static class Docker {
-        /** docker 可执行文件路径，留空表示自动探测 PATH */
+        /**
+         * docker 可执行文件路径。仅保留用于兼容历史配置；当前基于 docker-java SDK 直连守护进程，
+         * 不再调用 docker CLI。
+         */
         private String binary = "";
+
+        /**
+         * Docker 守护进程地址。留空时依次回退到 DOCKER_HOST 环境变量与系统默认值
+         * （Linux：unix:///var/run/docker.sock，Windows：npipe:////./pipe/docker_engine）。
+         */
+        private String host = "";
+
+        /**
+         * Docker API 版本。留空时应用自行从守护进程 /version 协商可用版本，
+         * 兼容 CentOS 上常见的 19.03 / 20.10 等旧版 Docker。
+         */
+        private String apiVersion = "";
+
+        /** 建立 Docker 连接的超时（秒）。 */
+        private int connectionTimeoutSeconds = 10;
+
+        /** Docker API 响应超时（秒）；镜像拉取等长耗时可单独调大。 */
+        private int responseTimeoutSeconds = 300;
 
         public String getBinary() {
             return binary;
@@ -92,6 +113,38 @@ public class AppProperties {
 
         public void setBinary(String binary) {
             this.binary = binary;
+        }
+
+        public String getHost() {
+            return host;
+        }
+
+        public void setHost(String host) {
+            this.host = host;
+        }
+
+        public String getApiVersion() {
+            return apiVersion;
+        }
+
+        public void setApiVersion(String apiVersion) {
+            this.apiVersion = apiVersion;
+        }
+
+        public int getConnectionTimeoutSeconds() {
+            return connectionTimeoutSeconds <= 0 ? 10 : connectionTimeoutSeconds;
+        }
+
+        public void setConnectionTimeoutSeconds(int connectionTimeoutSeconds) {
+            this.connectionTimeoutSeconds = connectionTimeoutSeconds;
+        }
+
+        public int getResponseTimeoutSeconds() {
+            return responseTimeoutSeconds <= 0 ? 300 : responseTimeoutSeconds;
+        }
+
+        public void setResponseTimeoutSeconds(int responseTimeoutSeconds) {
+            this.responseTimeoutSeconds = responseTimeoutSeconds;
         }
     }
 }

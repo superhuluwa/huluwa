@@ -1,92 +1,139 @@
-# Docker 部署
+# Docker 部署（CentOS 服务器）
 
-项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 会先构建前端，再将前端静态资源打进后端 JAR，最终由一个容器在 **8089** 端口提供页面和 API，不需要另起 Nginx 或数据库容器。
+项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 会先构建前端，再把前端静态资源打进后端 JAR，最终由**一个容器**在 **8089** 端口同时提供页面和 API，不需要另起 Nginx 或数据库容器。
+
+控制台容器通过挂载宿主机的 `/var/run/docker.sock`，在“Docker 管理”页面管理**宿主机上的容器 / 镜像 / 网络 / 卷**。
+
+## 架构
+
+```
+CentOS 宿主机
+├── Docker Engine / containerd
+│   ├── huluwa 容器（本控制台，8089）
+│   ├── /var/run/docker.sock  ──挂载──▶ 容器内 docker-java SDK（直连守护进程）
+│   └── 被管理的业务容器 / 镜像 / 网络 / 卷
+└── /app/data（命名卷 huluwa-data）：SQLite 数据库、令牌密钥、配置
+```
 
 ## 前置条件
 
-- 使用 Linux 容器模式的 Docker Engine / Docker Desktop；使用 Compose 方式时需安装 Docker Compose v2。
-- 构建使用 BuildKit，Dockerfile 中包含 npm / Maven 缓存挂载。
-- 构建机器需要能访问 Docker Hub、npm registry 和 Maven Central；不需要本机安装 Node.js、Maven 或 Java。
-- 容器默认以 UID / GID `10001:10001` 运行，不使用 root。
+- CentOS 7 / 8 / Stream 9，Docker Engine 19.03 及以上（20.10、24.x、26.x 均已验证兼容路径）。
+- 已安装 Docker Compose v2（`docker compose version` 可执行；CentOS 需安装 `docker-compose-plugin`）。
+- 构建机器需要能访问 Docker Hub、npm registry 和 Maven Central；服务器本身不需要安装 Node.js、Maven 或 Java。
+- 容器默认以 UID / GID `10001:10001` 运行，不使用 root、不开启 `--privileged`。
 
-## 推荐：Docker Compose
-
-在项目根目录执行：
+## 快速部署（推荐）
 
 ```shell
-docker compose up -d --build
-docker compose ps
-docker compose logs -f huluwa
+# 1. 上传项目到服务器，例如 /opt/huluwa
+cd /opt/huluwa
+
+# 2. 生成配置（可选，脚本会自动生成）
+cp .env.example .env
+
+# 3. 一键部署（自动写入 Docker socket 的 GID、构建并启动、等待健康检查）
+chmod +x deploy-centos.sh
+sudo ./deploy-centos.sh
 ```
 
-浏览器访问 `http://localhost:8089`。首次启动使用新的数据库时，页面会引导设置管理员密码，没有预置密码。
+默认只监听 `127.0.0.1`，不对公网开放。首次访问方式二选一：
 
-默认仅绑定 `127.0.0.1`，不对局域网或公网开放。需要远程访问时，建议先完成管理员初始化，再在项目根目录创建 `.env`：
+```shell
+# 方式 A：SSH 隧道（推荐，初始化阶段最安全）
+ssh -L 8089:127.0.0.1:8089 <用户>@<服务器IP>
+# 然后浏览器打开 http://127.0.0.1:8089 完成管理员初始化
+
+# 方式 B：直接在服务器上验证
+curl -sS http://127.0.0.1:8089/api/auth/status
+```
+
+完成管理员初始化后，把 `.env` 改为对外监听并重启：
 
 ```dotenv
 HULUWA_BIND_ADDRESS=0.0.0.0
 HULUWA_PORT=8089
 ```
 
-随后重新执行 `docker compose up -d`。通过服务器 IP 和配置的端口访问；公网部署建议使用带 HTTPS 的反向代理，并限制防火墙访问来源。
-
-查看日志、停止、更新：
-
 ```shell
-docker compose logs -f huluwa
-docker compose down
-docker compose up -d --build
+docker compose up -d
 ```
 
-## 仅使用 Dockerfile
+公网部署务必配置带 HTTPS 的反向代理、防火墙与来源限制。
 
-不使用 Compose 时，在项目根目录执行：
+## 手动部署（不使用脚本）
+
+```shell
+# 写入手 Docker socket 的 GID
+echo "DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> .env
+
+docker compose up -d --build
+docker compose ps
+docker compose logs -f huluwa
+```
+
+仅用 Dockerfile 时：
 
 ```shell
 docker build -t huluwa-console:latest .
-docker run -d --name huluwa-console --restart unless-stopped --init -p 127.0.0.1:8089:8089 --mount type=volume,source=huluwa-data,target=/app/data huluwa-console:latest
-docker logs -f huluwa-console
+docker run -d --name huluwa \
+  --restart unless-stopped --init \
+  -p 127.0.0.1:8089:8089 \
+  -e DOCKER_HOST=unix:///var/run/docker.sock \
+  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v huluwa-data:/app/data \
+  huluwa-console:latest
 ```
 
-上面的端口同样默认只允许本机访问。完成初始化后，如需远程访问，重建容器并将 `-p 127.0.0.1:8089:8089` 改为 `-p 8089:8089`。
+## Docker 管理能力与兼容性
+
+页面包含概览、容器、镜像、网络、卷五个部分，接口与功能覆盖原 Quantum 工程的 Docker 管理模块：
+
+| 模块 | 能力 |
+|---|---|
+| 概览 | 守护进程状态、客户端 / 服务端 / API 版本、平台信息、容器/镜像/网络统计、多主机连接配置 |
+| 容器 | 列表（运行中 / 全部）、搜索、启停 / 重启、删除、详情（端口、环境变量、实时 CPU / 内存 / 网络 / 磁盘 / PIDs）、日志（可调 tail）、容器内执行命令 |
+| 镜像 | 列表、拉取（镜像名 + 标签）、单个 / 批量删除 |
+| 网络 | 列表、创建、删除、容器连接 / 断开 |
+| 卷 | 列表、创建、删除 |
+
+兼容性说明：
+
+- 容器内使用 **docker-java 3.4.1** SDK 直接访问 Docker Socket，不需要安装 docker CLI。
+- 启动时会调用守护进程 `/version` 协商 API 版本，取客户端支持上限（1.44）与守护进程 `ApiVersion` 的较小值，可对接 CentOS 上常见的 19.03 / 20.10 / 24.x / 26.x；也可在 `application.yml` 中用 `huluwa.docker.api-version` 显式指定。
+- CentOS 7 的旧版守护进程在部分 SDK 字段组合下不返回容器 `State`，后端已改为从 `Status` 文本（如 `Up 2 hours`、`Exited (0)`）推导容器状态，运行中容器不会被误判为已停止。
+- 使用 rootless Docker 或自定义 socket 路径时，修改 compose 中的挂载路径与 `DOCKER_HOST`；也支持 `tcp://host:2375`（明文）或 `tcp://host:2376` + `DOCKER_TLS_VERIFY=1` / `DOCKER_CERT_PATH`。
+
+## SELinux（CentOS 默认 Enforcing）
+
+compose.yaml 已为 socket 挂载标注 `:z`，自动完成 SELinux 重新标记。若仍报权限错误，可按顺序排查：
+
+```shell
+getenforce                                  # 确认是否 Enforcing
+sudo ausearch -m avc -ts recent | tail      # 查看 SELinux 拒绝记录
+sudo restorecon -v /var/run/docker.sock     # 恢复 socket 上下文
+```
+
+不建议为了绕过权限而关闭 SELinux，或使用 `--privileged`。
 
 ## 数据持久化与已有数据
 
-- SQLite 数据库位于容器内 `/app/data/huluwa.db`，管理员账号、配置和自动生成的令牌密钥都保存在这里。
-- Compose 使用项目命名空间内的 `huluwa-data` 命名卷；单独 `docker run` 的例子使用名为 `huluwa-data` 的卷。**这两个卷不相同**，请选择一种启动方式。
-- 重建镜像或容器不会清空命名卷。**不要执行 `docker compose down -v` 或删除数据卷，除非明确要清空全部数据。**
-- `.dockerignore` 会排除本机 `data/` 和数据库文件，因此已有本机数据不会自动进入镜像，新卷会初始化新的数据库。
-- 如需使用已有数据，可将数据目录绑定挂载到 `/app/data`，替代命名卷。先停止旧进程，再迁移数据库及可能存在的 WAL / SHM 文件，避免复制正在写入的 SQLite 数据库；不要同时运行旧进程和新容器。
-- Linux 绑定挂载需要确保目录及数据库文件对 UID / GID `10001:10001` 可写。不要通过改为 root 或开启 `--privileged` 来解决普通的数据目录权限问题。
+- SQLite 数据库位于容器内 `/app/data/huluwa.db`，管理员账号、配置和自动生成的令牌密钥都在这里。
+- Compose 使用命名卷 `huluwa-data`；重建镜像或容器不会清空它。**不要执行 `docker compose down -v`，除非明确要清空全部数据。**
+- 如需使用已有数据，将数据目录绑定挂载到 `/app/data`，并确保 UID / GID `10001:10001` 有写权限。迁移 SQLite 前先停止写入，并一并处理 WAL / SHM 文件。
 
-## 可选：查询宿主机 Docker
+## 升级 / 回滚
 
-镜像已包含 Docker CLI，默认**不挂载**宿主机 Docker socket，因此普通控制台功能可用，但“Docker 管理”会显示守护进程不可用。
-
-如果确实需要查询宿主机 Docker，在 Linux Docker 主机上创建 `compose.docker-host.yaml`：
-
-```yaml
-services:
-  huluwa:
-    group_add:
-      - "${DOCKER_GID:?请先设置宿主机 Docker socket 的 GID}"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+```shell
+docker compose up -d --build     # 拉取代码后重建升级
+docker compose logs -f huluwa
+docker compose down              # 停止（保留数据卷）
 ```
 
-然后在该 Linux 主机执行：
+## 安全提醒
 
-```sh
-export DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
-docker compose -f compose.yaml -f compose.docker-host.yaml up -d --build
-```
+Docker socket 相当于宿主机的高权限控制能力：即使挂载标记为 `:ro`，也无法把 Docker API 限制为只读。仅在可信环境启用，不要把管理界面直接暴露到公网，并始终为控制台设置强管理员口令。
 
-附加 socket 的实际组 ID，应用仍以非 root 用户运行。上述方法假设使用标准 rootful Docker 的 `/var/run/docker.sock`；rootless Docker 或 Docker Desktop 的 socket 路径与权限可能不同，需要按实际环境配置。
+## 验证说明
 
-**安全提醒：Docker socket 访问权限相当于宿主机的高权限控制能力。即使当前应用只执行查询，或者将 socket 挂载标记为 `:ro`，也不能把 Docker API 限制成只读。只在可信环境中启用，且不要把管理界面直接暴露到公网。**
-
-## 健康检查与验证说明
-
-容器通过无需登录的 `/api/auth/status` 检查 HTTP 服务和数据库访问，启动等待期为 60 秒。可通过 `docker compose ps` 查看健康状态。
-
-本次仅新增部署配置并做静态检查，未执行 npm / Maven 构建、`docker build`、容器启动或运行时验证。上面的命令是部署时供你执行的步骤，不代表已经构建或启动成功。
+本次改动仅做静态检查（Java 源码与前端源码级别），**未执行 Maven 构建、npm 构建、docker build、容器启动或运行时验证**。上面的命令供部署时执行，不代表已构建或启动成功。

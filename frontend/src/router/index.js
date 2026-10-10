@@ -43,8 +43,32 @@ const routes = [
             {
                 path: 'docker',
                 name: 'docker',
-                meta: { title: 'Docker管理', icon: 'fa-brands fa-docker' },
+                meta: { title: 'Docker概览', icon: 'fa-brands fa-docker' },
                 component: () => import('@/views/docker/index.vue')
+            },
+            {
+                path: 'docker/containers',
+                name: 'docker-containers',
+                meta: { title: '容器管理', icon: 'fa-solid fa-cube' },
+                component: () => import('@/views/docker/containers.vue')
+            },
+            {
+                path: 'docker/images',
+                name: 'docker-images',
+                meta: { title: '镜像管理', icon: 'fa-regular fa-images' },
+                component: () => import('@/views/docker/images.vue')
+            },
+            {
+                path: 'docker/networks',
+                name: 'docker-networks',
+                meta: { title: '网络管理', icon: 'fa-solid fa-circle-nodes' },
+                component: () => import('@/views/docker/networks.vue')
+            },
+            {
+                path: 'docker/volumes',
+                name: 'docker-volumes',
+                meta: { title: '卷管理', icon: 'fa-solid fa-folder' },
+                component: () => import('@/views/docker/volumes.vue')
             }
         ]
     },

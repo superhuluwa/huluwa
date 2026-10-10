@@ -20,16 +20,12 @@ COPY --from=frontend-build /workspace/src/main/resources/static/ ./src/main/reso
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -DskipTests package
 
-# The application uses the Docker CLI for its Docker management page.
-# Copy only the client, not the daemon or its entrypoint.
-FROM docker:29-cli AS docker-cli
-
 FROM eclipse-temurin:21-jre-noble AS runtime
 WORKDIR /app
 ENV TZ=Asia/Shanghai \
     SERVER_PORT=8089 \
     HULUWA_DATA_DIR=/app/data \
-    HULUWA_DOCKER_BINARY=/usr/local/bin/docker \
+    HOME=/app/data \
     JAVA_TOOL_OPTIONS="-Duser.timezone=Asia/Shanghai"
 
 # Named volumes inherit this directory's ownership on first use.
@@ -40,7 +36,6 @@ RUN groupadd --gid 10001 huluwa \
     && chown huluwa:huluwa /app/data
 
 COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 USER 10001:10001
 VOLUME ["/app/data"]

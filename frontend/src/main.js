@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import {
+    NAlert,
     NButton,
     NCheckbox,
     NConfigProvider,
@@ -18,6 +19,8 @@ import {
     NMessageProvider,
     NModal,
     NNotificationProvider,
+    NRadioButton,
+    NRadioGroup,
     NSelect,
     NSwitch,
     NTabPane,
@@ -36,6 +39,7 @@ app.use(createPinia())
 app.use(router)
 
 const naiveComponents = {
+    NAlert,
     NButton,
     NCheckbox,
     NConfigProvider,
@@ -53,6 +57,8 @@ const naiveComponents = {
     NMessageProvider,
     NModal,
     NNotificationProvider,
+    NRadioButton,
+    NRadioGroup,
     NSelect,
     NSwitch,
     NTabPane,

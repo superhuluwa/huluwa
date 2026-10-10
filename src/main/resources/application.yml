@@ -41,8 +41,16 @@ huluwa:
     # 预留：frpc 可执行文件路径，后续接入进程管理时使用
     binary: ''
   docker:
-    # 预留：docker 可执行文件路径，留空则自动探测 PATH
+    # 兼容历史配置；当前使用 docker-java SDK 直连守护进程，不再调用 docker CLI
     binary: ''
+    # 守护进程地址：unix:///var/run/docker.sock（本机 socket）或 tcp://host:2375/2376（远程）
+    # 留空则回退 DOCKER_HOST 环境变量 / 系统默认 socket
+    host: ''
+    # API 版本，留空时由应用调用守护进程 /version 自动协商，兼容 CentOS 旧版 Docker
+    api-version: ''
+    # 连接 / 响应超时（秒）；旧版 CentOS 低配机器可适当调大
+    connection-timeout-seconds: 10
+    response-timeout-seconds: 300
 
 logging:
   level:
