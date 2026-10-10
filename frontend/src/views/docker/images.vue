@@ -1,15 +1,13 @@
 <template>
     <div class="docker-images">
-        <h3 class="page-title">
-            <i class="fa-regular fa-images"></i>
-            Docker 镜像
-            <span class="sub">拉取 / 删除 / 查看</span>
-        </h3>
-
-        <div class="glass-card table-card">
-            <div class="toolbar">
-                <span class="toolbar-title">共 {{ images.length }} 个镜像</span>
-                <div class="toolbar-actions">
+        <div class="glass-card main-card">
+            <div class="header">
+                <h2>
+                    <i class="fa-regular fa-images"></i>
+                    Docker 镜像
+                    <span class="sub">共 {{ images.length }} 个</span>
+                </h2>
+                <div class="actions">
                     <n-button size="small" quaternary :loading="loading" @click="loadImages">
                         <template #icon><i class="fa-solid fa-rotate"></i></template>
                         刷新
@@ -25,7 +23,7 @@
                 </div>
             </div>
 
-            <n-data-table :columns="columns" :data="images" :loading="loading" :bordered="false" size="small"
+            <n-data-table :columns="columns" :data="images" :loading="loading" :bordered="true" size="small"
                 :row-key="(row) => row.Id" :checked-row-keys="checkedKeys"
                 @update:checked-row-keys="(keys) => checkedKeys = keys" :scroll-x="1000" />
         </div>
@@ -87,6 +85,10 @@ export default {
                     width: 160,
                     className: 'mono',
                     render: (row) => h('span', row.Id ? row.Id.substring(7, 19) : '-')
+                },
+                {
+                    title: '容器数', key: 'Containers', width: 90,
+                    render: row => h('span', Number(row.Containers) >= 0 ? row.Containers : '未知')
                 },
                 { title: '创建时间', key: 'Created', width: 160, className: 'mono' },
                 {
@@ -158,7 +160,9 @@ export default {
                 positiveText: '删除',
                 negativeText: '取消',
                 onPositiveClick: async () => {
-                    await removeImage(row.Id, false)
+                    // 先常规删除（静默），若镜像被容器占用再升级为强制删除，避免误删正在使用的镜像。
+                    await removeImage(row.Id, false, { silent: true })
+                        .catch(() => removeImage(row.Id, true))
                     this.$message.success('镜像删除成功')
                     this.loadImages()
                 }
@@ -186,44 +190,66 @@ export default {
 
 <style scoped>
 .docker-images {
-    padding: 2px;
+    padding: 16px;
 }
 
-.table-card {
-    padding: 16px 18px;
+.main-card {
+    padding: 16px 20px;
 }
 
-.toolbar {
+.header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
-.toolbar-title {
-    font-size: 13px;
-    color: var(--text-2);
-}
-
-.toolbar-actions {
+.header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
-.tag-list {
+.header h2 .sub {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 8px;
+}
+
+.op-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .op-icon {
     font-size: 14px;
     cursor: pointer;
     opacity: .85;
+    transition: opacity .15s ease, transform .15s ease;
 }
 
 .op-icon:hover {
     opacity: 1;
+    transform: scale(1.15);
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
 }
 
 .modal-footer {

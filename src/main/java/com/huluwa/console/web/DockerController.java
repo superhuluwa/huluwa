@@ -53,7 +53,7 @@ public class DockerController {
     // ---------------- 容器 ----------------
 
     @GetMapping("/containers")
-    public ApiResult<List<Map<String, Object>>> containers(@RequestParam(defaultValue = "true") boolean all) {
+    public ApiResult<List<Map<String, Object>>> containers(@RequestParam(defaultValue = "false") boolean all) {
         return ApiResult.ok(dockerService.containers(all));
     }
 
@@ -105,10 +105,11 @@ public class DockerController {
 
     @GetMapping("/containers/{containerId}/logs")
     public ApiResult<String> containerLogs(@PathVariable String containerId,
+                                           @RequestParam(defaultValue = "false") boolean follow,
                                            @RequestParam(defaultValue = "true") boolean stdout,
                                            @RequestParam(defaultValue = "true") boolean stderr,
                                            @RequestParam(defaultValue = "all") String tail) {
-        return ApiResult.ok(dockerService.containerLogs(containerId, tail));
+        return ApiResult.ok(dockerService.containerLogs(containerId, follow, stdout, stderr, tail));
     }
 
     @PostMapping("/containers/{containerId}/execute")

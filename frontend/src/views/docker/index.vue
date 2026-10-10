@@ -1,47 +1,64 @@
 <template>
-    <div class="docker-overview">
-        <h3 class="page-title">
-            <i class="fa-brands fa-docker"></i>
-            Docker 管理
-            <span class="sub">容器 / 镜像 / 网络 / 卷</span>
-        </h3>
+    <div class="docker-management">
+        <div class="glass-card main-card">
+            <div class="header">
+                <h2>
+                    <i class="fa-brands fa-docker"></i>
+                    Docker 管理中心
+                </h2>
+                <p>管理宿主机上的 Docker 容器、镜像、网络和卷</p>
+            </div>
 
-        <n-alert v-if="environment.daemonOnline === false" type="warning" style="margin-bottom: 14px" title="无法连接宿主机 Docker 守护进程">
-            {{ environment.message || '请检查容器是否挂载了 /var/run/docker.sock。' }}
-            CentOS 部署要点：compose 中需挂载 /var/run/docker.sock，并把 .env 的 DOCKER_GID 设为
-            <span class="mono">stat -c '%g' /var/run/docker.sock</span> 的输出值。
-        </n-alert>
+            <n-alert v-if="environment.daemonOnline === false" type="warning" style="margin-bottom: 16px"
+                title="无法连接宿主机 Docker 守护进程">
+                {{ environment.message || '请检查容器是否挂载了 /var/run/docker.sock。' }}
+                CentOS 部署要点：compose 中需挂载 /var/run/docker.sock，并把 .env 的 DOCKER_GID 设为
+                <span class="mono">stat -c '%g' /var/run/docker.sock</span> 的输出值。
+            </n-alert>
 
-        <div class="stat-grid" style="margin-bottom: 16px">
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-cube" style="color: #2496ED"></i> 运行中容器</div>
-                <div class="stat-value">{{ summary.running }}</div>
-                <div class="stat-foot">共 {{ summary.total }} 个容器 · 已停止 {{ summary.stopped }}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-layer-group" style="color: var(--accent-2)"></i> 本地镜像</div>
-                <div class="stat-value">{{ summary.images }}</div>
-                <div class="stat-foot">docker images</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-circle-nodes" style="color: var(--ok)"></i> 网络</div>
-                <div class="stat-value">{{ summary.networks }}</div>
-                <div class="stat-foot">docker network ls</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-heart-pulse" style="color: var(--warn)"></i> 守护进程</div>
-                <div class="stat-value" style="font-size: 17px; margin-top: 14px">
-                    <span :class="['pill', environment.daemonOnline ? 'ok' : 'danger']">
-                        <span class="dot"></span>{{ environment.daemonOnline ? '在线' : '未连接' }}
-                    </span>
+            <div class="stats-grid">
+                <div class="stat">
+                    <div class="stat-k">
+                        <span class="badge b-cyan"><i class="fa-solid fa-cube"></i></span>
+                        运行中容器
+                    </div>
+                    <div class="stat-v mono">{{ summary.running }}</div>
+                    <div class="stat-f">共 {{ summary.total }} 个 · 已停止 {{ summary.stopped }}</div>
                 </div>
-                <div class="stat-foot mono">{{ environment.serverVersion || environment.message || '检测中…' }}</div>
+                <div class="stat">
+                    <div class="stat-k">
+                        <span class="badge b-amber"><i class="fa-regular fa-images"></i></span>
+                        本地镜像
+                    </div>
+                    <div class="stat-v mono">{{ summary.images }}</div>
+                    <div class="stat-f">docker images</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-k">
+                        <span class="badge b-green"><i class="fa-solid fa-circle-nodes"></i></span>
+                        网络
+                    </div>
+                    <div class="stat-v mono">{{ summary.networks }}</div>
+                    <div class="stat-f">docker network ls</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-k">
+                        <span class="badge b-red"><i class="fa-solid fa-heart-pulse"></i></span>
+                        守护进程
+                    </div>
+                    <div class="stat-v" style="font-size: 17px; margin-top: 14px">
+                        <span :class="['pill', environment.daemonOnline ? 'ok' : 'danger']">
+                            <span class="dot"></span>{{ environment.daemonOnline ? '在线' : '未连接' }}
+                        </span>
+                    </div>
+                    <div class="stat-f mono">{{ environment.serverVersion || environment.message || '检测中…' }}</div>
+                </div>
             </div>
         </div>
 
-        <div class="glass-card" style="padding: 18px 20px; margin-bottom: 16px">
+        <div class="glass-card main-card">
             <div class="section-title">
-                <i class="fa-solid fa-bolt"></i> 快捷入口
+                <i class="fa-solid fa-bolt"></i> 快捷操作
             </div>
             <div class="actions-grid">
                 <div class="action-item" @click="go('docker-containers')">
@@ -59,7 +76,7 @@
             </div>
         </div>
 
-        <div class="glass-card" style="padding: 18px 20px">
+        <div class="glass-card main-card">
             <div class="section-title">
                 <i class="fa-solid fa-server"></i> Docker 主机
                 <n-button size="small" quaternary style="margin-left: auto" :loading="loading" @click="refresh">
@@ -77,7 +94,8 @@
                 <n-descriptions-item label="服务端版本">{{ environment.serverVersion || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="API 版本">{{ environment.apiVersion || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="平台">{{ environment.os || '-' }} / {{ environment.arch || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="CLI">{{ environment.binary || 'docker' }}</n-descriptions-item>
+                <n-descriptions-item label="接入方式">{{ environment.transport || 'docker-java' }}</n-descriptions-item>
+                <n-descriptions-item label="连接地址"><span class="mono">{{ environment.host || '-' }}</span></n-descriptions-item>
                 <n-descriptions-item label="状态">{{ environment.message || '-' }}</n-descriptions-item>
             </n-descriptions>
 
@@ -224,8 +242,102 @@ export default {
 </script>
 
 <style scoped>
-.docker-overview {
-    padding: 2px;
+.docker-management {
+    padding: 16px;
+}
+
+.main-card {
+    padding: 20px 22px;
+    margin-bottom: 16px;
+}
+
+.main-card:last-of-type {
+    margin-bottom: 0;
+}
+
+.header {
+    margin-bottom: 20px;
+}
+
+.header h2 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 13px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.stat {
+    background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+}
+
+.stat-k {
+    color: var(--text-2);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stat-v {
+    font-size: 26px;
+    font-weight: 700;
+    margin-top: 10px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-f {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.b-cyan {
+    background: var(--accent-weak);
+    color: var(--accent);
+}
+
+.b-green {
+    background: rgba(52, 211, 153, .12);
+    color: var(--ok);
+}
+
+.b-amber {
+    background: rgba(251, 191, 36, .12);
+    color: var(--warn);
+}
+
+.b-red {
+    background: rgba(248, 113, 113, .12);
+    color: var(--danger);
 }
 
 .section-title {
@@ -235,7 +347,7 @@ export default {
     font-size: 14px;
     font-weight: 600;
     color: var(--text);
-    margin-bottom: 14px;
+    margin-bottom: 16px;
 }
 
 .actions-grid {
@@ -250,18 +362,18 @@ export default {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 18px;
+    padding: 20px;
     border-radius: 10px;
     background: var(--card-2);
     border: 1px solid var(--line);
     cursor: pointer;
-    transition: all .25s ease;
+    transition: all .3s;
     color: var(--text-2);
     font-size: 13px;
 }
 
 .action-item i {
-    font-size: 22px;
+    font-size: 24px;
 }
 
 .action-item:hover {
@@ -281,9 +393,11 @@ export default {
     font-size: 14px;
     cursor: pointer;
     opacity: .85;
+    transition: opacity .15s ease, transform .15s ease;
 }
 
 .op-icon:hover {
     opacity: 1;
+    transform: scale(1.15);
 }
 </style>

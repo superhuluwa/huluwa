@@ -53,6 +53,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /**
@@ -95,6 +101,12 @@ public class DockerService {
         row.put("updatedAt", rs.getString("updated_at"));
         return row;
     };
+
+    /** 批量采样最多同时执行 8 个请求，避免随容器数线性增长的等待和无限制线程创建。 */
+    private final ExecutorService statsExecutor = Executors.newFixedThreadPool(8,
+            Thread.ofPlatform().daemon().name("docker-stats-", 0).factory());
+    private final ScheduledExecutorService logTimer = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().daemon().name("docker-log-window-", 0).factory());
 
     private final JdbcTemplate jdbcTemplate;
     private final AppProperties properties;
@@ -158,11 +170,57 @@ public class DockerService {
      * 除本机 Unix Socket 外，也支持 {@code tcp://}（含 TLS 参数由 SDK 从 DOCKER_* 环境变量读取）。</p>
      */
     private String resolveHost() {
+        // 运行期优先使用「Docker 主机」页面登记的启用主机，其次 yml，再次 DOCKER_HOST，最后 SDK 默认。
+        String managed = activeHost();
+        if (managed != null) {
+            return managed;
+        }
         String configured = text(properties.getDocker().getHost(), null);
         if (configured != null) {
             return configured;
         }
         return text(System.getenv("DOCKER_HOST"), null);
+    }
+
+    /** 读取首个启用的托管主机地址；local / 未配置 / 查询失败均返回 null 以回退到默认连接。 */
+    private String activeHost() {
+        try {
+            return jdbcTemplate.query(
+                            "SELECT * FROM docker_host WHERE enabled = 1 ORDER BY id ASC LIMIT 1", HOST_MAPPER)
+                    .stream()
+                    .map(row -> text(row.get("host"), null))
+                    .filter(value -> value != null && !"local".equalsIgnoreCase(value))
+                    .findFirst()
+                    .orElse(null);
+        } catch (RuntimeException ex) {
+            log.debug("读取 Docker 主机配置失败，回退默认连接: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 主机配置变更后丢弃已建连接，下一次请求按新地址重建（含 API 版本重新协商）。 */
+    private void resetClient() {
+        synchronized (this) {
+            DockerClient current = client;
+            DockerHttpClient currentHttp = httpClient;
+            client = null;
+            httpClient = null;
+            resolvedApiVersion = null;
+            if (current != null) {
+                try {
+                    current.close();
+                } catch (Exception ignored) {
+                    // 重建连接时旧客户端关闭失败无需处理
+                }
+            }
+            if (currentHttp != null) {
+                try {
+                    currentHttp.close();
+                } catch (Exception ignored) {
+                    // 同上
+                }
+            }
+        }
     }
 
     /**
@@ -264,6 +322,8 @@ public class DockerService {
     }
     @PreDestroy
     public void close() {
+        statsExecutor.shutdownNow();
+        logTimer.shutdownNow();
         DockerClient current = client;
         if (current != null) {
             try {
@@ -286,6 +346,8 @@ public class DockerService {
     private <T> T invoke(String action, Supplier<T> supplier) {
         try {
             return supplier.get();
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (NotFoundException ex) {
             throw new BusinessException(404, "资源不存在或已被删除");
         } catch (NotModifiedException ex) {
@@ -334,8 +396,10 @@ public class DockerService {
                 VALUES (?, ?, ?, ?, ?)
                 """, name, text(body.get("host"), "local"),
                 Boolean.FALSE.equals(body.get("enabled")) ? 0 : 1, now, now);
-        return jdbcTemplate.query("SELECT * FROM docker_host ORDER BY id DESC LIMIT 1", HOST_MAPPER)
+        Map<String, Object> saved = jdbcTemplate.query("SELECT * FROM docker_host ORDER BY id DESC LIMIT 1", HOST_MAPPER)
                 .stream().findFirst().orElseThrow(() -> new BusinessException(500, "保存后读取主机配置失败"));
+        resetClient();
+        return saved;
     }
 
     public void deleteHost(long id) {
@@ -343,6 +407,7 @@ public class DockerService {
         if (affected == 0) {
             throw new BusinessException(404, "主机配置不存在");
         }
+        resetClient();
     }
 
     // ------------------------------------------------------------------
@@ -447,20 +512,30 @@ public class DockerService {
         return data;
     }
 
-    /** 批量统计：以容器 ID 为键返回，未运行或查询失败的容器自动跳过。 */
+    /** 有界并行采样，单个容器停止/删除不影响其余容器。 */
     public Map<String, Object> containerStatsMap(List<String> containerIds) {
         Map<String, Object> data = new LinkedHashMap<>();
-        if (containerIds == null) {
+        if (containerIds == null || containerIds.isEmpty()) {
             return data;
         }
-        for (String containerId : containerIds) {
-            if (containerId == null || containerId.isBlank()) {
-                continue;
-            }
-            try {
-                data.put(containerId, containerStats(containerId));
-            } catch (BusinessException ex) {
-                log.debug("跳过容器 {} 的统计信息: {}", containerId, ex.getMessage());
+        if (containerIds.size() > 200) {
+            throw new BusinessException(400, "每次最多查询 200 个容器的统计信息");
+        }
+        List<String> ids = containerIds.stream().filter(id -> id != null && !id.isBlank())
+                .map(String::trim).distinct().toList();
+        List<CompletableFuture<Map<String, Object>>> tasks = ids.stream().map(id ->
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return containerStats(id);
+                    } catch (BusinessException ex) {
+                        log.debug("跳过容器 {} 的统计信息: {}", id, ex.getMessage());
+                        return (Map<String, Object>) null;
+                    }
+                }, statsExecutor)).toList();
+        for (int i = 0; i < ids.size(); i++) {
+            Map<String, Object> stats = tasks.get(i).join();
+            if (stats != null) {
+                data.put(ids.get(i), stats);
             }
         }
         return data;
@@ -497,7 +572,10 @@ public class DockerService {
         if (!memory.isEmpty()) {
             memoryUsage = (long) numberValue(memory.get("usage"));
             Map<String, Object> memoryDetail = asMap(memory.get("stats"));
-            memoryUsage = Math.max(0L, memoryUsage - (long) numberValue(memoryDetail.get("cache")));
+            Object cache = memoryDetail.get("total_inactive_file");
+            if (cache == null) cache = memoryDetail.get("inactive_file");
+            if (cache == null) cache = memoryDetail.get("cache");
+            memoryUsage = Math.max(0L, memoryUsage - (long) numberValue(cache));
             memoryLimit = (long) numberValue(memory.get("limit"));
         }
         double memoryPercent = memoryLimit > 0 ? (double) memoryUsage / memoryLimit * 100d : 0d;
@@ -584,14 +662,26 @@ public class DockerService {
      * 两种容器都能正确输出。</p>
      */
     public String containerLogs(String containerId, String tail) {
+        return containerLogs(containerId, false, true, true, tail);
+    }
+
+    /** follow 使用最多 5 秒的采集窗口，避免 JSON 接口等待永不结束的流。 */
+    public String containerLogs(String containerId, boolean follow, boolean stdout, boolean stderr, String tail) {
         String id = requireReference(containerId, "容器");
         String tailValue = text(tail, "all");
+        if (!"all".equals(tailValue) && !tailValue.matches("\\d{1,9}")) {
+            throw new BusinessException(400, "日志行数必须为非负整数或 all");
+        }
+        if (!stdout && !stderr) {
+            return "";
+        }
         boolean tty = isTty(inspectContainer(id));
         Map<String, String> query = new LinkedHashMap<>();
-        query.put("stdout", "1");
-        query.put("stderr", "1");
+        query.put("stdout", stdout ? "1" : "0");
+        query.put("stderr", stderr ? "1" : "0");
+        query.put("follow", follow ? "1" : "0");
         query.put("tail", tailValue);
-        return demuxLogs(readBytes("/containers/" + encodePath(id) + "/logs", query), tty);
+        return demuxLogs(readBytes("/containers/" + encodePath(id) + "/logs", query, follow), tty);
     }
 
     @SuppressWarnings("unchecked")
@@ -865,21 +955,11 @@ public class DockerService {
     // ------------------------------------------------------------------
 
     public Map<String, Object> volumes() {
-        ListVolumesResponse response = invoke("查询卷列表", () -> client().listVolumesCmd().exec());
-        Map<String, Object> data = new LinkedHashMap<>();
-        List<Map<String, Object>> items = new ArrayList<>();
-        if (response.getVolumes() != null) {
-            for (InspectVolumeResponse volume : response.getVolumes()) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("Name", volume.getName());
-                item.put("Driver", volume.getDriver());
-                item.put("Mountpoint", volume.getMountpoint());
-                item.put("Labels", volume.getLabels());
-                item.put("Options", volume.getOptions());
-                items.add(item);
-            }
+        // 原始协议保留 Scope / CreatedAt / Status / UsageData / Warnings，旧 SDK 的 DTO 会丢掉字段。
+        Map<String, Object> data = readJson("/volumes", Map.of());
+        if (!(data.get("Volumes") instanceof List<?>)) {
+            data.put("Volumes", List.of());
         }
-        data.put("Volumes", items);
         return data;
     }
 
@@ -1019,6 +1099,10 @@ public class DockerService {
     }
 
     private byte[] readBytes(String path, Map<String, String> query) {
+        return readBytes(path, query, false);
+    }
+
+    private byte[] readBytes(String path, Map<String, String> query, boolean follow) {
         return invoke("读取 Docker 数据", () -> {
             String target = apiPath(path);
             if (query != null && !query.isEmpty()) {
@@ -1042,9 +1126,36 @@ public class DockerService {
             try (DockerHttpClient.Response response = httpClient().execute(builder.build());
                  InputStream body = response.getBody()) {
                 if (response.getStatusCode() >= 400) {
-                    throw new BusinessException(500, "Docker 接口返回状态码 " + response.getStatusCode());
+                    int status = response.getStatusCode();
+                    String detail = new String(body.readAllBytes(), StandardCharsets.UTF_8);
+                    try {
+                        detail = objectMapper.readTree(detail).path("message").asText(detail);
+                    } catch (IOException ignored) {
+                        // 非 JSON 错误仍保留第一行诊断。
+                    }
+                    throw new BusinessException(status == 404 ? 404 : status == 409 ? 409 : 500,
+                            "Docker 接口失败：" + firstLine(detail));
                 }
-                return body.readAllBytes();
+                if (!follow) return body.readAllBytes();
+                AtomicBoolean expired = new AtomicBoolean(false);
+                ScheduledFuture<?> deadline = logTimer.schedule(() -> {
+                    expired.set(true);
+                    // DockerHttpClient.Response.close() 不声明受检异常，直接关闭即可。
+                    response.close();
+                }, 5, TimeUnit.SECONDS);
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                try {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = body.read(buffer)) != -1) {
+                        output.write(buffer, 0, count);
+                    }
+                } catch (IOException ex) {
+                    if (!expired.get()) throw ex;
+                } finally {
+                    deadline.cancel(false);
+                }
+                return output.toByteArray();
             } catch (IOException ex) {
                 throw new BusinessException(500, "读取 Docker 数据失败：" + firstLine(ex.getMessage()));
             }

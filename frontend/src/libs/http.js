@@ -24,7 +24,7 @@ instance.interceptors.response.use(
             if (body.code === 200) {
                 return body.data
             }
-            message.error(body.message || '请求失败')
+            if (!response.config.silent) message.error(body.message || '请求失败')
             return Promise.reject(new Error(body.message || '请求失败'))
         }
         return body
@@ -39,7 +39,7 @@ instance.interceptors.response.use(
                 window.location.hash = '#/login'
             }
             message.warning('登录状态已失效，请重新登录')
-        } else {
+        } else if (!error.config?.silent) {
             message.error(text)
         }
         return Promise.reject(error)

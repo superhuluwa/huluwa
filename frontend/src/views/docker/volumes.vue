@@ -1,14 +1,13 @@
 <template>
     <div class="docker-volumes">
-        <h3 class="page-title">
-            <i class="fa-solid fa-folder"></i>
-            Docker 卷
-            <span class="sub">数据卷管理</span>
-        </h3>
-        <div class="glass-card table-card">
-            <div class="toolbar">
-                <span class="toolbar-title">共 {{ volumes.length }} 个卷</span>
-                <div class="toolbar-actions">
+        <div class="glass-card main-card">
+            <div class="header">
+                <h2>
+                    <i class="fa-solid fa-folder"></i>
+                    Docker 卷
+                    <span class="sub">共 {{ volumes.length }} 个</span>
+                </h2>
+                <div class="actions">
                     <n-button size="small" quaternary :loading="loading" @click="loadVolumes">
                         <template #icon><i class="fa-solid fa-rotate"></i></template>
                         刷新
@@ -19,8 +18,9 @@
                     </n-button>
                 </div>
             </div>
-            <n-data-table :columns="columns" :data="volumes" :loading="loading" :bordered="false" size="small"
-                :row-key="(row) => row.Name" />
+
+            <n-data-table :columns="columns" :data="volumes" :loading="loading" :bordered="true" size="small"
+                :row-key="(row) => row.Name" :scroll-x="1000" />
         </div>
 
         <n-modal v-model:show="createModal" preset="card" title="创建数据卷" style="width: 460px" :mask-closable="false">
@@ -63,6 +63,11 @@ export default {
                 { title: '名称', key: 'Name', minWidth: 180, className: 'mono' },
                 { title: '驱动', key: 'Driver', width: 110 },
                 { title: '作用域', key: 'Scope', width: 100 },
+                {
+                    title: '创建时间', key: 'CreatedAt', width: 180, className: 'mono',
+                    render: row => h('span', row.CreatedAt && !Number.isNaN(Date.parse(row.CreatedAt))
+                        ? new Date(row.CreatedAt).toLocaleString() : '-')
+                },
                 { title: '挂载点', key: 'Mountpoint', minWidth: 260, className: 'mono', ellipsis: { tooltip: true } },
                 {
                     title: '操作',
@@ -136,43 +141,71 @@ export default {
 
 <style scoped>
 .docker-volumes {
-    padding: 2px;
+    padding: 16px;
 }
 
-.table-card {
-    padding: 16px 18px;
+.main-card {
+    padding: 16px 20px;
 }
 
-.toolbar {
+.header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
-.toolbar-title {
-    font-size: 13px;
-    color: var(--text-2);
-}
-
-.toolbar-actions {
+.header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
-.modal-footer {
+.header h2 .sub {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.actions {
     display: flex;
-    justify-content: flex-end;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.op-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .op-icon {
     font-size: 14px;
     cursor: pointer;
     opacity: .85;
+    transition: opacity .15s ease, transform .15s ease;
 }
 
 .op-icon:hover {
     opacity: 1;
+    transform: scale(1.15);
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }
 </style>

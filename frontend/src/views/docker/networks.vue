@@ -1,15 +1,13 @@
 <template>
     <div class="docker-networks">
-        <h3 class="page-title">
-            <i class="fa-solid fa-circle-nodes"></i>
-            Docker 网络
-            <span class="sub">创建 / 连接 / 断开 / 删除</span>
-        </h3>
-
-        <div class="glass-card table-card">
-            <div class="toolbar">
-                <span class="toolbar-title">共 {{ networks.length }} 个网络</span>
-                <div class="toolbar-actions">
+        <div class="glass-card main-card">
+            <div class="header">
+                <h2>
+                    <i class="fa-solid fa-circle-nodes"></i>
+                    Docker 网络
+                    <span class="sub">共 {{ networks.length }} 个</span>
+                </h2>
+                <div class="actions">
                     <n-button size="small" quaternary :loading="loading" @click="loadNetworks">
                         <template #icon><i class="fa-solid fa-rotate"></i></template>
                         刷新
@@ -21,7 +19,7 @@
                 </div>
             </div>
 
-            <n-data-table :columns="columns" :data="networks" :loading="loading" :bordered="false" size="small"
+            <n-data-table :columns="columns" :data="networks" :loading="loading" :bordered="true" size="small"
                 :row-key="(row) => row.Id" :scroll-x="960" />
         </div>
 
@@ -42,8 +40,8 @@
             </template>
         </n-modal>
 
-        <n-modal v-model:show="connectModal" preset="card" :title="'连接容器 - ' + (currentNetwork && currentNetwork.Name)" style="width: 520px"
-            :mask-closable="false">
+        <n-modal v-model:show="connectModal" preset="card" :title="'连接容器 - ' + (currentNetwork && currentNetwork.Name)"
+            style="width: 520px" :mask-closable="false">
             <n-form label-placement="left" label-width="90">
                 <n-form-item label="容器">
                     <n-select v-model:value="selectedContainer" filterable placeholder="选择要连接 / 断开的容器"
@@ -239,27 +237,41 @@ export default {
 
 <style scoped>
 .docker-networks {
-    padding: 2px;
+    padding: 16px;
 }
 
-.table-card {
-    padding: 16px 18px;
+.main-card {
+    padding: 16px 20px;
 }
 
-.toolbar {
+.header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
-.toolbar-title {
-    font-size: 13px;
-    color: var(--text-2);
-}
-
-.toolbar-actions {
+.header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
     display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.header h2 .sub {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-3);
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
 }
 
@@ -279,6 +291,12 @@ export default {
 .op-icon:hover {
     opacity: 1;
     transform: scale(1.15);
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
 }
 
 .modal-footer {
