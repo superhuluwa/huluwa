@@ -1,0 +1,266 @@
+<template>
+    <!-- 系统通知卡：独立左对齐卡片，不带头像 -->
+    <div v-if="isNotify" class="message-row">
+        <NotifyCard :meta="notifyMeta" deletable @delete="$emit('delete', message)" />
+    </div>
+
+    <!-- 普通气泡 -->
+    <div v-else class="message-row" :class="{ mine: isMine }">
+        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie }">
+            <i v-if="isMovie" class="fa-solid fa-film"></i>
+            <template v-else>Q</template>
+        </div>
+        <div v-if="isMine" class="avatar mine">我</div>
+        <div class="bubble" :class="{ 'is-cover': isImage, 'is-error': isError }" :title="fullTime">
+            <div class="bubble-tools">
+                <span class="tool" title="复制" @click="copy"><i class="fa-regular fa-copy"></i></span>
+            </div>
+            <div class="bubble-content">
+                <!-- 图片气泡（影视封面 / 图片消息）：封面 + 配文，点击封面看大图 -->
+                <template v-if="isImage">
+                    <div v-if="loadError" class="cover-fallback">
+                        <i class="fa-solid fa-image"></i>
+                        <span>封面加载失败</span>
+                    </div>
+                    <img v-else class="cover" :src="message.content" alt="封面" @error="loadError = true"
+                        @click="openCover" />
+                    <RichText class="cover-caption" :text="message.contentText" :support-fold="false" />
+                </template>
+                <RichText v-else :text="message.content" />
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+/**
+ * 消息气泡外壳（自 quantum-web 的 MessageBubble.vue 迁移）：
+ * 头像 38px、机器人左/用户右、靠头像侧下角 4px 收尾、圆角 16、内边距 9/12、最大宽 min(68%,720px)。
+ * 本项目消息类型：text（纯文本，详情链接自动可点）、image（封面 + 配文）、notify（系统通知卡）、error（错误提示）。
+ */
+import RichText from './RichText.vue'
+import NotifyCard from './NotifyCard.vue'
+import { formatFullTime } from '@/utils/chatFormat'
+
+export default {
+    name: 'MessageBubble',
+    components: { RichText, NotifyCard },
+    props: {
+        message: {
+            type: Object,
+            required: true
+        }
+    },
+    emits: ['open-cover', 'delete'],
+    data() {
+        return {
+            loadError: false
+        }
+    },
+    computed: {
+        isNotify() {
+            return this.message.type === 'notify'
+        },
+        isImage() {
+            return this.message.type === 'image' && !!this.message.content
+        },
+        isError() {
+            return this.message.type === 'error'
+        },
+        isMine() {
+            return this.message.role === 'user'
+        },
+        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像 */
+        isMovie() {
+            return !!this.message.payload
+        },
+        /** 大图标题：优先用载荷里的片名 */
+        coverTitle() {
+            const payload = this.parsedPayload
+            return payload.title || '影视封面'
+        },
+        /** 载荷解析（影视卡片字段 / 通知分类），损坏时退化为空对象 */
+        parsedPayload() {
+            if (!this.message.payload) {
+                return {}
+            }
+            try {
+                const parsed = JSON.parse(this.message.payload)
+                return parsed && typeof parsed === 'object' ? parsed : {}
+            } catch (e) {
+                return {}
+            }
+        },
+        fullTime() {
+            return formatFullTime(this.message.createdAt)
+        },
+        notifyMeta() {
+            return {
+                ...this.parsedPayload,
+                time: formatFullTime(this.message.createdAt),
+                body: this.message.content
+            }
+        }
+    },
+    watch: {
+        'message.id'() {
+            this.loadError = false
+        }
+    },
+    methods: {
+        async copy() {
+            const text = this.message.content || ''
+            try {
+                await navigator.clipboard.writeText(text)
+                window.$message?.success('已复制消息内容')
+            } catch (e) {
+                window.$message?.error('复制失败，请手动选择文本')
+            }
+        },
+        openCover() {
+            this.$emit('open-cover', { url: this.message.content, title: this.coverTitle })
+        }
+    }
+}
+</script>
+
+<style scoped>
+.message-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: flex-start;
+}
+
+.message-row.mine {
+    flex-direction: row-reverse;
+}
+
+.avatar {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.avatar.bot {
+    background: linear-gradient(135deg, var(--accent), #6366F1);
+    color: #04121B;
+    font-size: 16px;
+}
+
+.avatar.bot.movie {
+    background: linear-gradient(135deg, #6366F1, #A855F7);
+    color: #F8FAFC;
+    font-size: 15px;
+}
+
+.avatar.mine {
+    background: rgba(99, 102, 241, .20);
+    color: #C7D2FE;
+    font-weight: 600;
+}
+
+.bubble {
+    position: relative;
+    max-width: min(68%, 720px);
+    padding: 9px 12px;
+    border-radius: 16px;
+    border-bottom-left-radius: 4px;
+    background: var(--bubble-bot, #1E293B);
+}
+
+/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡 */
+.bubble.is-cover {
+    padding: 6px;
+    max-width: min(46%, 320px);
+}
+
+.message-row.mine .bubble {
+    background: var(--bubble-me, #0C4A6E);
+    border-bottom-left-radius: 16px;
+    border-bottom-right-radius: 4px;
+}
+
+.bubble.is-error {
+    border: 1px solid rgba(244, 63, 94, .45);
+}
+
+.bubble-tools {
+    position: absolute;
+    top: -12px;
+    right: 8px;
+    display: none;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--line-2);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+    z-index: 2;
+}
+
+.message-row.mine .bubble-tools {
+    right: auto;
+    left: 8px;
+}
+
+.bubble:hover .bubble-tools {
+    display: flex;
+}
+
+.tool {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.tool:hover {
+    background: rgba(148, 163, 184, .14);
+    color: var(--text);
+}
+
+.bubble-content {
+    font-size: 14px;
+}
+
+.cover {
+    display: block;
+    width: 100%;
+    max-height: 420px;
+    object-fit: cover;
+    border-radius: 11px;
+    cursor: zoom-in;
+    background: rgba(148, 163, 184, .08);
+}
+
+.cover-fallback {
+    width: 100%;
+    height: 150px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 11px;
+    background: rgba(148, 163, 184, .08);
+    color: var(--text-3);
+    font-size: 12.5px;
+}
+
+.cover-caption {
+    padding: 8px 6px 4px;
+    font-size: 13px;
+}
+</style>

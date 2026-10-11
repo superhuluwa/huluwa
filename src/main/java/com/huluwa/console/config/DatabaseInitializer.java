@@ -17,7 +17,8 @@ public class DatabaseInitializer implements ApplicationRunner {
 
     /** 所有建表语句都必须幂等，缺失任何一张表都说明 schema.sql 未正确执行 */
     private static final String[] REQUIRED_TABLES = {
-            "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host"
+            "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
+            "chat_session", "chat_message"
     };
 
     private final JdbcTemplate jdbcTemplate;

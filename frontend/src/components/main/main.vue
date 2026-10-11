@@ -37,8 +37,13 @@
 import { h } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useChatStore } from '@/stores/chat'
 import HeaderBar from './components/header-bar.vue'
 import UserChip from './components/user-chip.vue'
+
+/** 「消息中心」分组下的会话子项（对齐 quantum 的 chat-index /「会话」） */
+const MESSAGES_INDEX_KEY = 'messages-index'
+const MESSAGES_INDEX_TITLE = '会话'
 
 const renderIcon = (iconClass) => {
     if (!iconClass) return undefined
@@ -49,12 +54,14 @@ export default {
     name: 'MainLayout',
     components: { HeaderBar, UserChip },
     setup() {
-        return { appStore: useAppStore() }
+        const appStore = useAppStore()
+        const chatStore = useChatStore()
+        return { appStore, chatStore }
     },
     data() {
         return {
             // 展开的子菜单 key；accordion 模式下只保留一个，默认跟随当前页所在分组
-            expandedKeys: []
+            expandedKeys: [],
         }
     },
     computed: {
@@ -62,27 +69,80 @@ export default {
             return this.appStore.collapsed
         },
         activeMenu() {
+            // 会话页高亮「消息中心 → 会话」子项，其余页面高亮路由名
+            if (this.$route.name === 'messages') {
+                return MESSAGES_INDEX_KEY
+            }
             return this.$route.name
         },
         menuOptions() {
-            // 顶层路由（登录 / 错误页已通过 hideInMenu 排除）；带 children 的渲染为可折叠子菜单
+            // 顶层路由（登录 / 错误页已通过 hideInMenu 排除）；带 children 的渲染为可折叠子菜单。
             const home = this.$router.options.routes.find((route) => route.path === '/')
             if (!home || !Array.isArray(home.children)) return []
             return home.children
                 .filter((item) => !(item.meta && item.meta.hideInMenu))
-                .map((item) => this.toMenuOption(item))
-        }
+                .map((item) => (item.name === 'messages' ? this.messagesMenuOption(item) : this.toMenuOption(item)))
+        },
     },
     watch: {
-        // 跨分组跳转或刷新后，保持当前页所在分组展开
-        '$route.name'() {
+        // 跨分组跳转或刷新后，保持当前页所在分组展开；
+        // 消息中心内部切换会话（仅 query 变化）不触发本监听，展开态自然保留。
+        '$route.name'(next, prev) {
+            // 消息中心 ⇄ 其它页面时都要确保会话分组可见
+            if (next === 'messages' || prev === 'messages') {
+                this.ensureMessagesExpanded()
+                if (next === 'messages') {
+                    return
+                }
+            }
             this.syncExpandedKeys()
         }
     },
-    mounted() {
+    async mounted() {
         this.syncExpandedKeys()
+        // 菜单里的会话子项/未读角标以 chat store 为准：
+        // 主框架常驻轮询会话快照（每 15s），离开会话页也能更新侧栏角标；
+        // 会话页自己还有更密的轮询（8s），两者互不冲突（refreshSessions 幂等）。
+        try {
+            await this.chatStore.refreshSessions()
+        } catch (e) {
+            // 菜单角标拉取失败不影响主框架
+        }
+        this.startMenuPolling()
+    },
+    beforeUnmount() {
+        this.stopMenuPolling()
     },
     methods: {
+        /** 会话子项的数据保障：列表为空时补拉一次（避免菜单分组渲染成空分组） */
+        ensureSessionsLoaded() {
+            const sessions = this.chatStore.sessions || []
+            if (!sessions.length) {
+                this.chatStore.refreshSessions().catch(() => {})
+            }
+        },
+        /** 确保「消息中心」分组处于展开态（会话页内部切换会话时不被收起） */
+        ensureMessagesExpanded() {
+            this.ensureSessionsLoaded()
+            if (!this.expandedKeys.includes('messages')) {
+                this.expandedKeys = [...this.expandedKeys, 'messages']
+            }
+        },
+        /** 侧栏角标轮询：只刷新会话快照（不碰消息流），15s 一次 */
+        startMenuPolling() {
+            if (this._menuTimer) {
+                return
+            }
+            this._menuTimer = setInterval(() => {
+                this.chatStore.refreshSessions().catch(() => {})
+            }, 15000)
+        },
+        stopMenuPolling() {
+            if (this._menuTimer) {
+                clearInterval(this._menuTimer)
+                this._menuTimer = null
+            }
+        },
         /** 路由节点转 n-menu 选项；有 children 的渲染为可折叠分组，父级本身不跳转。 */
         toMenuOption(item) {
             const children = Array.isArray(item.children)
@@ -102,9 +162,47 @@ export default {
                 icon: renderIcon(item.meta && item.meta.icon)
             }
         },
+        /**
+         * 消息中心分组：与 Docker 管理同款的可折叠分组，子项 = 各会话（电影港 / 系统通知…）。
+         * 子项 key 用 「messages:<sessionId>」，点击跳 /messages?session=<id>；
+         * 未读角标直接挂在子项标签上（父级用红点提示有未读，折叠时也能看见）。
+         */
+        messagesMenuOption(item) {
+            // 与 quantum 的菜单结构一致：「消息中心」分组下只有一个「会话」子项
+            // （会话列表在页面内呈现，不摊进菜单），未读角标挂在子项上、父级用红点提示。
+            const unreadTotal = (this.chatStore.sessions || [])
+                .reduce((sum, session) => sum + (session.unread || 0), 0)
+            return {
+                key: item.name,
+                label: () => h('span', { class: 'menu-label' }, [
+                    h('span', item.meta && item.meta.title),
+                    unreadTotal > 0 ? h('span', { class: 'menu-dot' }) : null
+                ]),
+                icon: renderIcon(item.meta && item.meta.icon),
+                children: [
+                    {
+                        key: MESSAGES_INDEX_KEY,
+                        label: () => h('span', { class: 'menu-label' }, [
+                            h('span', MESSAGES_INDEX_TITLE),
+                            unreadTotal > 0
+                                ? h('span', { class: 'menu-badge' }, unreadTotal > 99 ? '99+' : String(unreadTotal))
+                                : null
+                        ]),
+                        icon: renderIcon('fa-solid fa-comments')
+                    }
+                ]
+            }
+        },
         /** 展开当前激活项所属的顶层分组。 */
         syncExpandedKeys() {
             const currentName = this.$route.name
+            // 消息中心（会话页）：分组保持展开，便于随时切换会话
+            // （用户手动展开其它分组时这里不能把 messages 之外的手动展开态清掉——
+            //   accordion 模式下 n-menu 自己只保留一个，这里只需确保当前页所在分组可见）
+            if (currentName === 'messages') {
+                this.ensureMessagesExpanded()
+                return
+            }
             const home = this.$router.options.routes.find((route) => route.path === '/')
             const groups = (home && Array.isArray(home.children) ? home.children : [])
                 .filter((item) => Array.isArray(item.children) && item.children.length)
@@ -112,14 +210,26 @@ export default {
             this.expandedKeys = owner ? [owner.name] : []
         },
         turnToPage(name) {
+            // 「消息中心 → 会话」子项：进入会话页（保留当前会话，默认电影港）
+            if (name === MESSAGES_INDEX_KEY) {
+                this.$router.push({ name: 'messages' }).catch(() => {})
+                return
+            }
             if (name !== this.$route.name) {
                 this.$router.push({ name }).catch(() => {})
             }
         },
+        /** 左侧菜单折叠：走 store action，顺带写入 localStorage（刷新后保持） */
         handleCollapsedChange(value) {
-            this.appStore.collapsed = value
+            this.appStore.setCollapsed(value)
         },
         handleExpandedChange(keys) {
+            // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
+            // 会把「消息中心」分组意外收起；会话页要求该分组常开，这里补回。
+            if (this.$route.name === 'messages' && !keys.includes('messages')) {
+                this.expandedKeys = [...keys, 'messages']
+                return
+            }
             this.expandedKeys = keys
         }
     }
@@ -134,6 +244,8 @@ export default {
 }
 
 .sider {
+    /* 宽度含左右 padding 与描边：折叠 64px 才是视觉总宽（否则 64+20+1=85px） */
+    box-sizing: border-box;
     width: 236px;
     flex: none;
     background: linear-gradient(180deg, #0d1526 0%, #0b1322 100%);
@@ -190,6 +302,35 @@ export default {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+
+.sider :deep(.menu-label) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.sider :deep(.menu-badge) {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+
+.sider :deep(.menu-dot) {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+    box-shadow: 0 0 8px var(--danger);
 }
 
 .sider-foot {

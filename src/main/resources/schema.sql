@@ -79,3 +79,31 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 );
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
+
+-- 消息中心会话（聊天对象）：当前内置「电影港」搜索会话；
+-- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
+CREATE TABLE IF NOT EXISTS chat_session (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | system
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- 会话消息：role=user 用户发送 / role=bot 机器人回复；type=text 纯文本 / image 图片气泡（封面+配文）/ error 错误提示
+CREATE TABLE IF NOT EXISTS chat_message (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL,
+    role         TEXT NOT NULL,
+    type         TEXT NOT NULL DEFAULT 'text',
+    content      TEXT,                          -- 正文；image 类型为图片地址
+    content_text TEXT,                          -- 配文（image 类型为封面下方文案，可含链接）
+    payload      TEXT,                          -- 结构化载荷（JSON 文本，如影视卡片字段）
+    read_flag    INTEGER NOT NULL DEFAULT 0,    -- 0 未读 1 已读（仅 bot 行参与未读统计）
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_message_session ON chat_message (session_id, id DESC);
+
+-- 内置会话：电影港搜索（幂等，重启不覆盖用户数据）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));

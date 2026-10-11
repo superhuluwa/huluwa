@@ -1,179 +1,224 @@
 <template>
-    <div>
-        <h3 class="page-title">
-            <i class="fa-solid fa-bell"></i>
-            消息中心
-            <span class="sub">系统事件与运行通知</span>
-        </h3>
+    <div class="message-page" :class="{ narrow, 'show-room': narrowShowRoom }">
+        <ConversationList :sessions="sessions" :current-key="currentKey" @select="switchSession" />
 
-        <div class="filter-card">
-            <n-form inline :show-feedback="false">
-                <n-form-item label="关键字">
-                    <n-input v-model:value="query.keyword" clearable placeholder="标题 / 内容" style="width: 200px"
-                        @keydown.enter="load" />
-                </n-form-item>
-                <n-form-item label="级别">
-                    <n-select v-model:value="query.level" :options="levelOptions" clearable placeholder="全部"
-                        style="width: 140px" />
-                </n-form-item>
-                <n-form-item label="状态">
-                    <n-select v-model:value="query.read" :options="readOptions" clearable placeholder="全部"
-                        style="width: 140px" />
-                </n-form-item>
-                <n-form-item>
-                    <div class="filter-actions">
-                        <n-button type="primary" :loading="loading" @click="load">
-                            <template #icon><i class="fa-solid fa-magnifying-glass"></i></template>
-                            查询
-                        </n-button>
-                        <n-button @click="reset">
-                            <template #icon><i class="fa-solid fa-rotate-left"></i></template>
-                            重置
-                        </n-button>
-                        <n-button quaternary type="primary" @click="markAll">
-                            <template #icon><i class="fa-solid fa-check-double"></i></template>
-                            全部已读
-                        </n-button>
-                    </div>
-                </n-form-item>
-            </n-form>
-        </div>
+        <section class="chat-room">
+            <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
+                :clearable="canSend" :markable="isSystem" @refresh="refresh" @clear="onClear"
+                @back="backToList" @open-session="switchSession" @mark-all="onMarkAll" />
 
-        <div class="glass-card table-wrap">
-            <n-data-table :columns="columns" :data="items" :loading="loading" :bordered="false" size="small"
-                :row-key="(row) => row.id" />
-        </div>
+            <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
+                :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
+                :empty-tip="emptyTip"
+                @load-earlier="loadEarlier" @open-cover="onOpenCover" @delete="onDeleteNotify" />
+
+            <ChatComposer :disabled="!currentKey" :sending="sending" :kind="currentKind" :hint="composerHint"
+                @send="onSend" />
+        </section>
+
+        <CoverViewer v-model:show="viewer.show" :url="viewer.url" :title="viewer.title" />
     </div>
 </template>
 
 <script>
-import { h } from 'vue'
+/**
+ * 消息中心（会话页）：左会话列表 + 右会话详情双栏；窄屏（<960px）折叠为单栏，用顶栏返回按钮切换。
+ * UI 与交互整体参考 quantum-web 的会话页（view/chat + stores/chat）：
+ * 会话列表、气泡流、时间分隔、贴底跟随、顶部消息检索、清空会话。
+ *
+ * 与量子端的差异（本项目无 WS、无任务体系）：
+ *  - 实时性由 store 轮询提供（8s），发送时同步等待服务端搜索完成；
+ *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
+ *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
+ */
+import { mapActions, mapState } from 'pinia'
+import { useChatStore } from '@/stores/chat'
 import http from '@/libs/http'
+import ConversationList from './components/ConversationList.vue'
+import ChatHeader from './components/ChatHeader.vue'
+import MessageList from './components/MessageList.vue'
+import ChatComposer from './components/ChatComposer.vue'
+import CoverViewer from './components/CoverViewer.vue'
 
-const LEVEL_META = {
-    info: { text: '信息', type: 'info' },
-    success: { text: '成功', type: 'success' },
-    warning: { text: '警告', type: 'warning' },
-    error: { text: '错误', type: 'error' }
-}
+/** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
+const PREFERRED_SESSION = 'movie'
 
 export default {
     name: 'MessageCenter',
+    components: {
+        ConversationList,
+        ChatHeader,
+        MessageList,
+        ChatComposer,
+        CoverViewer
+    },
     data() {
         return {
-            loading: false,
-            items: [],
-            query: {
-                keyword: '',
-                level: null,
-                read: null
-            },
-            levelOptions: [
-                { label: '信息', value: 'info' },
-                { label: '成功', value: 'success' },
-                { label: '警告', value: 'warning' },
-                { label: '错误', value: 'error' }
-            ],
-            readOptions: [
-                { label: '未读', value: 'false' },
-                { label: '已读', value: 'true' }
-            ]
+            viewer: { show: false, url: '', title: '' },
+            narrow: false,
+            narrowShowRoom: false
         }
     },
     computed: {
-        columns() {
-            return [
-                {
-                    title: '级别',
-                    key: 'level',
-                    width: 90,
-                    render: (row) => {
-                        const meta = LEVEL_META[row.level] || LEVEL_META.info
-                        return h('span', { class: ['pill', row.level === 'error' ? 'danger' : (row.level === 'warning' ? 'warn' : (row.level === 'success' ? 'ok' : 'off'))] }, [
-                            h('span', { class: 'dot' }),
-                            meta.text
-                        ])
-                    }
-                },
-                {
-                    title: '状态',
-                    key: 'read',
-                    width: 80,
-                    render: (row) => h('span', {
-                        style: { color: row.read ? 'var(--text-3)' : 'var(--accent-2)', fontSize: '12px' }
-                    }, row.read ? '已读' : '未读')
-                },
-                { title: '标题', key: 'title', minWidth: 180, ellipsis: { tooltip: true } },
-                { title: '内容', key: 'content', minWidth: 240, ellipsis: { tooltip: true } },
-                { title: '来源', key: 'source', width: 110 },
-                { title: '时间', key: 'createdAt', width: 170 },
-                {
-                    title: '操作',
-                    key: 'actions',
-                    width: 130,
-                    render: (row) => h('div', { class: 'op-actions' }, [
-                        h('i', {
-                            class: 'fa-solid fa-check op-icon',
-                            style: { color: 'var(--ok)', display: row.read ? 'none' : 'inline-block' },
-                            title: '标记已读',
-                            onClick: () => this.markRead(row)
-                        }),
-                        h('i', {
-                            class: 'fa-solid fa-trash op-icon',
-                            style: { color: 'var(--danger)' },
-                            title: '删除',
-                            onClick: () => this.remove(row)
-                        })
-                    ])
-                }
-            ]
+        ...mapState(useChatStore, [
+            'sessions', 'currentKey', 'currentMessages', 'currentSession',
+            'loadingMessages', 'loadingEarlier', 'sending'
+        ]),
+        ...mapState(useChatStore, ['hasMore']),
+        title() {
+            return this.currentSession?.title || '会话'
+        },
+        subtitle() {
+            if (!this.currentSession) {
+                return ''
+            }
+            const count = this.currentMessages.length
+            const kindText = { movie: '影视搜索', system: '系统事件与运行通知' }[this.currentSession.kind] || '会话'
+            return kindText + ' · ' + count + ' 条消息'
+        },
+        currentKind() {
+            return this.currentSession?.kind || 'chat'
+        },
+        canSend() {
+            return !!this.currentSession && this.currentSession.kind !== 'system'
+        },
+        isSystem() {
+            return this.currentSession?.kind === 'system'
+        },
+        emptyTitle() {
+            return this.currentKind === 'movie' ? '还没有搜索记录' : '暂无消息'
+        },
+        emptyTip() {
+            return this.currentKind === 'movie'
+                ? '输入片名开始搜索，例如「凡人修仙传」'
+                : '系统事件与运行通知会显示在这里'
+        },
+        composerHint() {
+            if (!this.currentSession || this.currentSession.kind === 'system') {
+                // 只读会话的说明由输入框 placeholder 承载，避免重复提示
+                return ''
+            }
+            return this.currentKind === 'movie'
+                ? '输入片名回车即搜索，回复含封面与详情链接'
+                : ''
         }
     },
-    mounted() {
-        this.load()
-    },
-    methods: {
-        async load() {
-            this.loading = true
-            try {
-                const params = {
-                    keyword: this.query.keyword || undefined,
-                    level: this.query.level || undefined,
-                    read: this.query.read === null ? undefined : this.query.read
-                }
-                const data = await http.get('/messages', params)
-                this.items = data.items || []
-            } catch (error) {
-                // 拦截器已提示
-            } finally {
-                this.loading = false
+    watch: {
+        '$route.query.session'(next) {
+            if (next && next !== this.currentKey) {
+                this.switchSession(next)
+                return
+            }
+            // 菜单点击当前已打开的会话时也要显示详情（窄屏两级视图）
+            if (next) {
+                this.narrowShowRoom = true
             }
         },
-        reset() {
-            this.query = { keyword: '', level: null, read: null }
-            this.load()
+        currentKey(next, prev) {
+            if (next === prev) {
+                return
+            }
+            this.syncQuery(next)
+            this.narrowShowRoom = true
+        }
+    },
+    async mounted() {
+        this.handleResize()
+        window.addEventListener('resize', this.handleResize)
+        const store = useChatStore()
+        await store.refreshSessions()
+        const target = this.$route.query.session || PREFERRED_SESSION
+        const exists = store.sessions.some((item) => item.id === target)
+        await store.openSession(exists ? target : (store.sessions[0]?.id || ''))
+        this.syncQuery(store.currentKey)
+        this.narrowShowRoom = !this.narrow
+        store.startPolling()
+    },
+    activated() {
+        const store = useChatStore()
+        store.refreshSessions()
+        store.startPolling()
+        // 从左侧菜单的会话子项进入时 URL 带 ?session=<id>：以它为准切换会话，
+        // 否则（页签返回等无 query 的场景）保持当前会话并把 query 补回地址栏。
+        const target = this.$route.query.session
+        if (target && target !== store.currentKey) {
+            this.switchSession(target)
+            return
+        }
+        this.syncQuery(store.currentKey)
+    },
+    deactivated() {
+        // 页面被 keep-alive 缓存时停掉轮询，避免后台持续请求
+        useChatStore().stopPolling()
+    },
+    beforeUnmount() {
+        window.removeEventListener('resize', this.handleResize)
+        useChatStore().stopPolling()
+    },
+    methods: {
+        ...mapActions(useChatStore, ['openSession', 'refreshSessions', 'loadEarlier']),
+        handleResize() {
+            this.narrow = window.innerWidth < 960
         },
-        async markRead(row) {
-            if (row.read) return
-            await http.post(`/messages/${row.id}/read`)
-            row.read = true
-            this.$message.success('已标记为已读')
+        /** 把当前会话同步进地址栏 query，便于刷新/分享定位（同一路由内 replace） */
+        syncQuery(sessionId) {
+            const current = this.$route.query.session || ''
+            if (current !== sessionId) {
+                this.$router.replace({ query: sessionId ? { session: sessionId } : {} }).catch(() => {})
+            }
         },
-        async markAll() {
+        async switchSession(sessionId) {
+            if (!sessionId) {
+                return
+            }
+            if (sessionId === this.currentKey) {
+                this.narrowShowRoom = true
+                return
+            }
+            await this.openSession(sessionId)
+            this.syncQuery(sessionId)
+            this.narrowShowRoom = true
+        },
+        backToList() {
+            this.narrowShowRoom = false
+        },
+        async refresh() {
+            await this.refreshSessions()
+            await useChatStore().reloadSession(this.currentKey)
+        },
+        async onSend(text) {
+            try {
+                await useChatStore().send(text)
+            } catch (e) {
+                // 失败文案由 axios 拦截器提示
+            }
+        },
+        /** 系统通知「全部已读」：沿用消息中心既有接口 */
+        async onMarkAll() {
             await http.post('/messages/read-all')
             this.$message.success('已全部标记为已读')
-            this.load()
+            await useChatStore().reloadSession(this.currentKey)
+            await this.refreshSessions()
         },
-        remove(row) {
+        onClear() {
+            useChatStore().clearSession(this.currentKey)
+                .then(() => this.$message.success('会话已清空'))
+                .catch(() => {})
+        },
+        onOpenCover({ url, title }) {
+            this.viewer = { show: true, url, title }
+        },
+        /** 系统通知删除：沿用消息中心既有接口，删除后刷新当前会话 */
+        onDeleteNotify(message) {
             this.$dialog.warning({
-                title: '删除消息',
-                content: `确认删除「${row.title}」？`,
+                title: '删除通知',
+                content: '确认删除「' + ((message.contentText || '').trim() || '该通知') + '」？',
                 positiveText: '删除',
                 negativeText: '取消',
                 onPositiveClick: async () => {
-                    await http.delete(`/messages/${row.id}`)
+                    await http.delete('/messages/' + message.id)
                     this.$message.success('已删除')
-                    this.load()
+                    await useChatStore().reloadSession(this.currentKey)
                 }
             })
         }
@@ -182,25 +227,32 @@ export default {
 </script>
 
 <style scoped>
-.table-wrap {
-    padding: 8px 12px 12px;
+.message-page {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, .40);
+    overflow: hidden;
 }
 
-.op-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
+.chat-room {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg);
 }
 
-.op-icon {
-    font-size: 14px;
-    cursor: pointer;
-    opacity: .85;
-    transition: opacity .15s ease, transform .15s ease;
+/* 窄屏（<960px）折叠为单栏：列表 ⇄ 详情，等价两端的两级页面体验 */
+.message-page.narrow.show-room :deep(.conversation-list) {
+    display: none;
 }
 
-.op-icon:hover {
-    opacity: 1;
-    transform: scale(1.15);
+.message-page.narrow:not(.show-room) .chat-room {
+    display: none;
 }
 </style>
