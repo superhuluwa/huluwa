@@ -1,6 +1,7 @@
 services:
   huluwa:
     image: huluwa-console:latest
+    container_name: huluwa-console
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,18 +12,14 @@ services:
     ports:
       - "${HULUWA_BIND_ADDRESS:-127.0.0.1}:${HULUWA_PORT:-8089}:8089"
     environment:
-      # docker-java SDK inside the container connects directly to the mounted host socket.
-      # No docker CLI is required; API version is negotiated against the host daemon at startup.
+      # docker-java SDK 直连宿主机 Docker 守护进程，无需容器内安装 docker CLI。
       DOCKER_HOST: unix:///var/run/docker.sock
-    # CentOS Docker socket is usually owned by root:docker (GID 999) or root:dockerroot (GID 994).
-    # Set DOCKER_GID in .env from: stat -c '%g' /var/run/docker.sock
+    # 容器进程以 10001:10001 运行，需加入 socket 所属组才能访问。
+    # 取值命令：stat -c '%g' /var/run/docker.sock（CentOS 常见 999 或 994）
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:
-      - huluwa-data:/app/data
-      # Manage the host Docker Engine: containers / images / networks / volumes.
-      # :z relabels for SELinux (CentOS default enforcing).
+      - ${HULUWA_DATA_DIR:-./data}:/app/data
+      # 管理宿主机上的容器 / 镜像 / 网络 / 卷。
+      # :z 用于 CentOS 默认的 SELinux enforcing 重新标记。
       - /var/run/docker.sock:/var/run/docker.sock:z
-
-volumes:
-  huluwa-data:

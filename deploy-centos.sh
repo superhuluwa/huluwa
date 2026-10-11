@@ -17,6 +17,17 @@ if [ ! -f .env ]; then
   cp .env.example .env
 fi
 
+# 读取数据目录（与 compose 保持一致，默认 ./data）
+DATA_DIR="$(grep -E '^HULUWA_DATA_DIR=' .env | tail -n1 | cut -d= -f2- || true)"
+DATA_DIR="${DATA_DIR:-./data}"
+case "${DATA_DIR}" in
+  /*) ;;
+  *) DATA_DIR="$(pwd)/${DATA_DIR#./}" ;;
+esac
+log "数据目录：${DATA_DIR}"
+mkdir -p "${DATA_DIR}"
+chown -R 10001:10001 "${DATA_DIR}"
+
 SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
 log "宿主机 /var/run/docker.sock 的 GID = ${SOCKET_GID}"
 if grep -q '^DOCKER_GID=' .env; then
@@ -25,7 +36,7 @@ else
   printf '\nDOCKER_GID=%s\n' "${SOCKET_GID}" >> .env
 fi
 
-# CentOS 7 默认 SELinux enforcing：:z 已在 compose.yaml 中标注，仍给出提示便于排查
+# CentOS 7 默认 SELinux enforcing：compose.yaml 已给 socket 挂载标注 :z
 if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = "Enforcing" ]; then
   log "SELinux 处于 Enforcing，compose.yaml 已使用 :z 重新标记 socket"
 fi
@@ -34,14 +45,14 @@ log "构建镜像并启动容器"
 docker compose up -d --build
 
 log "等待服务健康检查通过"
+CONSOLE_CONTAINER="$(docker compose ps -q huluwa || true)"
 for i in $(seq 1 30); do
-  STATUS="$(docker inspect -f '{{.State.Health.Status}}' huluwa 2>/dev/null || echo starting)"
+  STATUS="$(docker inspect -f '{{.State.Health.Status}}' "${CONSOLE_CONTAINER}" 2>/dev/null || echo starting)"
   [ "$STATUS" = "healthy" ] && break
   sleep 2
 done
 
-CONTAINER_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' huluwa 2>/dev/null || true)"
-log "容器状态：$(docker inspect -f '{{.State.Status}} / 健康：{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' huluwa 2>/dev/null || echo unknown)"
+log "容器状态：$(docker inspect -f '{{.State.Status}} / 健康：{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "${CONSOLE_CONTAINER}" 2>/dev/null || echo unknown)"
 
 if grep -q '^HULUWA_BIND_ADDRESS=127.0.0.1' .env; then
   log "服务已启动，且仅监听 127.0.0.1。"

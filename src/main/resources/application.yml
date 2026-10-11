@@ -43,8 +43,9 @@ huluwa:
   docker:
     # 兼容历史配置；当前使用 docker-java SDK 直连守护进程，不再调用 docker CLI
     binary: ''
-    # 守护进程地址：unix:///var/run/docker.sock（本机 socket）或 tcp://host:2375/2376（远程）
-    # 留空则回退 DOCKER_HOST 环境变量 / 系统默认 socket
+    # 守护进程地址：留空则回退 DOCKER_HOST 环境变量 / 系统默认 socket。
+    # compose 部署已注入 DOCKER_HOST=unix:///var/run/docker.sock；
+    # 远程可填 tcp://host:2375（或 2376 + TLS）。
     host: ''
     # API 版本，留空时由应用调用守护进程 /version 自动协商，兼容 CentOS 旧版 Docker
     api-version: ''

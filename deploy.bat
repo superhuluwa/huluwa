@@ -85,7 +85,7 @@ for /L %%i in (1,1,!SSH_RETRY!) do (
 )
 if !UPLOAD_OK!==0 goto :upload_fail
 
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "set -e; rm -rf %REMOTE_DIR%; mkdir -p %REMOTE_DIR%; tar -xzf /tmp/huluwa-src.tar.gz -C %REMOTE_DIR%; find %REMOTE_DIR% -type f -exec sed -i 's/\r$//' {} +; echo 解压完成: $(find %REMOTE_DIR% -type f | wc -l) 个文件"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "set -e; rm -rf %REMOTE_DIR%; mkdir -p %REMOTE_DIR%; tar -xzf /tmp/huluwa-src.tar.gz -C %REMOTE_DIR%; find %REMOTE_DIR% -type f \( -name '*.sh' -o -name 'mvnw' -o -name 'Dockerfile' -o -name '*.yml' -o -name '*.yaml' -o -name '*.properties' \) -exec sed -i 's/\r$//' {} +; echo 解压完成: $(find %REMOTE_DIR% -type f | wc -l) 个文件（已规范换行）"
 if errorlevel 1 goto :fail
 
 REM ---------- 4. 构建镜像 ----------
@@ -93,13 +93,22 @@ echo [4/5] 构建 Docker 镜像 %IMAGE% ...
 "%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker build -t %IMAGE% . > /root/huluwa-build.log 2>&1; echo BUILD_EXIT=$?; tail -n 5 /root/huluwa-build.log"
 if errorlevel 1 goto :build_fail
 
-REM ---------- 5. 重建容器 ----------
-echo [5/5] 重建容器 %CONTAINER% ...
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "docker rm -f %CONTAINER% >/dev/null 2>&1; mkdir -p %DATA_DIR%; chown -R 10001:10001 %DATA_DIR%; docker run -d --name %CONTAINER% --restart unless-stopped --init -p %HOST_PORT%:%CONTAINER_PORT% -v %DATA_DIR%:/app/data -e TZ=Asia/Shanghai %IMAGE% >/dev/null && echo 容器已启动"
+REM ---------- 4b. 生成远端 compose 配置 ----------
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "printf '%%s\n' 'HULUWA_BIND_ADDRESS=0.0.0.0' 'HULUWA_PORT=%HOST_PORT%' 'HULUWA_DATA_DIR=%DATA_DIR%' DOCKER_GID=$(stat -c '%%g' /var/run/docker.sock) > %REMOTE_DIR%/.env && chmod 600 %REMOTE_DIR%/.env && cat %REMOTE_DIR%/.env"
 if errorlevel 1 goto :fail
 
+REM ---------- 5. 重建容器（单容器，挂载宿主机 docker.sock） ----------
+echo [5/5] 重建容器 %CONTAINER% ...
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker compose down --remove-orphans >/dev/null 2>&1; docker rm -f %CONTAINER% huluwa-docker-proxy >/dev/null 2>&1; mkdir -p %DATA_DIR%; chown -R 10001:10001 %DATA_DIR%; docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12"
+if errorlevel 1 goto :fail
+
+REM ---------- 5b. 校验容器内可访问宿主机 Docker socket ----------
+echo [5/5] 校验宿主机 Docker socket 挂载...
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "docker exec %CONTAINER% sh -c 'curl -sS --max-time 5 --unix-socket /var/run/docker.sock http://localhost/_ping' 2>/dev/null | grep -q OK && echo DOCKER_SOCKET_OK || { echo DOCKER_SOCKET_FAIL; docker inspect %CONTAINER% --format '{{json .Mounts}}'; docker inspect %CONTAINER% --format '{{json .HostConfig.GroupAdd}}'; exit 1; }"
+if errorlevel 1 goto :docker_api_fail
+
 echo       等待服务就绪...
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "for i in $(seq 1 60); do c=$(curl -s -o /dev/null -w '%%{http_code}' --max-time 3 http://127.0.0.1:%HOST_PORT%/api/auth/status); if [ \"$c\" = 200 ]; then echo HEALTH_OK; docker ps --filter name=%CONTAINER% --format '{{.Names}} | {{.Status}} | {{.Ports}}'; exit 0; fi; sleep 3; done; echo HEALTH_FAIL; docker logs --tail 30 %CONTAINER% 2>&1; exit 1"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "for i in $(seq 1 60); do if curl -fsS --max-time 3 http://127.0.0.1:%HOST_PORT%/api/auth/status >/dev/null 2>&1; then echo HEALTH_OK; docker ps --filter name=%CONTAINER% --format '{{.Names}} | {{.Status}} | {{.Ports}}'; exit 0; fi; sleep 3; done; echo HEALTH_FAIL; docker logs --tail 30 %CONTAINER% 2>&1; exit 1"
 if errorlevel 1 goto :health_fail
 
 echo.
@@ -107,9 +116,10 @@ echo ========== 部署完成 ==========
 echo 访问地址: http://%SERVER%:%HOST_PORT%
 echo 数据目录: %DATA_DIR%  (容器内 /app/data)
 echo 查看日志: "%SSH_EXE%" -i "%SSH_KEY%" -p %SSH_PORT% %USER%@%SERVER% "docker logs -f %CONTAINER%"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "docker ps -a --filter name=huluwa --format '{{.Names}} | {{.Status}} | {{.Ports}}'"
 echo.
 del /q "%TARBALL%" 2>nul
-pause
+if not "%HULUWA_NO_PAUSE%"=="1" pause
 endlocal
 exit /b 0
 
@@ -152,10 +162,16 @@ echo [错误] 新容器启动后健康检查未通过。
 echo        请手动登录服务器排查: docker logs --tail 100 %CONTAINER%
 goto :fail
 
+:docker_api_fail
+echo [错误] 容器内无法访问宿主机 Docker socket。
+echo        排查: docker inspect huluwa-console --format "{{json .Mounts}}"
+echo              检查 .env 的 DOCKER_GID 是否等于 stat -c "%g" /var/run/docker.sock
+goto :fail
+
 :fail
 echo.
 echo ---------- 部署失败 ----------
 echo.
-pause
+if not "%HULUWA_NO_PAUSE%"=="1" pause
 endlocal
 exit /b 1

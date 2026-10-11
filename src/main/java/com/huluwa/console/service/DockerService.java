@@ -67,9 +67,10 @@ import java.util.function.Supplier;
  * <p>通过 docker-java SDK（对标参考工程的 Docker.DotNet）直连 Docker 守护进程，覆盖容器 / 镜像 /
  * 网络 / 卷的完整管理能力：不依赖宿主机或容器内安装 docker CLI，也不经过 shell，避免命令注入。</p>
  *
- * <p>连接地址优先取 {@code huluwa.docker.host}，其次取 {@code DOCKER_HOST} 环境变量，最后使用
- * docker-java 的系统默认值（Linux 为 unix:///var/run/docker.sock，Windows 为 npipe）。
- * CentOS 容器化部署时由 compose 注入 {@code DOCKER_HOST=unix:///var/run/docker.sock} 并挂载该 socket。</p>
+ * <p>连接地址优先取「Docker 主机」页面登记的启用主机，其次 {@code huluwa.docker.host}，
+ * 再次 {@code DOCKER_HOST} 环境变量，最后使用 docker-java 系统默认值（Linux 为
+ * unix:///var/run/docker.sock）。容器化部署时 compose 注入
+ * {@code DOCKER_HOST=unix:///var/run/docker.sock} 并挂载宿主机 socket。</p>
  */
 @Service
 public class DockerService {
