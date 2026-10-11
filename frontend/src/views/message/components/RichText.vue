@@ -148,4 +148,22 @@ export default {
 .fold-btn:hover {
     color: var(--accent-2);
 }
+
+/* 手机端：正文与链接加大到 16px 级，折叠按钮给足点按高度 */
+@media (max-width: 900px) {
+    .rich-text {
+        font-size: 15px;
+        line-height: 1.58;
+    }
+
+    .rich-text :deep(a) {
+        padding: 2px 0;
+        display: inline-block;
+    }
+
+    .fold-btn {
+        padding: 4px 0;
+        font-size: 13px;
+    }
+}
 </style>

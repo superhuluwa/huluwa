@@ -127,7 +127,7 @@ export default {
                         await this.auth.setup(payload)
                         this.$message.success('管理员账号密码设置成功')
                     }
-                    const redirect = this.$route.query.redirect || '/dashboard'
+                    const redirect = this.$route.query.redirect || '/messages'
                     this.$router.push(redirect)
                 } catch (error) {
                     if (!this.initialized) {

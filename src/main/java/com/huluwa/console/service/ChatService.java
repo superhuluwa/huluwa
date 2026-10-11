@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索）/ 已读 / 清空 / 检索。
+ * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载）/ 已读 / 清空 / 检索。
  *
  * 数据来源两条线：
  *  - 「电影港」等聊天会话：chat_session + chat_message（用户发送与机器人回复都落库）；
@@ -30,18 +30,28 @@ public class ChatService {
     public static final String SYSTEM_SESSION = "system";
     /** 电影港会话键（schema 内置） */
     public static final String MOVIE_SESSION = "movie";
+    /** 磁力下载会话键（schema 内置） */
+    public static final String MAGNET_SESSION = "magnet";
+    /** 磁力下载会话内的配置引导指令 */
+    private static final String MAGNET_HELP_TASK = "帮助";
+    /** 磁力下载会话内的任务状态指令 */
+    private static final String MAGNET_STATUS_TASK = "状态";
+    /** 磁力下载会话内的保存路径指令前缀（如「路径 D:/Downloads/电影」） */
+    private static final String MAGNET_PATH_PREFIX = "路径";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
 
     private final JdbcTemplate jdbcTemplate;
     private final MovieSearchService movieSearchService;
+    private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
-                       MessageService messageService) {
+                       QBittorrentService qBittorrentService, MessageService messageService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
+        this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
     }
 
@@ -219,8 +229,9 @@ public class ChatService {
     // ------------------------------------------------------------------ 发送（搜索）
 
     /**
-     * 发送消息。电影港会话同步执行站点搜索，返回本轮新增的全部消息（用户气泡 + 机器人回复），
-     * 前端拿到后直接追加渲染；其它聊天会话只落一条用户气泡。
+     * 发送消息。电影港会话同步执行站点搜索、磁力下载会话同步提交 qB 任务，
+     * 返回本轮新增的全部消息（用户气泡 + 机器人回复），前端拿到后直接追加渲染；
+     * 其它聊天会话只落一条用户气泡。
      */
     public List<ChatMessage> send(String sessionId, String content) {
         requireSession(sessionId);
@@ -239,6 +250,9 @@ public class ChatService {
         if ("movie".equals(kind)) {
             // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
             produced.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
+        } else if ("magnet".equals(kind)) {
+            // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
+            produced.addAll(runMagnetTask(sessionId, text));
         }
         touch(sessionId);
         return produced;
@@ -304,6 +318,148 @@ public class ChatService {
             }
         }
         return replies;
+    }
+
+    // ------------------------------------------------------------------ 磁力下载
+
+    /**
+     * 磁力下载会话的一次发送：识别内置指令（帮助 / 状态 / 路径），否则按磁力提交给 qB。
+     *
+     * <p>首次使用（未配置服务地址）时返回「配置引导」气泡，前端据此弹出配置表单；
+     * 之后每条消息都会带一份连接状态快照，前端在页脚常驻「已连接 / 未配置」入口。</p>
+     */
+    private List<ChatMessage> runMagnetTask(String sessionId, String text) {
+        List<ChatMessage> replies = new ArrayList<>();
+        String task = text == null ? "" : text.trim();
+        boolean configured = qBittorrentService.settings().configured();
+
+        if (task.isEmpty() || MAGNET_HELP_TASK.equals(task)) {
+            replies.add(magnetText(sessionId, magnetHelpText(configured), magnetMeta(configured)));
+            return replies;
+        }
+        if (task.equalsIgnoreCase(MAGNET_STATUS_TASK)) {
+            replies.add(magnetStatus(sessionId));
+            return replies;
+        }
+        if (task.startsWith(MAGNET_PATH_PREFIX + " ") || task.equals(MAGNET_PATH_PREFIX)) {
+            replies.add(magnetSavePath(sessionId, task.length() > MAGNET_PATH_PREFIX.length()
+                    ? task.substring(MAGNET_PATH_PREFIX.length()).trim() : ""));
+            return replies;
+        }
+
+        List<String> magnets = QBittorrentService.extractMagnets(task);
+        if (magnets.isEmpty()) {
+            return replies;
+        }
+        if (!configured) {
+            replies.add(magnetText(sessionId,
+                    "已收到 " + magnets.size() + " 条磁力链接，但还没有配置 qBittorrent。"
+                            + "\n请填写服务地址与账号密码，配置完成后本条磁力可直接重发。",
+                    magnetMeta("config", magnets)));
+            return replies;
+        }
+
+        QBittorrentService.AddResult result;
+        try {
+            result = qBittorrentService.add(magnets, null);
+        } catch (Exception e) {
+            replies.add(magnetText(sessionId, "提交失败：" + safeMessage(e), magnetMeta(true)));
+            return replies;
+        }
+
+        String summary = result.duplicate() ? "已在列表" : (result.ok() ? "添加成功" : "添加失败");
+        String headline = (result.ok() ? "✅ " : "⚠️ ") + summary + "：" + result.message();
+        replies.add(magnetText(sessionId, headline, magnetMeta(true)));
+        // 磁力链接很长，逐条单独成气泡（可整体复制）
+        for (String magnet : magnets) {
+            replies.add(append(sessionId, "bot", "text", magnet, null, magnetMeta(true)));
+        }
+        return replies;
+    }
+
+    /** 「状态」指令：汇总 qB 的任务列表 */
+    private ChatMessage magnetStatus(String sessionId) {
+        if (!qBittorrentService.settings().configured()) {
+            return magnetText(sessionId, "尚未配置 qBittorrent，请先填写服务地址与账号密码。", magnetMeta(false));
+        }
+        List<QBittorrentService.Torrent> torrents;
+        try {
+            torrents = qBittorrentService.torrents(10);
+        } catch (Exception e) {
+            return magnetText(sessionId, "读取任务失败：" + safeMessage(e), magnetMeta(true));
+        }
+        if (torrents.isEmpty()) {
+            return magnetText(sessionId, "qBittorrent 当前没有任务。把磁力链接发给我即可开始下载。", magnetMeta(true));
+        }
+        StringBuilder sb = new StringBuilder("qBittorrent 最近 ").append(torrents.size()).append(" 个任务：");
+        for (QBittorrentService.Torrent torrent : torrents) {
+            sb.append('\n').append('•').append(' ').append(torrent.name())
+                    .append('\n').append("    ")
+                    .append(Math.round(torrent.progress() * 100)).append("%  ")
+                    .append(QBittorrentService.stateLabel(torrent.state())).append("  ")
+                    .append(QBittorrentService.humanSize(torrent.size()));
+            if (torrent.downloadSpeed() > 0) {
+                sb.append("  ↓").append(QBittorrentService.humanSpeed(torrent.downloadSpeed()));
+            }
+            if (torrent.eta() > 0 && torrent.eta() < 8640000L) {
+                sb.append("  剩余 ").append(QBittorrentService.humanEta(torrent.eta()));
+            }
+        }
+        return magnetText(sessionId, sb.toString(), magnetMeta(true));
+    }
+
+    /** 「路径 xxx」指令：保存默认下载路径（留空 = 清空，用 qB 自身的默认目录） */
+    private ChatMessage magnetSavePath(String sessionId, String path) {
+        if (!qBittorrentService.settings().configured()) {
+            return magnetText(sessionId, "请先完成 qBittorrent 连接配置，再设置保存路径。", magnetMeta(false));
+        }
+        // 只改路径：不重新校验账号密码，也不清除已缓存的登录会话
+        qBittorrentService.saveSavePath(path);
+        return magnetText(sessionId, path.isEmpty()
+                        ? "已清空默认保存路径：新任务使用 qBittorrent 自身的默认下载目录。"
+                        : "已设置默认保存路径：" + path + "\n（新任务会把保存路径透传给 qB，目录必须对 qB 可见）",
+                magnetMeta(true));
+    }
+
+    /** 配置引导文案：未配置时是「首次使用向导」，已配置时是帮助卡片 */
+    private static String magnetHelpText(boolean configured) {
+        if (!configured) {
+            return """
+                    还没有配置 qBittorrent，无法提交磁力任务。请按下面两步完成配置：
+                    1. 在 qB 中开启「Web UI」并记住端口（默认 8080），地址形如 http://192.168.3.202:8080；
+                    2. 在本会话里填写服务地址与账号密码（账号密码可留空，此时依赖 qB 的 IP 白名单放行）。
+                    配置会保存在本机，密码只在保存时提交，之后不会回传到页面。""";
+        }
+        return """
+                磁力下载已就绪，把磁力链接直接发给我即可：
+                1. 一条消息可放多个磁力链接（空格或换行分隔），会一起提交给 qBittorrent；
+                2. 输入「状态」查看最近的下载任务；
+                3. 输入「路径 D:/Downloads」设置默认保存目录，「路径」单独发送则清空；
+                4. 首次使用需在 qB 的「Web UI」中放行本机 IP，或填写账号密码登录。""";
+    }
+
+    /** 磁力会话消息的结构化载荷（前端据此渲染状态徽标与配置入口） */
+    private String magnetMeta(boolean configured) {
+        return magnetMeta(configured ? "ready" : "config");
+    }
+
+    private String magnetMeta(String status) {
+        return magnetMeta(status, null);
+    }
+
+    private String magnetMeta(String status, List<String> magnets) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("kind", "magnet");
+        meta.put("status", status);
+        meta.put("settings", qBittorrentService.describe());
+        if (magnets != null && !magnets.isEmpty()) {
+            meta.put("magnets", magnets);
+        }
+        return toJson(meta);
+    }
+
+    private ChatMessage magnetText(String sessionId, String content, String payload) {
+        return append(sessionId, "bot", "text", content, null, payload);
     }
 
     /** 配文：标题（年代 / 产地 / 类型）+ 详情页链接（前端自动识别为可点链接） */

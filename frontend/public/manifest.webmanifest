@@ -1,0 +1,25 @@
+{
+    "name": "葫芦娃助手",
+    "short_name": "葫芦娃",
+    "description": "葫芦娃助手控制台 · 会话中心",
+    "start_url": "./#/messages",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0B0F19",
+    "theme_color": "#0B0F19",
+    "icons": [
+        {
+            "src": "./apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "./huluwa-logo.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ]
+}

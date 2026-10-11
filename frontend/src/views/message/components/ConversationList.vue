@@ -1,20 +1,27 @@
 <template>
-    <aside class="conversation-list">
+    <aside class="conversation-list" :class="{ mobile }">
         <div class="list-head">
             <div class="list-title">
                 <h3>会话</h3>
-                <span class="count">{{ sessions.length }} 个</span>
+                <span class="count">{{ filtered.length }} 个</span>
+                <!-- 手机端是全屏沉浸页面：这里提供进入控制台其它模块（Docker/首页等）的唯一入口 -->
+                <button v-if="showMenu" class="menu-btn" type="button" title="更多功能" @click="$emit('menu')">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
             </div>
-            <n-input v-model:value="keyword" size="small" clearable placeholder="筛选会话 / 消息内容">
+            <n-input v-model:value="keyword" :size="mobile ? 'medium' : 'small'" clearable
+                placeholder="搜索会话或消息内容">
                 <template #prefix>
                     <i class="fa-solid fa-magnifying-glass"></i>
                 </template>
             </n-input>
         </div>
         <div class="list-body">
-            <div v-if="!filtered.length" class="list-empty">暂无会话</div>
+            <div v-if="!filtered.length" class="list-empty">
+                {{ keyword ? '没有匹配的会话' : '暂无会话' }}
+            </div>
             <div v-for="item in filtered" :key="item.id" class="conversation"
-                :class="{ active: item.id === currentKey }" @click="$emit('select', item.id)">
+                :class="{ active: item.id === currentKey && !mobile }" @click="$emit('select', item.id)">
                 <div class="conv-icon" :class="iconClass(item)">
                     <i :class="iconOf(item)"></i>
                 </div>
@@ -26,6 +33,7 @@
                     <span class="conv-time">{{ timeOf(item) }}</span>
                     <span v-if="item.unread > 0" class="conv-unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
                 </div>
+                <i v-if="mobile" class="fa-solid fa-chevron-right conv-arrow"></i>
             </div>
         </div>
     </aside>
@@ -35,7 +43,10 @@
 /**
  * 会话列表（对齐 quantum ConversationList 的视觉）：
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
- * 会话由服务端提供（内置电影港 + 系统通知虚拟会话），列表不做删除。
+ * 会话由服务端提供（内置电影港 / 磁力下载 + 系统通知虚拟会话），列表不做删除。
+ *
+ * 手机端（mobile）：列表本身就是一级「全屏页面」——标题区留出状态栏安全区、行高与触控目标放大、
+ * 右侧加箭头提示可进入聊天详情，因此不再需要高亮当前会话。
  */
 import { sessionPreview, formatTimeLabel } from '@/utils/chatFormat'
 
@@ -49,9 +60,19 @@ export default {
         currentKey: {
             type: String,
             default: ''
+        },
+        /** 手机端形态：全屏一级页面（大标题 + 大行高 + 箭头） */
+        mobile: {
+            type: Boolean,
+            default: false
+        },
+        /** 是否显示「更多功能」入口（全屏沉浸页面里没有主框架菜单，需要它拉出抽屉） */
+        showMenu: {
+            type: Boolean,
+            default: false
         }
     },
-    emits: ['select'],
+    emits: ['select', 'menu'],
     data() {
         return {
             keyword: ''
@@ -84,10 +105,17 @@ export default {
             if (item.kind === 'movie') {
                 return 'fa-solid fa-film'
             }
+            if (item.kind === 'magnet') {
+                return 'fa-solid fa-magnet'
+            }
             return 'fa-regular fa-comments'
         },
         iconClass(item) {
-            return { movie: item.kind === 'movie', system: item.kind === 'system' }
+            return {
+                movie: item.kind === 'movie',
+                magnet: item.kind === 'magnet',
+                system: item.kind === 'system'
+            }
         }
     }
 }
@@ -133,6 +161,7 @@ export default {
     flex: 1;
     overflow-y: auto;
     padding: 2px 10px 10px;
+    -webkit-overflow-scrolling: touch;
 }
 
 .list-empty {
@@ -151,6 +180,7 @@ export default {
     border-radius: 12px;
     cursor: pointer;
     border: 1px solid transparent;
+    transition: background .15s ease;
 }
 
 .conversation:hover {
@@ -178,6 +208,11 @@ export default {
 .conv-icon.movie {
     background: rgba(99, 102, 241, .16);
     color: #A5B4FC;
+}
+
+.conv-icon.magnet {
+    background: rgba(245, 158, 11, .16);
+    color: #FCD34D;
 }
 
 .conv-icon.system {
@@ -233,5 +268,118 @@ export default {
     font-weight: 700;
     line-height: 18px;
     text-align: center;
+}
+
+.conv-arrow {
+    flex: none;
+    font-size: 12px;
+    color: var(--text-3);
+}
+
+.menu-btn {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: rgba(148, 163, 184, .06);
+    color: var(--text-2);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.menu-btn:hover {
+    color: var(--text);
+    border-color: var(--line-2);
+}
+
+/* ==========================================================================
+   手机端：会话列表 = 一级全屏页面
+   ========================================================================== */
+.conversation-list.mobile {
+    width: 100%;
+    border-right: 0;
+    background: var(--bg);
+}
+
+.conversation-list.mobile .list-head {
+    /* 顶部留出状态栏安全区，标题区本身兼作页面头部 */
+    padding: calc(env(safe-area-inset-top) + 14px) max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20, 28, 46, .9) 0%, rgba(11, 15, 25, .75) 100%);
+    backdrop-filter: blur(10px);
+}
+
+.conversation-list.mobile .list-title {
+    margin-bottom: 12px;
+}
+
+.conversation-list.mobile .list-title h3 {
+    font-size: 22px;
+    letter-spacing: .5px;
+}
+
+.conversation-list.mobile .count {
+    margin-left: auto;
+}
+
+.conversation-list.mobile .count {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-weak);
+    color: var(--accent-2);
+}
+
+.conversation-list.mobile .menu-btn {
+    width: 38px;
+    height: 38px;
+    margin-left: 2px;
+    font-size: 15px;
+}
+
+.conversation-list.mobile .list-body {
+    padding: 6px max(8px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 12px) max(8px, env(safe-area-inset-left));
+}
+
+.conversation-list.mobile .conversation {
+    gap: 14px;
+    padding: 12px 10px;
+    border-radius: 14px;
+}
+
+/* 覆盖式高亮：手机端点击即离开本页，无需保留选中态 */
+.conversation-list.mobile .conversation:active {
+    background: rgba(148, 163, 184, .1);
+}
+
+.conversation-list.mobile .conv-icon {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
+}
+
+.conversation-list.mobile .conv-title {
+    font-size: 16px;
+}
+
+.conversation-list.mobile .conv-preview {
+    margin-top: 3px;
+    font-size: 13px;
+}
+
+.conversation-list.mobile .conv-time {
+    font-size: 11.5px;
+}
+
+.conversation-list.mobile .conv-unread {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    line-height: 20px;
+    font-size: 11.5px;
 }
 </style>

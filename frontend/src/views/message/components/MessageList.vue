@@ -238,6 +238,8 @@ export default {
     overflow-x: hidden;
     position: relative;
     padding: 14px 16px 4px;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .stream-content {
@@ -296,5 +298,26 @@ export default {
 .jump-bottom:hover {
     color: var(--text);
     border-color: rgba(14, 165, 233, .45);
+}
+
+/* 手机端：消息流左右留白收紧、气泡吃满更多宽度，回到底部按钮放大触控目标 */
+@media (max-width: 900px) {
+    .message-stream {
+        padding: 10px 12px 2px;
+    }
+
+    .stream-hint {
+        font-size: 12px;
+        padding: 10px 0;
+    }
+
+    .time-separator {
+        margin: 12px 0 10px;
+    }
+
+    .jump-bottom {
+        padding: 9px 14px;
+        font-size: 12.5px;
+    }
 }
 </style>

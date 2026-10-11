@@ -1,6 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { loadingBar } from '@/libs/discrete'
+import { isMobileDevice } from '@/composables/useIsMobile'
+import { setFullscreenPage } from '@/composables/useFullscreenPage'
 
 const Main = () => import('@/components/main/main.vue')
 
@@ -14,8 +16,15 @@ const routes = [
     {
         path: '/',
         component: Main,
-        redirect: '/dashboard',
+        redirect: '/messages',
         children: [
+            // 消息中心（会话）：登录后的默认落地页，手机端为全屏两级结构
+            {
+                path: 'messages',
+                name: 'messages',
+                meta: { title: '消息中心', icon: 'fa-solid fa-bell' },
+                component: () => import('@/views/message/index.vue')
+            },
             {
                 path: 'dashboard',
                 name: 'dashboard',
@@ -25,12 +34,6 @@ const routes = [
             // 消息中心：父级分组可折叠（与 quantum 的「消息中心 → 会话」结构一致），
             // 分组下的「会话」子项由 components/main/main.vue 渲染，未读角标取自 chat store；
             // 具体会话用 ?session= 区分（会话列表在页面内呈现），故此处只登记一个路由、不声明 children。
-            {
-                path: 'messages',
-                name: 'messages',
-                meta: { title: '消息中心', icon: 'fa-solid fa-bell' },
-                component: () => import('@/views/message/index.vue')
-            },
             {
                 path: 'frp',
                 name: 'frp',
@@ -117,6 +120,14 @@ router.beforeEach(async (to) => {
         return { name: 'login', query: { redirect: to.fullPath } }
     }
     return true
+})
+
+/**
+ * 手机端「会话」页使用全屏沉浸布局：导航落地前先写好标记，主框架渲染时即收起侧栏与顶栏，
+ * 避免先按控制台布局绘制一帧再被覆盖（会看到一次闪动）。其余页面恒为 false。
+ */
+router.beforeResolve((to) => {
+    setFullscreenPage(to.name === 'messages' && isMobileDevice())
 })
 
 router.afterEach((to) => {

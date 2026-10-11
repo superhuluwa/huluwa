@@ -156,4 +156,29 @@ export default {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* 手机端：通知卡占满更多宽度，字号上调，删除入口常显（触屏没有 hover） */
+@media (max-width: 900px) {
+    .notify-card {
+        max-width: 92%;
+        padding: 12px 13px;
+    }
+
+    .notify-title {
+        font-size: 15px;
+    }
+
+    :deep(.notify-body) {
+        font-size: 14.5px;
+    }
+
+    .notify-delete {
+        top: 10px;
+        right: 10px;
+        width: 30px;
+        height: 30px;
+        font-size: 13px;
+        opacity: .55;
+    }
+}
 </style>

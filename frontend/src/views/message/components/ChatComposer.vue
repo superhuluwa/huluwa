@@ -1,15 +1,15 @@
 <template>
-    <div class="composer">
+    <div class="composer" :class="{ mobile }">
         <div class="composer-inner" :class="{ focused, busy: sending }">
             <textarea ref="input" v-model="draft" rows="1" :placeholder="placeholder" :disabled="readonly"
                 @focus="focused = true" @blur="focused = false" @keydown="onKeydown" @input="autoGrow"></textarea>
-            <button class="send" type="button" :disabled="!canSend" :title="sending ? '搜索中…' : '发送'"
+            <button class="send" type="button" :disabled="!canSend" :title="sending ? busyText : '发送'"
                 @click="submit">
                 <i :class="sending ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-paper-plane'"></i>
             </button>
         </div>
         <div v-if="sending" class="composer-tip">
-            <i class="fa-solid fa-magnifying-glass"></i>正在搜索，请稍候…
+            <i :class="busyIcon"></i>{{ busyText }}
         </div>
         <div v-else-if="hint" class="composer-tip">{{ hint }}</div>
     </div>
@@ -20,6 +20,7 @@
  * 输入条（对齐量子端 ChatComposer 的交互与视觉，去掉附件/指令面板）：
  * - Enter 发送 / Shift+Enter 换行（量子端 Enter 发送、最多 4 行；桌面端补 Shift+Enter）
  * - 电影港会话：整条输入即搜索关键字，发送后由服务端返回结果气泡
+ * - 磁力下载会话：整条输入可含多个磁力链接，发送后由服务端提交 qB 并回复结果
  */
 export default {
     name: 'ChatComposer',
@@ -36,10 +37,15 @@ export default {
             type: String,
             default: ''
         },
-        /** 会话类型：movie 提示搜索语义，其它会话提示普通对话 */
+        /** 会话类型：movie 搜索 / magnet 提交磁力 / system 只读 / chat 普通对话 */
         kind: {
             type: String,
             default: 'chat'
+        },
+        /** 手机端：输入区更宽松，按钮放大便于拇指点按 */
+        mobile: {
+            type: Boolean,
+            default: false
         }
     },
     emits: ['send'],
@@ -61,12 +67,23 @@ export default {
             if (this.disabled) {
                 return '请先选择左侧会话'
             }
-            return this.kind === 'movie'
-                ? '输入片名搜索电影港（Enter 发送 / Shift+Enter 换行）'
-                : '输入消息…（Enter 发送 / Shift+Enter 换行）'
+            if (this.kind === 'movie') {
+                return this.mobile ? '输入片名开始搜索' : '输入片名搜索电影港（Enter 发送 / Shift+Enter 换行）'
+            }
+            if (this.kind === 'magnet') {
+                return this.mobile ? '粘贴磁力链接提交下载' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交；可一次贴多条'
+            }
+            return this.mobile ? '输入消息…' : '输入消息…（Enter 发送 / Shift+Enter 换行）'
         },
         canSend() {
             return !this.readonly && !this.sending && this.draft.trim().length > 0
+        },
+        /** 发送中的提示文案与图标：磁力会话是提交任务，不是搜索 */
+        busyText() {
+            return this.kind === 'magnet' ? '正在提交到 qBittorrent，请稍候…' : '正在搜索，请稍候…'
+        },
+        busyIcon() {
+            return this.kind === 'magnet' ? 'fa-solid fa-cloud-arrow-up' : 'fa-solid fa-magnifying-glass'
         }
     },
     methods: {
@@ -177,5 +194,53 @@ export default {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* ==========================================================================
+   手机端：输入区像聊天软件一样贴底，末段留出系统手势安全距离
+   ========================================================================== */
+.composer.mobile {
+    padding: 8px max(10px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-right));
+    background: rgba(11, 15, 25, .96);
+    backdrop-filter: blur(10px);
+}
+
+.composer.mobile .composer-inner {
+    gap: 4px;
+    padding: 0 4px 0 0;
+    border-radius: 18px;
+}
+
+.composer.mobile .composer-inner textarea {
+    min-height: 44px;
+    max-height: 120px;
+    padding: 11px 0 11px 15px;
+    /* 14px 会触发 iOS 聚焦缩放，手机端统一 16px */
+    font-size: 16px;
+    line-height: 1.45;
+}
+
+.composer.mobile .send {
+    width: 44px;
+    height: 44px;
+    margin: 4px 0 4px 2px;
+    font-size: 17px;
+    background: var(--accent);
+    color: #04121B;
+}
+
+.composer.mobile .send:hover:not(:disabled) {
+    background: var(--accent-2);
+}
+
+.composer.mobile .send:disabled {
+    background: rgba(148, 163, 184, .18);
+    color: var(--text-3);
+    opacity: 1;
+}
+
+.composer.mobile .composer-tip {
+    padding: 7px 6px 1px;
+    font-size: 12px;
 }
 </style>

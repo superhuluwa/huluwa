@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 消息中心会话接口：会话列表 / 消息流 / 发送（电影港搜索）/ 已读 / 清空 / 跨会话检索。
+ * 消息中心会话接口：会话列表 / 消息流 / 发送（电影港搜索、磁力下载）/ 已读 / 清空 / 跨会话检索。
  * 与既有 /api/messages（系统通知消息）并存：本接口服务聊天式会话 UI。
  */
 @RestController
@@ -43,7 +43,7 @@ public class ChatController {
         return ApiResult.ok(chatService.messages(sessionId, beforeId, limit));
     }
 
-    /** 发送消息：电影港会话同步搜索并返回本轮新增的用户与机器人消息 */
+    /** 发送消息：电影港会话同步搜索、磁力下载会话同步提交 qB，返回本轮新增的用户与机器人消息 */
     @PostMapping("/sessions/{sessionId}/messages")
     public ApiResult<List<ChatService.ChatMessage>> send(@PathVariable String sessionId,
                                                          @RequestBody SendRequest body) {

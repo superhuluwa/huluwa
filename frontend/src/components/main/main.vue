@@ -1,6 +1,7 @@
 <template>
-    <div class="main-console" :class="{ 'is-mobile': isMobile, 'drawer-open': isMobile && mobileDrawerOpen }">
-        <aside class="sider" :class="{ collapsed: siderCollapsed }">
+    <div class="main-console"
+        :class="{ 'is-mobile': isMobile, 'drawer-open': isMobile && mobileDrawerOpen, 'is-immersive': shellHidden }">
+        <aside v-if="shellVisible" class="sider" :class="{ collapsed: siderCollapsed }">
             <div class="logo">
                 <img class="logo-mark" src="/huluwa-logo.svg" alt="葫芦娃 Logo" width="36" height="36" />
                 <div v-show="!siderCollapsed" class="logo-text">
@@ -18,10 +19,11 @@
         </aside>
 
         <!-- 移动端抽屉遮罩：点击关闭侧栏（桌面端不渲染） -->
-        <div v-if="isMobile && mobileDrawerOpen" class="sider-mask" @click="closeDrawer"></div>
+        <div v-if="shellVisible && isMobile && mobileDrawerOpen" class="sider-mask" @click="closeDrawer"></div>
 
         <div class="main-body">
-            <header-bar :collapsed="headerCollapsed" :mobile="isMobile" @on-coll-change="handleCollapsedChange">
+            <header-bar v-if="!shellHidden" :collapsed="headerCollapsed" :mobile="isMobile"
+                @on-coll-change="handleCollapsedChange">
                 <user-chip />
             </header-bar>
 
@@ -41,6 +43,8 @@ import { h } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
+import { isMobileDevice } from '@/composables/useIsMobile'
+import { onShellDrawerRequest, setFullscreenPage, useFullscreenPage } from '@/composables/useFullscreenPage'
 import HeaderBar from './components/header-bar.vue'
 import UserChip from './components/user-chip.vue'
 
@@ -59,7 +63,9 @@ export default {
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()
-        return { appStore, chatStore }
+        // 手机端会话页等「全屏沉浸」页面：外壳整体不渲染，内容独占整屏
+        const shellHidden = useFullscreenPage()
+        return { appStore, chatStore, shellHidden }
     },
     data() {
         return {
@@ -71,6 +77,14 @@ export default {
         }
     },
     computed: {
+        /**
+         * 外壳（侧栏 / 遮罩 / 顶栏）是否渲染：
+         * 沉浸态（手机端会话页）整体隐藏，但用户请求打开抽屉时仍要把侧栏渲染出来，
+         * 否则全屏页面里没有任何进入其它模块的通道。
+         */
+        shellVisible() {
+            return !this.shellHidden || this.mobileDrawerOpen
+        },
         /** 桌面端：沿用 store 的持久化折叠态（行为不变） */
         collapsed() {
             return this.appStore.collapsed
@@ -100,6 +114,21 @@ export default {
         },
     },
     watch: {
+        // 沉浸态（手机端会话页）切换时启停菜单角标轮询：外壳隐藏后不需要空转
+        shellHidden: {
+            immediate: true,
+            handler(hidden, prev) {
+                if (hidden) {
+                    this.stopMenuPolling()
+                    return
+                }
+                // 首次执行且已挂载时才需要拉数据，之后由 mounted 负责首拉
+                if (prev !== undefined) {
+                    this.chatStore.refreshSessions().catch(() => {})
+                    this.startMenuPolling()
+                }
+            }
+        },
         // 跨分组跳转或刷新后，保持当前页所在分组展开；
         // 消息中心内部切换会话（仅 query 变化）不触发本监听，展开态自然保留。
         '$route.name'(next, prev) {
@@ -116,6 +145,10 @@ export default {
     async mounted() {
         this.handleResize()
         window.addEventListener('resize', this.handleResize)
+        // 全屏沉浸页面（手机端会话页）里的「菜单」按钮 → 打开这里同款抽屉
+        onShellDrawerRequest(() => {
+            this.mobileDrawerOpen = true
+        })
         this.syncExpandedKeys()
         // 菜单里的会话子项/未读角标以 chat store 为准：
         // 主框架常驻轮询会话快照（每 15s），离开会话页也能更新侧栏角标；
@@ -129,6 +162,7 @@ export default {
     },
     beforeUnmount() {
         window.removeEventListener('resize', this.handleResize)
+        onShellDrawerRequest(null)
         this.stopMenuPolling()
     },
     methods: {
@@ -141,6 +175,11 @@ export default {
                 if (mobile) {
                     this.mobileDrawerOpen = false
                 }
+            }
+            // 手机横竖屏切换会跨越移动端断点：会话页的沉浸标记要跟着走，
+            // 否则会出现「外壳已隐藏但页面按桌面双栏渲染」的错配。
+            if (this.$route.name === 'messages') {
+                setFullscreenPage(isMobileDevice())
             }
         },
         /** 顶栏按钮：桌面端折叠侧栏（写 store），移动端开合抽屉 */
@@ -252,7 +291,7 @@ export default {
         turnToPage(name) {
             // 移动端点完菜单后立即收起抽屉，露出目标页面
             this.closeDrawer()
-            // 「消息中心 → 会话」子项：进入会话页（保留当前会话，默认电影港）
+            // 「消息中心 → 会话」子项：进入会话页（保留当前会话，手机端停在会话列表）
             if (name === MESSAGES_INDEX_KEY) {
                 this.$router.push({ name: 'messages' }).catch(() => {})
                 return
@@ -395,6 +434,16 @@ export default {
     overflow: auto;
     position: relative;
 }
+/* 全屏沉浸（手机端会话页）：外壳不渲染，内容区去掉留白与滚动容器，交给页面自己管理 */
+.main-console.is-immersive .main-body {
+    width: 100%;
+}
+
+.main-console.is-immersive .content-wrapper {
+    padding: 0;
+    overflow: hidden;
+}
+
 /* ==========================================================================
    移动端适配（<= 900px）：仅覆盖窄屏，桌面端样式保持原样
    侧栏改为覆盖式抽屉（默认收起），内容区独占整屏宽度。

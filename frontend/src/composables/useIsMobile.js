@@ -7,6 +7,19 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
  */
 export const MOBILE_BREAKPOINT = 900
 
+/**
+ * 当前设备是否按「手机」对待。
+ * 供路由守卫（决定是否走全屏沉浸布局）等非组件场景使用：
+ * 触屏 + 窄视口 + 移动端 UA 才算手机，避免桌面端把窗口拖窄后误判。
+ */
+export function isMobileDevice(width = window.innerWidth) {
+    if (width > MOBILE_BREAKPOINT) {
+        return false
+    }
+    const touch = (navigator.maxTouchPoints || 0) > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    return touch && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+}
+
 export function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
     const isMobile = ref(false)
     const query = `(max-width: ${breakpoint}px)`

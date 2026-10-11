@@ -80,12 +80,12 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
 
--- 消息中心会话（聊天对象）：当前内置「电影港」搜索会话；
+-- 消息中心会话（聊天对象）：当前内置「电影港」搜索会话与「磁力下载」会话；
 -- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | magnet | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -107,3 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_message_session ON chat_message (session_id,
 -- 内置会话：电影港搜索（幂等，重启不覆盖用户数据）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));
+
+-- 内置会话：磁力下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('magnet', '磁力下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));

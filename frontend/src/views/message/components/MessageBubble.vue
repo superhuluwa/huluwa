@@ -6,12 +6,15 @@
 
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
-        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie }">
+        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie, magnet: isMagnet }">
             <i v-if="isMovie" class="fa-solid fa-film"></i>
+            <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
             <template v-else>Q</template>
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
-        <div class="bubble" :class="{ 'is-cover': isImage, 'is-error': isError }" :title="fullTime">
+        <div class="bubble" :class="{ 'is-cover': isImage, 'is-error': isError, 'hold-open': holdOpen }"
+            :title="fullTime" @touchstart.passive="onHoldStart" @touchend="endHold" @touchcancel="endHold"
+            @touchmove.passive="endHold">
             <div class="bubble-tools">
                 <span class="tool" title="复制" @click="copy"><i class="fa-regular fa-copy"></i></span>
             </div>
@@ -37,6 +40,7 @@
  * 消息气泡外壳（自 quantum-web 的 MessageBubble.vue 迁移）：
  * 头像 38px、机器人左/用户右、靠头像侧下角 4px 收尾、圆角 16、内边距 9/12、最大宽 min(68%,720px)。
  * 本项目消息类型：text（纯文本，详情链接自动可点）、image（封面 + 配文）、notify（系统通知卡）、error（错误提示）。
+ * 头像按会话类型区分：电影港=胶片、磁力下载=磁铁。
  */
 import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
@@ -54,7 +58,9 @@ export default {
     emits: ['open-cover', 'delete'],
     data() {
         return {
-            loadError: false
+            loadError: false,
+            /** 手机端长按气泡：显示复制工具条（触屏没有 hover，工具条默认隐藏就永远点不到） */
+            holdOpen: false
         }
     },
     computed: {
@@ -70,17 +76,8 @@ export default {
         isMine() {
             return this.message.role === 'user'
         },
-        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像 */
-        isMovie() {
-            return !!this.message.payload
-        },
-        /** 大图标题：优先用载荷里的片名 */
-        coverTitle() {
-            const payload = this.parsedPayload
-            return payload.title || '影视封面'
-        },
-        /** 载荷解析（影视卡片字段 / 通知分类），损坏时退化为空对象 */
-        parsedPayload() {
+        /** 载荷解析结果（影视卡片 / 磁力指令元信息），损坏时退化为空对象 */
+        payload() {
             if (!this.message.payload) {
                 return {}
             }
@@ -90,6 +87,23 @@ export default {
             } catch (e) {
                 return {}
             }
+        },
+        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像 */
+        isMovie() {
+            return Object.prototype.hasOwnProperty.call(this.payload, 'cover')
+        },
+        /** 磁力下载会话的机器人回复显示磁铁头像 */
+        isMagnet() {
+            return this.payload.kind === 'magnet'
+        },
+        /** 大图标题：优先用载荷里的片名 */
+        coverTitle() {
+            const payload = this.parsedPayload
+            return payload.title || '影视封面'
+        },
+        /** 载荷解析（影视卡片字段 / 通知分类），供气泡内部使用 */
+        parsedPayload() {
+            return this.payload
         },
         fullTime() {
             return formatFullTime(this.message.createdAt)
@@ -108,10 +122,35 @@ export default {
         }
     },
     methods: {
+        /** 长按 450ms 弹出工具栏（期间滑动/松手即取消，避免误触） */
+        onHoldStart() {
+            clearTimeout(this._holdTimer)
+            this._holdTimer = setTimeout(() => {
+                this.holdOpen = true
+            }, 450)
+        },
+        endHold() {
+            clearTimeout(this._holdTimer)
+        },
+        beforeUnmount() {
+            clearTimeout(this._holdTimer)
+        },
         async copy() {
+            this.holdOpen = false
             const text = this.message.content || ''
             try {
-                await navigator.clipboard.writeText(text)
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text)
+                } else {
+                    const el = document.createElement('textarea')
+                    el.value = text
+                    el.setAttribute('readonly', '')
+                    el.style.cssText = 'position:fixed;top:-1000px;opacity:0'
+                    document.body.appendChild(el)
+                    el.select()
+                    document.execCommand('copy')
+                    document.body.removeChild(el)
+                }
                 window.$message?.success('已复制消息内容')
             } catch (e) {
                 window.$message?.error('复制失败，请手动选择文本')
@@ -158,6 +197,12 @@ export default {
     background: linear-gradient(135deg, #6366F1, #A855F7);
     color: #F8FAFC;
     font-size: 15px;
+}
+
+.avatar.bot.magnet {
+    background: linear-gradient(135deg, #F59E0B, #EF4444);
+    color: #1B1206;
+    font-size: 14px;
 }
 
 .avatar.mine {
@@ -262,5 +307,49 @@ export default {
 .cover-caption {
     padding: 8px 6px 4px;
     font-size: 13px;
+}
+
+/* ==========================================================================
+   手机端：气泡更宽、字号更大，复制工具条由「长按」唤出（触屏无 hover）
+   ========================================================================== */
+@media (max-width: 900px) {
+    .message-row {
+        gap: 7px;
+        margin-bottom: 10px;
+    }
+
+    .avatar {
+        width: 36px;
+        height: 36px;
+    }
+
+    .bubble {
+        max-width: min(76%, 720px);
+        padding: 10px 13px;
+        border-radius: 17px;
+    }
+
+    .bubble.is-cover {
+        max-width: min(62%, 300px);
+    }
+
+    .bubble-content {
+        font-size: 15px;
+    }
+
+    .bubble.hold-open .bubble-tools {
+        display: flex;
+    }
+
+    .tool {
+        width: 30px;
+        height: 30px;
+        font-size: 13px;
+    }
+
+    .bubble-tools {
+        top: -14px;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, .55);
+    }
 }
 </style>
