@@ -9,7 +9,8 @@
                 </div>
             </div>
             <n-menu :value="activeMenu" :options="menuOptions" :collapsed="collapsed" :collapsed-width="64"
-                :collapsed-icon-size="17" :indent="18" @update:value="turnToPage" />
+                :collapsed-icon-size="17" :indent="18" :expanded-keys="expandedKeys" accordion
+                @update:value="turnToPage" @update:expanded-keys="handleExpandedChange" />
             <div class="sider-foot" v-show="!collapsed">
                 <span>版本</span>
                 <span class="mono">v1.0.0</span>
@@ -50,6 +51,12 @@ export default {
     setup() {
         return { appStore: useAppStore() }
     },
+    data() {
+        return {
+            // 展开的子菜单 key；accordion 模式下只保留一个，默认跟随当前页所在分组
+            expandedKeys: []
+        }
+    },
     computed: {
         collapsed() {
             return this.appStore.collapsed
@@ -58,17 +65,52 @@ export default {
             return this.$route.name
         },
         menuOptions() {
-            const children = this.$router.options.routes
-                .find((route) => route.path === '/')
-                .children.filter((item) => !(item.meta && item.meta.hideInMenu))
-            return children.map((item) => ({
+            // 顶层路由（登录 / 错误页已通过 hideInMenu 排除）；带 children 的渲染为可折叠子菜单
+            const home = this.$router.options.routes.find((route) => route.path === '/')
+            if (!home || !Array.isArray(home.children)) return []
+            return home.children
+                .filter((item) => !(item.meta && item.meta.hideInMenu))
+                .map((item) => this.toMenuOption(item))
+        }
+    },
+    watch: {
+        // 跨分组跳转或刷新后，保持当前页所在分组展开
+        '$route.name'() {
+            this.syncExpandedKeys()
+        }
+    },
+    mounted() {
+        this.syncExpandedKeys()
+    },
+    methods: {
+        /** 路由节点转 n-menu 选项；有 children 的渲染为可折叠分组，父级本身不跳转。 */
+        toMenuOption(item) {
+            const children = Array.isArray(item.children)
+                ? item.children.filter((child) => !(child.meta && child.meta.hideInMenu))
+                : []
+            if (children.length) {
+                return {
+                    key: item.name,
+                    label: item.meta && item.meta.title,
+                    icon: renderIcon(item.meta && item.meta.icon),
+                    children: children.map((child) => this.toMenuOption(child))
+                }
+            }
+            return {
                 key: item.name,
                 label: () => h(RouterLink, { to: { name: item.name } }, { default: () => item.meta.title }),
                 icon: renderIcon(item.meta && item.meta.icon)
-            }))
-        }
-    },
-    methods: {
+            }
+        },
+        /** 展开当前激活项所属的顶层分组。 */
+        syncExpandedKeys() {
+            const currentName = this.$route.name
+            const home = this.$router.options.routes.find((route) => route.path === '/')
+            const groups = (home && Array.isArray(home.children) ? home.children : [])
+                .filter((item) => Array.isArray(item.children) && item.children.length)
+            const owner = groups.find((group) => group.children.some((child) => child.name === currentName))
+            this.expandedKeys = owner ? [owner.name] : []
+        },
         turnToPage(name) {
             if (name !== this.$route.name) {
                 this.$router.push({ name }).catch(() => {})
@@ -76,6 +118,9 @@ export default {
         },
         handleCollapsedChange(value) {
             this.appStore.collapsed = value
+        },
+        handleExpandedChange(keys) {
+            this.expandedKeys = keys
         }
     }
 }

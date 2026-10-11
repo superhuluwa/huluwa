@@ -40,35 +40,47 @@ const routes = [
                 meta: { title: '推送设置', icon: 'fa-solid fa-paper-plane' },
                 component: () => import('@/views/push/index.vue')
             },
+            // Docker 管理：父级分组可折叠，子项对应概览 / 容器 / 镜像 / 网络 / 卷。
+            // 父级本身只作为 n-menu 的子菜单容器，不直接渲染页面，因此指向概览页。
             {
                 path: 'docker',
                 name: 'docker',
-                meta: { title: 'Docker概览', icon: 'fa-brands fa-docker' },
-                component: () => import('@/views/docker/index.vue')
-            },
-            {
-                path: 'docker/containers',
-                name: 'docker-containers',
-                meta: { title: '容器管理', icon: 'fa-solid fa-cube' },
-                component: () => import('@/views/docker/containers.vue')
-            },
-            {
-                path: 'docker/images',
-                name: 'docker-images',
-                meta: { title: '镜像管理', icon: 'fa-regular fa-images' },
-                component: () => import('@/views/docker/images.vue')
-            },
-            {
-                path: 'docker/networks',
-                name: 'docker-networks',
-                meta: { title: '网络管理', icon: 'fa-solid fa-circle-nodes' },
-                component: () => import('@/views/docker/networks.vue')
-            },
-            {
-                path: 'docker/volumes',
-                name: 'docker-volumes',
-                meta: { title: '卷管理', icon: 'fa-solid fa-folder' },
-                component: () => import('@/views/docker/volumes.vue')
+                meta: { title: 'Docker管理', icon: 'fa-brands fa-docker' },
+                redirect: '/docker/index',
+                // 纯分组路由：不挂 component，子页面仍渲染在 Main 的 router-view 中；
+                // 若在此挂 component，子路由将因缺少嵌套 router-view 而无法显示。
+                children: [
+                    {
+                        path: 'index',
+                        name: 'docker-index',
+                        meta: { title: '概览', icon: 'fa-solid fa-gauge-high' },
+                        component: () => import('@/views/docker/index.vue')
+                    },
+                    {
+                        path: 'containers',
+                        name: 'docker-containers',
+                        meta: { title: '容器管理', icon: 'fa-solid fa-cube' },
+                        component: () => import('@/views/docker/containers.vue')
+                    },
+                    {
+                        path: 'images',
+                        name: 'docker-images',
+                        meta: { title: '镜像管理', icon: 'fa-regular fa-images' },
+                        component: () => import('@/views/docker/images.vue')
+                    },
+                    {
+                        path: 'networks',
+                        name: 'docker-networks',
+                        meta: { title: '网络管理', icon: 'fa-solid fa-circle-nodes' },
+                        component: () => import('@/views/docker/networks.vue')
+                    },
+                    {
+                        path: 'volumes',
+                        name: 'docker-volumes',
+                        meta: { title: '卷管理', icon: 'fa-solid fa-folder' },
+                        component: () => import('@/views/docker/volumes.vue')
+                    }
+                ]
             }
         ]
     },
