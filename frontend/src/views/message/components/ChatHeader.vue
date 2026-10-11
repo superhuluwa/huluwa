@@ -104,7 +104,7 @@ export default {
             default: false
         }
     },
-    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu'],
+    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings'],
     data() {
         return {
             searching: false,
@@ -129,6 +129,8 @@ export default {
             if (this.clearable) {
                 options.push({ label: '清空会话消息', key: 'clear', icon: () => h('i', { class: 'fa-solid fa-trash-can' }) })
             }
+            options.push({ type: 'divider', key: 'd0' })
+            options.push({ label: 'qBittorrent 设置', key: 'qb-settings', icon: () => h('i', { class: 'fa-solid fa-magnet' }) })
             if (this.showMenu) {
                 options.push({ type: 'divider', key: 'd1' })
                 options.push({ label: '控制台菜单', key: 'shell', icon: () => h('i', { class: 'fa-solid fa-bars' }) })
@@ -185,6 +187,10 @@ export default {
             }
             if (key === 'mark-all') {
                 this.$emit('mark-all')
+                return
+            }
+            if (key === 'qb-settings') {
+                this.$emit('qb-settings')
             }
         }
     }

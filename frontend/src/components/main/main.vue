@@ -24,6 +24,7 @@
         <div class="main-body">
             <header-bar v-if="!shellHidden" :collapsed="headerCollapsed" :mobile="isMobile"
                 @on-coll-change="handleCollapsedChange">
+                <qb-settings-chip />
                 <user-chip />
             </header-bar>
 
@@ -47,6 +48,7 @@ import { isMobileDevice } from '@/composables/useIsMobile'
 import { onShellDrawerRequest, setFullscreenPage, useFullscreenPage } from '@/composables/useFullscreenPage'
 import HeaderBar from './components/header-bar.vue'
 import UserChip from './components/user-chip.vue'
+import QbSettingsChip from './components/qb-settings-chip.vue'
 
 /** 「消息中心」分组下的会话子项（对齐 quantum 的 chat-index /「会话」） */
 const MESSAGES_INDEX_KEY = 'messages-index'
@@ -59,7 +61,7 @@ const renderIcon = (iconClass) => {
 
 export default {
     name: 'MainLayout',
-    components: { HeaderBar, UserChip },
+    components: { HeaderBar, UserChip, QbSettingsChip },
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()
@@ -268,6 +270,12 @@ export default {
                                 : null
                         ]),
                         icon: renderIcon('fa-solid fa-comments')
+                    },
+                    // 电影港订阅管理：查看片名 / 具体链接 / 每集磁力基线 / 巡检与下载结果
+                    {
+                        key: 'movie-subscriptions',
+                        label: () => h(RouterLink, { to: { name: 'movie-subscriptions' } }, { default: () => '电影港订阅' }),
+                        icon: renderIcon('fa-solid fa-bell')
                     }
                 ]
             }
@@ -278,7 +286,7 @@ export default {
             // 消息中心（会话页）：分组保持展开，便于随时切换会话
             // （用户手动展开其它分组时这里不能把 messages 之外的手动展开态清掉——
             //   accordion 模式下 n-menu 自己只保留一个，这里只需确保当前页所在分组可见）
-            if (currentName === 'messages') {
+            if (currentName === 'messages' || currentName === 'movie-subscriptions') {
                 this.ensureMessagesExpanded()
                 return
             }
@@ -303,7 +311,8 @@ export default {
         handleExpandedChange(keys) {
             // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
             // 会把「消息中心」分组意外收起；会话页要求该分组常开，这里补回。
-            if (this.$route.name === 'messages' && !keys.includes('messages')) {
+            const pinned = this.$route.name === 'messages' || this.$route.name === 'movie-subscriptions'
+            if (pinned && !keys.includes('messages')) {
                 this.expandedKeys = [...keys, 'messages']
                 return
             }

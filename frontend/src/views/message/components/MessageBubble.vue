@@ -28,8 +28,26 @@
                     <img v-else class="cover" :src="message.content" alt="封面" @error="loadError = true"
                         @click="openCover" />
                     <RichText class="cover-caption" :text="message.contentText" :support-fold="false" />
+                    <div v-if="isMovie" class="movie-actions">
+                        <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
+                            :disabled="subscribed || busy" @click="onSubscribe">
+                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
+                        </button>
+                        <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
+                    </div>
                 </template>
-                <RichText v-else :text="message.content" />
+                <template v-else>
+                    <RichText :text="message.content" />
+                    <div v-if="isMovie" class="movie-actions">
+                        <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
+                            :disabled="subscribed || busy" @click="onSubscribe">
+                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
+                        </button>
+                        <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
+                    </div>
+                </template>
             </div>
         </div>
     </div>
@@ -44,6 +62,7 @@
  */
 import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
+import { SubscribeMovie } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
@@ -55,12 +74,15 @@ export default {
             required: true
         }
     },
-    emits: ['open-cover', 'delete'],
+    emits: ['open-cover', 'delete', 'subscribed'],
     data() {
         return {
             loadError: false,
             /** 手机端长按气泡：显示复制工具条（触屏没有 hover，工具条默认隐藏就永远点不到） */
-            holdOpen: false
+            holdOpen: false,
+            /** 本地订阅状态覆盖：服务端载荷里的 subscribed 只在渲染时读取，点按后立即切换 */
+            subscribedLocal: null,
+            busy: false
         }
     },
     computed: {
@@ -90,7 +112,16 @@ export default {
         },
         /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像 */
         isMovie() {
-            return Object.prototype.hasOwnProperty.call(this.payload, 'cover')
+            return Object.prototype.hasOwnProperty.call(this.payload, 'url')
+                && Object.prototype.hasOwnProperty.call(this.payload, 'title')
+                && Object.prototype.hasOwnProperty.call(this.payload, 'cover')
+        },
+        /** 订阅状态：本地操作优先，其次是服务端下发的标记 */
+        subscribed() {
+            if (this.subscribedLocal !== null) {
+                return this.subscribedLocal
+            }
+            return !!this.payload.subscribed
         },
         /** 磁力下载会话的机器人回复显示磁铁头像 */
         isMagnet() {
@@ -108,6 +139,19 @@ export default {
         fullTime() {
             return formatFullTime(this.message.createdAt)
         },
+        /** 订阅请求体：与卡片载荷同形，片名/链接都由服务端再校验 */
+        subscribePayload() {
+            const payload = this.parsedPayload
+            return {
+                id: payload.id || null,
+                title: payload.title || null,
+                year: payload.year || null,
+                origin: payload.origin || null,
+                genre: payload.genre || null,
+                cover: payload.cover || null,
+                url: payload.url
+            }
+        },
         notifyMeta() {
             return {
                 ...this.parsedPayload,
@@ -119,6 +163,11 @@ export default {
     watch: {
         'message.id'() {
             this.loadError = false
+            this.subscribedLocal = null
+            this.busy = false
+        },
+        'message.payload'() {
+            this.subscribedLocal = null
         }
     },
     methods: {
@@ -158,6 +207,29 @@ export default {
         },
         openCover() {
             this.$emit('open-cover', { url: this.message.content, title: this.coverTitle })
+        },
+        /** 订阅该剧：落库片名 + 电影港具体链接，并把详情页每集磁力存为对比基线 */
+        async onSubscribe() {
+            if (this.subscribed || this.busy) {
+                return
+            }
+            const url = this.parsedPayload.url
+            if (!url) {
+                window.$message?.error('这条卡片缺少电影港链接，无法订阅')
+                return
+            }
+            this.busy = true
+            try {
+                const result = await SubscribeMovie(this.subscribePayload)
+                this.subscribedLocal = true
+                const message = result && result.message ? result.message : '订阅成功'
+                window.$message?.success(message)
+                this.$emit('subscribed', { url, subscription: result && result.subscription })
+            } catch (e) {
+                // 失败文案由 axios 拦截器提示
+            } finally {
+                this.busy = false
+            }
         }
     }
 }
@@ -309,6 +381,54 @@ export default {
     font-size: 13px;
 }
 
+/* 影视卡片的订阅操作条：与配文同色系，点按后切换成「已订阅」静止态 */
+.movie-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 4px;
+    flex-wrap: wrap;
+}
+
+.subscribe-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(99, 102, 241, .55);
+    background: rgba(99, 102, 241, .16);
+    color: #C7D2FE;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+}
+
+.subscribe-btn:hover:not(:disabled) {
+    background: rgba(99, 102, 241, .28);
+    border-color: rgba(129, 140, 248, .8);
+    color: #E0E7FF;
+}
+
+.subscribe-btn.subscribed,
+.subscribe-btn:disabled {
+    cursor: default;
+    border-color: rgba(74, 222, 128, .45);
+    background: rgba(34, 197, 94, .14);
+    color: #86EFAC;
+}
+
+.subscribe-btn.busy {
+    opacity: .75;
+}
+
+.subscribe-tip {
+    font-size: 11.5px;
+    color: var(--text-3);
+}
+
 /* ==========================================================================
    手机端：气泡更宽、字号更大，复制工具条由「长按」唤出（触屏无 hover）
    ========================================================================== */
@@ -350,6 +470,11 @@ export default {
     .bubble-tools {
         top: -14px;
         box-shadow: 0 10px 26px rgba(0, 0, 0, .55);
+    }
+
+    .subscribe-btn {
+        padding: 7px 14px;
+        font-size: 13px;
     }
 }
 </style>

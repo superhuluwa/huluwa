@@ -48,8 +48,6 @@ export const useChatStore = defineStore('chat', {
         loadingEarlier: false,
         hasMoreBySession: {},
         sending: false,
-        /** 「磁力下载」会话的 qBittorrent 连接快照（由后端随磁力消息 payload 下发） */
-        magnetSettings: null,
         /** 首屏是否已定位过（会话页进入时瞬时落底，之后新消息才平滑跟随） */
         initialized: false
     }),
@@ -111,7 +109,6 @@ export const useChatStore = defineStore('chat', {
                     [key]: earlier.length ? [...earlier, ...rows] : rows
                 }
                 this.hasMoreBySession = { ...this.hasMoreBySession, [key]: rows.length >= PAGE_SIZE }
-                this.syncMagnetSettings(rows, key)
                 await this.markRead(key)
             } finally {
                 this.loadingMessages = false
@@ -131,7 +128,6 @@ export const useChatStore = defineStore('chat', {
             const rows = Array.isArray(page) ? page : []
             this.messagesBySession = { ...this.messagesBySession, [key]: rows }
             this.hasMoreBySession = { ...this.hasMoreBySession, [key]: rows.length >= PAGE_SIZE }
-            this.syncMagnetSettings(rows, key)
         },
 
         /** 向上翻页：拉 id 小于当前最早一条的更早消息 */
@@ -173,36 +169,9 @@ export const useChatStore = defineStore('chat', {
                     ...this.messagesBySession,
                     [key]: mergeById(this.messagesBySession[key] || [], rows)
                 }
-                // 先刷新会话列表（syncMagnetSettings 需要知道当前会话类型），再同步 qB 快照
                 await Promise.all([this.refreshSessions(), this.markRead(key)])
-                this.syncMagnetSettings(rows, key)
             } finally {
                 this.sending = false
-            }
-        },
-
-        /** 从消息载荷里提取 qB 连接快照（配置引导 / 提交结果 / 状态查询都会带） */
-        syncMagnetSettings(messages, sessionId) {
-            const key = sessionId || this.currentKey
-            const session = this.sessions.find((item) => item.id === key)
-            if (!session || session.kind !== 'magnet') {
-                return
-            }
-            const rows = Array.isArray(messages) ? messages : []
-            for (let i = rows.length - 1; i >= 0; i--) {
-                const payload = rows[i] && rows[i].payload
-                if (!payload) {
-                    continue
-                }
-                try {
-                    const parsed = JSON.parse(payload)
-                    if (parsed && parsed.kind === 'magnet' && parsed.settings) {
-                        this.magnetSettings = parsed.settings
-                        return
-                    }
-                } catch (e) {
-                    // 损坏的载荷忽略
-                }
             }
         },
 
@@ -256,7 +225,6 @@ export const useChatStore = defineStore('chat', {
                         ...this.messagesBySession,
                         [key]: mergeById(rows, incoming)
                     }
-                    this.syncMagnetSettings(incoming, key)
                     await this.markRead(key)
                 }
             } catch (e) {

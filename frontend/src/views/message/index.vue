@@ -13,14 +13,12 @@
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
                 :compact="isMobile" :clearable="canSend" :markable="isSystem" :show-menu="isMobile"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
-                @mark-all="onMarkAll" @menu="openShellDrawer" />
+                @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
                 :empty-tip="emptyTip"
                 @load-earlier="loadEarlier" @open-cover="onOpenCover" @delete="onDeleteNotify" />
-
-            <QbStatusBar v-if="isMagnet" :settings="magnetSettings" @saved="onQbSaved" />
 
             <ChatComposer :disabled="!currentKey" :sending="sending" :kind="currentKind" :hint="composerHint"
                 :mobile="isMobile" @send="onSend" />
@@ -53,7 +51,6 @@
  */
 import { mapActions, mapState } from 'pinia'
 import { useChatStore } from '@/stores/chat'
-import { GetQbSettings } from '@/api/qbittorrent'
 import http from '@/libs/http'
 import { isMobileDevice } from '@/composables/useIsMobile'
 import { requestShellDrawer, useFullscreenPage } from '@/composables/useFullscreenPage'
@@ -62,7 +59,6 @@ import ChatHeader from './components/ChatHeader.vue'
 import MessageList from './components/MessageList.vue'
 import ChatComposer from './components/ChatComposer.vue'
 import CoverViewer from './components/CoverViewer.vue'
-import QbStatusBar from './components/QbStatusBar.vue'
 import QbSettingsDialog from './components/QbSettingsDialog.vue'
 
 /** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
@@ -76,7 +72,6 @@ export default {
         MessageList,
         ChatComposer,
         CoverViewer,
-        QbStatusBar,
         QbSettingsDialog
     },
     setup() {
@@ -100,7 +95,7 @@ export default {
     computed: {
         ...mapState(useChatStore, [
             'sessions', 'currentKey', 'currentMessages', 'currentSession',
-            'loadingMessages', 'loadingEarlier', 'sending', 'magnetSettings'
+            'loadingMessages', 'loadingEarlier', 'sending'
         ]),
         ...mapState(useChatStore, ['hasMore']),
         /** 列表区是否可见：手机端与详情页互斥（两级视图），桌面端常显 */
@@ -218,7 +213,6 @@ export default {
         const exists = store.sessions.some((item) => item.id === requested)
         this.narrowShowRoom = this.isMobile ? !!requested : true
         await store.openSession(exists ? requested : (store.sessions[0]?.id || ''))
-        this.refreshQbSettings()
         // 手机端直接带 session 进来（分享链接 / 刷新聊天页）时把地址栏补全；列表页则保持干净
         if (this.isMobile && requested) {
             this.syncQuery(store.currentKey)
@@ -242,7 +236,6 @@ export default {
         if (!target) {
             this.narrowShowRoom = false
         }
-        this.refreshQbSettings()
         this.syncQuery(store.currentKey)
     },
     deactivated() {
@@ -280,10 +273,6 @@ export default {
                 return
             }
             await this.openSession(sessionId)
-            // 切到「磁力下载」时补一次 qB 状态快照（页脚状态条 / 配置入口依赖它）
-            if (this.isMagnet) {
-                this.refreshQbSettings()
-            }
             // 先切换视图再同步 query：手机端由此把 session 写进地址栏（进入二级页）
             this.narrowShowRoom = true
             this.syncQuery(sessionId)
@@ -331,23 +320,14 @@ export default {
                 return false
             }
         },
-        /** qB 配置状态快照：首屏 / 切换会话时主动拉一次，不必等用户先发言 */
-        async refreshQbSettings() {
-            if (!this.sessions.some((item) => item.kind === 'magnet')) {
-                return
-            }
-            try {
-                useChatStore().magnetSettings = await GetQbSettings()
-            } catch (e) {
-                // 未登录 / 网络异常等由拦截器提示，页脚状态条保持上一次快照
-            }
+        /** 打开 qBittorrent 连接配置表单（顶栏「更多 → qBittorrent 设置」与配置引导共用） */
+        openQbDialog() {
+            this.qbDialog = true
         },
-        /** 配置保存后同步页脚状态条，并清掉「未配置」的提示态 */
-        onQbSaved(settings) {
-            const store = useChatStore()
-            store.magnetSettings = settings || store.magnetSettings
+        /** 配置保存后标记已引导过，避免再次自动弹出配置表单 */
+        onQbSaved() {
             this.qbPrompted = true
-            this.$message.success('qBittorrent 配置已保存，重新发送磁力即可提交')
+            this.qbDialog = false
         },
         /** 系统通知「全部已读」：沿用消息中心既有接口 */
         async onMarkAll() {

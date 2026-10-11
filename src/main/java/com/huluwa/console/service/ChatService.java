@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载）/ 已读 / 清空 / 检索。
@@ -20,6 +21,8 @@ import java.util.Map;
  *  - 「系统通知」虚拟会话：直接读既有 message 表（Frp / Docker / 推送等系统事件），不复制数据。
  * 发送电影港消息即同步触发站点搜索（约 1-2 秒），把结果按参考脚本的形态逐条落成机器人气泡：
  * 摘要一条 + 每条结果一个「封面图 + 配文」气泡（配文含标题/年代/产地/类型与详情页链接）。
+ * 每条结果的结构化载荷里额外带 subscribed 标记与订阅所需字段，前端据此渲染「订阅 / 已订阅」按钮，
+ * 点击后由 /api/chat/subscriptions 落库并把该剧详情页的全部磁力存为对比基线。
  */
 @Service
 public class ChatService {
@@ -45,14 +48,17 @@ public class ChatService {
     private final MovieSearchService movieSearchService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
+    private final MovieSubscriptionService movieSubscriptionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
-                       QBittorrentService qBittorrentService, MessageService messageService) {
+                       QBittorrentService qBittorrentService, MessageService messageService,
+                       MovieSubscriptionService movieSubscriptionService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
+        this.movieSubscriptionService = movieSubscriptionService;
     }
 
     /** 会话消息（前后端统一形状，camelCase 下发） */
@@ -306,11 +312,15 @@ public class ChatService {
 
         int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
         replies.add(append(sessionId, "bot", "text",
-                "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：", null, null));
+                "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
+                        + "点卡片下方「订阅」即可监听该剧更新（默认每小时巡检一次）。", null, null));
+        Set<String> subscribed = movieSubscriptionService.subscribedUrls();
         for (int i = 0; i < shown; i++) {
             MovieSearchService.MovieItem item = found.get(i);
             String caption = caption(item);
-            String payload = toJson(MovieSearchService.toPayload(item));
+            Map<String, Object> payloadMap = MovieSearchService.toPayload(item);
+            payloadMap.put("subscribed", subscribed.contains(item.url()));
+            String payload = toJson(payloadMap);
             if (item.cover() == null || item.cover().isBlank()) {
                 replies.add(append(sessionId, "bot", "text", caption, null, payload));
             } else {

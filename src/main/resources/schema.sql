@@ -111,3 +111,63 @@ VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('n
 -- 内置会话：磁力下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('magnet', '磁力下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));
+
+-- ============================================================
+-- 电影港订阅（对齐 quantum 的 dygangs_search.cs / dygangs.cs）：
+--   movie_subscription        订阅清单：片名 + 电影港具体链接 + 巡检状态（默认每小时一轮）
+--   movie_subscription_magnet 详情页下已采集的磁力（订阅基线 + 后续新增），用于对比更新
+--   movie_download_task       订阅触发的磁力下载任务：qB 任务哈希 / 状态 / 两类通知标记
+-- ============================================================
+CREATE TABLE IF NOT EXISTS movie_subscription (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    res_id        TEXT,                          -- 电影港资源ID（详情页文件名，如 48089）
+    title         TEXT NOT NULL,                 -- 片名（剧名，下载子目录与文件名补全都用它）
+    year          TEXT,
+    origin        TEXT,
+    genre         TEXT,
+    cover         TEXT,
+    detail_url    TEXT NOT NULL,                 -- 电影港具体链接（剧集详情页）
+    enabled       INTEGER NOT NULL DEFAULT 1,    -- 0 取消订阅（数据保留，可重新订阅）
+    baseline_at   TEXT,                          -- 订阅基线采集完成时间
+    last_check_at TEXT,                          -- 最近一次巡检时间
+    next_check_at TEXT,                          -- 下次巡检时间（默认 +1 小时）
+    last_error    TEXT,                          -- 最近一次巡检失败原因（成功后清空）
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_subscription_url ON movie_subscription (detail_url);
+
+CREATE TABLE IF NOT EXISTS movie_subscription_magnet (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER NOT NULL,
+    title           TEXT,                        -- 详情页里的剧集标题（如「xxx 第5季212.2160p」）
+    magnet          TEXT NOT NULL,               -- 磁力链接原文（已还原 &amp; 实体）
+    magnet_key      TEXT NOT NULL,               -- 去重键：info hash，无 hash 时用磁力原文
+    quality         TEXT,                        -- 清晰度：2160P / 1080P / 720P / 480P / OTHER
+    episode         TEXT,                        -- 剧集键（集号，如 212 / 208-209）
+    baseline        INTEGER NOT NULL DEFAULT 0,  -- 1 订阅基线（不触发下载）
+    first_seen_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_magnet_key ON movie_subscription_magnet (subscription_id, magnet_key);
+CREATE INDEX IF NOT EXISTS idx_movie_magnet_sub ON movie_subscription_magnet (subscription_id, id);
+
+CREATE TABLE IF NOT EXISTS movie_download_task (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER,
+    series_title    TEXT NOT NULL,               -- 剧名（qB 保存子目录名）
+    episode         TEXT,                        -- 剧集键
+    quality         TEXT,
+    magnet          TEXT NOT NULL,
+    torrent_hash    TEXT,                        -- info hash，用于跟踪 qB 任务
+    save_path       TEXT,                        -- 提交给 qB 的保存目录
+    status          TEXT NOT NULL DEFAULT 'pending', -- pending|added|downloading|completed|failed|removed
+    message         TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    completed_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_task_magnet ON movie_download_task (magnet);
+CREATE INDEX IF NOT EXISTS idx_movie_task_status ON movie_download_task (status, id);
+
+INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
+VALUES (2, datetime('now', 'localtime'));

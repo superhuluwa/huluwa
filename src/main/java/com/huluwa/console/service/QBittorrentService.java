@@ -119,8 +119,13 @@ public class QBittorrentService {
     public record AddResult(boolean ok, boolean duplicate, String message) {
     }
 
-    /** 下载任务概览（给「状态」指令使用） */
-    public record Torrent(String name, double progress, String state, long size, long downloadSpeed, long eta) {
+    /** 下载任务概览（给「状态」指令与订阅下载跟踪使用） */
+    public record Torrent(String hash, String name, double progress, String state, long size,
+                          long downloadSpeed, long eta) {
+    }
+
+    /** 任务里的单个文件（订阅下载完成后按剧名补齐文件名用） */
+    public record TorrentFile(String name, long size, double progress, int priority) {
     }
 
     // ------------------------------------------------------------------ 配置读写
@@ -339,18 +344,147 @@ public class QBittorrentService {
                 if (list.size() >= Math.max(1, limit)) {
                     break;
                 }
+                String hash = node.path("hash").asText("").toLowerCase(java.util.Locale.ROOT);
                 String name = node.path("name").asText("");
                 double progress = node.path("progress").asDouble(0);
                 String state = node.path("state").asText("");
                 long size = node.path("size").asLong(node.path("total_size").asLong(0));
                 long speed = node.path("dlspeed").asLong(0);
                 long eta = node.path("eta").asLong(0);
-                list.add(new Torrent(name.isBlank() ? "（未命名任务）" : name, progress, state, size, speed, eta));
+                list.add(new Torrent(hash, name.isBlank() ? "（未命名任务）" : name, progress, state, size, speed, eta));
             }
         } catch (Exception e) {
             throw new BusinessException(400, "解析 qBittorrent 任务列表失败：" + safeMessage(e));
         }
         return list;
+    }
+
+    /**
+     * 按 info hash 查单个任务（订阅下载跟踪用）。
+     *
+     * @return 找到返回任务，未找到返回 null
+     */
+    public Torrent torrent(String hash) {
+        String target = hash == null ? "" : hash.trim().toLowerCase(java.util.Locale.ROOT);
+        if (target.isEmpty()) {
+            return null;
+        }
+        for (Torrent torrent : torrents(500)) {
+            if (target.equals(torrent.hash())) {
+                return torrent;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 读取某个任务的文件列表（GET /api/v2/torrents/files）。
+     * 用于下载完成后检查种子里的文件名是否带上了剧名。
+     */
+    public List<TorrentFile> files(String hash) {
+        Settings settings = settings();
+        if (!settings.configured()) {
+            throw new BusinessException(400, "尚未配置 qBittorrent 服务地址");
+        }
+        String target = hash == null ? "" : hash.trim();
+        if (target.isEmpty()) {
+            return List.of();
+        }
+        String cookie;
+        try {
+            cookie = currentCookie(settings);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(400, "连接 qBittorrent 失败：" + safeMessage(e));
+        }
+
+        HttpResponse<String> response;
+        try {
+            response = get(settings.url() + "/api/v2/torrents/files?hash=" + urlEncode(target), cookie, QUERY_TIMEOUT);
+        } catch (Exception e) {
+            throw new BusinessException(400, "读取 qBittorrent 文件列表失败：" + safeMessage(e));
+        }
+        if (response.statusCode() == 403) {
+            clearSession();
+            throw new BusinessException(400, "qBittorrent 拒绝访问（403）：请检查账号密码或 IP 白名单设置");
+        }
+        if (response.statusCode() / 100 != 2) {
+            throw new BusinessException(400, "qBittorrent 返回 HTTP " + response.statusCode());
+        }
+
+        List<TorrentFile> files = new ArrayList<>();
+        try {
+            JsonNode root = objectMapper.readTree(response.body());
+            if (!root.isArray()) {
+                return files;
+            }
+            for (JsonNode node : root) {
+                files.add(new TorrentFile(
+                        node.path("name").asText(""),
+                        node.path("size").asLong(0),
+                        node.path("progress").asDouble(0),
+                        node.path("priority").asInt(0)));
+            }
+        } catch (Exception e) {
+            throw new BusinessException(400, "解析 qBittorrent 文件列表失败：" + safeMessage(e));
+        }
+        return files;
+    }
+
+    /**
+     * 重命名任务内的文件（POST /api/v2/torrents/renameFile）。
+     * 订阅下载在完成后用它把「没有剧名」的文件名补上剧名（含子目录内的相对路径）。
+     *
+     * @param oldPath 任务内的原始相对路径（qB 文件列表里的 name）
+     * @param newPath 目标相对路径（与 oldPath 同层级，仅文件名变化）
+     * @return 成功返回 null，失败返回可展示的中文原因
+     */
+    public String renameFile(String hash, String oldPath, String newPath) {
+        Settings settings = settings();
+        if (!settings.configured()) {
+            return "尚未配置 qBittorrent 服务地址";
+        }
+        String cookie;
+        try {
+            cookie = currentCookie(settings);
+        } catch (BusinessException e) {
+            return e.getMessage();
+        } catch (Exception e) {
+            return "连接 qBittorrent 失败：" + safeMessage(e);
+        }
+
+        List<Map.Entry<String, String>> fields = List.of(
+                field("hash", hash == null ? "" : hash),
+                field("oldPath", oldPath == null ? "" : oldPath),
+                field("newPath", newPath == null ? "" : newPath));
+        HttpResponse<String> response;
+        try {
+            response = post(settings.url() + "/api/v2/torrents/renameFile", cookie, fields, ADD_TIMEOUT);
+        } catch (Exception e) {
+            return "调用 qBittorrent 重命名失败：" + safeMessage(e);
+        }
+        String body = response.body() == null ? "" : response.body().trim();
+        if (response.statusCode() == 403) {
+            clearSession();
+            return "qBittorrent 拒绝访问（403）";
+        }
+        if (response.statusCode() == 409) {
+            return "目标文件名已存在：" + newPath;
+        }
+        if (response.statusCode() / 100 != 2) {
+            return "qBittorrent 返回 HTTP " + response.statusCode() + (body.isEmpty() ? "" : "：" + body);
+        }
+        return null;
+    }
+
+    /** 单点 URL 编码（路径参数 / 查询参数用） */
+    private static String urlEncode(String value) {
+        try {
+            return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return value;
+        }
     }
 
     // ------------------------------------------------------------------ 登录 / 会话缓存

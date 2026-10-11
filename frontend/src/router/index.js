@@ -34,6 +34,14 @@ const routes = [
             // 消息中心：父级分组可折叠（与 quantum 的「消息中心 → 会话」结构一致），
             // 分组下的「会话」子项由 components/main/main.vue 渲染，未读角标取自 chat store；
             // 具体会话用 ?session= 区分（会话列表在页面内呈现），故此处只登记一个路由、不声明 children。
+            // 消息中心：父级分组可折叠（与 quantum 的「消息中心 → 会话」结构一致），
+            // 分组下另有「电影港订阅」管理页（查看磁力基线与订阅触发的下载任务）。
+            {
+                path: 'subscriptions',
+                name: 'movie-subscriptions',
+                meta: { title: '电影港订阅', icon: 'fa-solid fa-bell', hideInMenu: true },
+                component: () => import('@/views/movie/subscriptions.vue')
+            },
             {
                 path: 'frp',
                 name: 'frp',
