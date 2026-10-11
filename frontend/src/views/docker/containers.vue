@@ -172,10 +172,15 @@ import {
 export default {
     name: 'DockerContainers',
     components: { ResourceCharts },
+    setup() {
+        // 窄屏判定：弹窗宽度与默认视图据此切换（桌面端行为不变）
+        return { isMobile: useIsMobile() }
+    },
     data() {
         return {
             tab: 'running',
-            viewMode: 'table',
+            // 移动端默认卡片（网格）视图：窄屏表格列多，卡片更易读；桌面端保持表格
+            viewMode: window.matchMedia?.('(max-width: 900px)').matches ? 'grid' : 'table',
             searchText: '',
             loading: false,
             containers: [],
@@ -835,5 +840,72 @@ export default {
     padding: 40px;
     color: var(--text-3);
     font-size: 13px;
+}
+/* 移动端：容器内边距收紧，头部操作区换行铺满，表格横向滚动查看（列结构不变） */
+@media (max-width: 900px) {
+    .docker-containers {
+        padding: 0;
+    }
+
+    .main-card {
+        padding: 14px 12px;
+        border-radius: 10px;
+    }
+
+    .header {
+        margin-bottom: 12px;
+    }
+
+    .header h2 {
+        font-size: 15px;
+    }
+
+    .actions {
+        width: 100%;
+        gap: 6px;
+    }
+
+    .actions :deep(.n-input) {
+        width: 100% !important;
+    }
+
+    .card-footer {
+        gap: 6px;
+    }
+
+    .container-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    /* 详情/日志弹窗内部：单列排布，高度收敛到视口内 */
+    .stat-grid-inner {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
+    }
+
+    .stat-item {
+        gap: 8px;
+    }
+
+    .stat-item .label {
+        min-width: 72px;
+    }
+
+    .logs-container {
+        height: min(62vh, 460px);
+    }
+
+    .logs-actions {
+        justify-content: flex-start;
+    }
+
+    .logs-actions :deep(.n-input) {
+        width: 110px !important;
+    }
+
+    .exec-output {
+        max-height: 200px;
+    }
 }
 </style>

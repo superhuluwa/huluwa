@@ -1,0 +1,1 @@
+import{C as r,D as u,E as c}from"./index-QlMFvW5i.js";const i=900;function m(o=i){const n=c(!1),s=`(max-width: ${o}px)`;let e=null;const t=a=>{n.value=a.matches};return r(()=>{e=window.matchMedia(s),n.value=e.matches,e.addEventListener("change",t)}),u(()=>{e?.removeEventListener("change",t),e=null}),n}export{m as u};

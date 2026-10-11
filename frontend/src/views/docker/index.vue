@@ -89,7 +89,7 @@
                 </n-button>
             </div>
 
-            <n-descriptions :column="3" size="small" bordered label-placement="left">
+            <n-descriptions :column="isMobile ? 1 : 3" size="small" bordered label-placement="left">
                 <n-descriptions-item label="客户端版本">{{ environment.clientVersion || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="服务端版本">{{ environment.serverVersion || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="API 版本">{{ environment.apiVersion || '-' }}</n-descriptions-item>
@@ -129,9 +129,14 @@
 <script>
 import { h } from 'vue'
 import { getEnvironment, getSummary, listHosts, createHost, deleteHost } from '@/api/docker'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 export default {
     name: 'DockerManagement',
+    setup() {
+        // 窄屏下详情/主机描述表收成单列，桌面端仍为三列
+        return { isMobile: useIsMobile() }
+    },
     data() {
         return {
             loading: false,
@@ -399,5 +404,51 @@ export default {
 .op-icon:hover {
     opacity: 1;
     transform: scale(1.15);
+}
+/* 移动端：卡片留白收紧，快捷操作与统计卡片保持双列铺满 */
+@media (max-width: 900px) {
+    .docker-management {
+        padding: 0;
+    }
+
+    .main-card {
+        padding: 14px 12px;
+        border-radius: 10px;
+    }
+
+    .header {
+        margin-bottom: 14px;
+    }
+
+    .header h2 {
+        font-size: 16px;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .stat {
+        padding: 12px;
+    }
+
+    .stat-v {
+        font-size: 22px;
+    }
+
+    .actions-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .action-item {
+        padding: 14px 10px;
+    }
+
+    .section-title {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
 }
 </style>

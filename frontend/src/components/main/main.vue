@@ -1,24 +1,27 @@
 <template>
-    <div class="main-console">
-        <aside class="sider" :class="{ collapsed }">
+    <div class="main-console" :class="{ 'is-mobile': isMobile, 'drawer-open': isMobile && mobileDrawerOpen }">
+        <aside class="sider" :class="{ collapsed: siderCollapsed }">
             <div class="logo">
                 <img class="logo-mark" src="/huluwa-logo.svg" alt="葫芦娃 Logo" width="36" height="36" />
-                <div v-show="!collapsed" class="logo-text">
+                <div v-show="!siderCollapsed" class="logo-text">
                     <div class="logo-name">葫芦娃助手</div>
                     <div class="logo-sub">OPS CONSOLE</div>
                 </div>
             </div>
-            <n-menu :value="activeMenu" :options="menuOptions" :collapsed="collapsed" :collapsed-width="64"
+            <n-menu :value="activeMenu" :options="menuOptions" :collapsed="siderCollapsed" :collapsed-width="64"
                 :collapsed-icon-size="17" :indent="18" :expanded-keys="expandedKeys" accordion
                 @update:value="turnToPage" @update:expanded-keys="handleExpandedChange" />
-            <div class="sider-foot" v-show="!collapsed">
+            <div class="sider-foot" v-show="!siderCollapsed">
                 <span>版本</span>
                 <span class="mono">v1.0.0</span>
             </div>
         </aside>
 
+        <!-- 移动端抽屉遮罩：点击关闭侧栏（桌面端不渲染） -->
+        <div v-if="isMobile && mobileDrawerOpen" class="sider-mask" @click="closeDrawer"></div>
+
         <div class="main-body">
-            <header-bar :collapsed="collapsed" @on-coll-change="handleCollapsedChange">
+            <header-bar :collapsed="headerCollapsed" :mobile="isMobile" @on-coll-change="handleCollapsedChange">
                 <user-chip />
             </header-bar>
 
@@ -62,11 +65,23 @@ export default {
         return {
             // 展开的子菜单 key；accordion 模式下只保留一个，默认跟随当前页所在分组
             expandedKeys: [],
+            // 移动端（窄屏，<= 900px）：侧栏改为覆盖式抽屉，默认关闭
+            isMobile: false,
+            mobileDrawerOpen: false
         }
     },
     computed: {
+        /** 桌面端：沿用 store 的持久化折叠态（行为不变） */
         collapsed() {
             return this.appStore.collapsed
+        },
+        /** 侧栏实际是否收起：移动端抽屉默认收起，不受桌面折叠偏好影响 */
+        siderCollapsed() {
+            return this.isMobile ? !this.mobileDrawerOpen : this.collapsed
+        },
+        /** 顶栏按钮展示状态：移动端仅在抽屉打开时高亮为「收起」 */
+        headerCollapsed() {
+            return this.isMobile ? !this.mobileDrawerOpen : this.collapsed
         },
         activeMenu() {
             // 会话页高亮「消息中心 → 会话」子项，其余页面高亮路由名
@@ -99,6 +114,8 @@ export default {
         }
     },
     async mounted() {
+        this.handleResize()
+        window.addEventListener('resize', this.handleResize)
         this.syncExpandedKeys()
         // 菜单里的会话子项/未读角标以 chat store 为准：
         // 主框架常驻轮询会话快照（每 15s），离开会话页也能更新侧栏角标；
@@ -111,9 +128,32 @@ export default {
         this.startMenuPolling()
     },
     beforeUnmount() {
+        window.removeEventListener('resize', this.handleResize)
         this.stopMenuPolling()
     },
     methods: {
+        /** 窄屏判定：<= 900px 走移动端布局（抽屉侧栏 + 单列内容），桌面端分支完全不变 */
+        handleResize() {
+            const mobile = window.innerWidth <= 900
+            if (mobile !== this.isMobile) {
+                this.isMobile = mobile
+                // 从桌面缩到移动端时收起抽屉，避免窄屏下侧栏占满整屏
+                if (mobile) {
+                    this.mobileDrawerOpen = false
+                }
+            }
+        },
+        /** 顶栏按钮：桌面端折叠侧栏（写 store），移动端开合抽屉 */
+        handleCollapsedChange(value) {
+            if (this.isMobile) {
+                this.mobileDrawerOpen = !this.mobileDrawerOpen
+                return
+            }
+            this.appStore.setCollapsed(value)
+        },
+        closeDrawer() {
+            this.mobileDrawerOpen = false
+        },
         /** 会话子项的数据保障：列表为空时补拉一次（避免菜单分组渲染成空分组） */
         ensureSessionsLoaded() {
             const sessions = this.chatStore.sessions || []
@@ -210,6 +250,8 @@ export default {
             this.expandedKeys = owner ? [owner.name] : []
         },
         turnToPage(name) {
+            // 移动端点完菜单后立即收起抽屉，露出目标页面
+            this.closeDrawer()
             // 「消息中心 → 会话」子项：进入会话页（保留当前会话，默认电影港）
             if (name === MESSAGES_INDEX_KEY) {
                 this.$router.push({ name: 'messages' }).catch(() => {})
@@ -218,10 +260,6 @@ export default {
             if (name !== this.$route.name) {
                 this.$router.push({ name }).catch(() => {})
             }
-        },
-        /** 左侧菜单折叠：走 store action，顺带写入 localStorage（刷新后保持） */
-        handleCollapsedChange(value) {
-            this.appStore.setCollapsed(value)
         },
         handleExpandedChange(keys) {
             // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
@@ -356,5 +394,42 @@ export default {
     padding: 18px;
     overflow: auto;
     position: relative;
+}
+/* ==========================================================================
+   移动端适配（<= 900px）：仅覆盖窄屏，桌面端样式保持原样
+   侧栏改为覆盖式抽屉（默认收起），内容区独占整屏宽度。
+   ========================================================================== */
+@media (max-width: 900px) {
+    .sider {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 130;
+        width: 236px;
+        transform: translateX(-100%);
+        transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+        box-shadow: 0 0 40px rgba(0, 0, 0, .55);
+    }
+
+    .main-console.drawer-open .sider {
+        transform: translateX(0);
+    }
+
+    .sider.collapsed {
+        width: 236px;
+    }
+
+    .sider-mask {
+        position: fixed;
+        inset: 0;
+        z-index: 120;
+        background: rgba(0, 0, 0, .5);
+        backdrop-filter: blur(2px);
+    }
+
+    .content-wrapper {
+        padding: 12px;
+    }
 }
 </style>

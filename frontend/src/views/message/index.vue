@@ -255,4 +255,20 @@ export default {
 .message-page.narrow:not(.show-room) .chat-room {
     display: none;
 }
+/* 移动端（<= 900px）：会话列表独占整屏，避免残留右栏空隙 */
+@media (max-width: 900px) {
+    .message-page {
+        border-radius: 10px;
+    }
+
+    .message-page :deep(.conversation-list) {
+        width: 100%;
+        border-right: 0;
+    }
+
+    .chat-room :deep(.chat-header) {
+        padding: 0 10px;
+        gap: 8px;
+    }
+}
 </style>

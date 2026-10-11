@@ -212,4 +212,18 @@ h2 {
     padding-top: 14px;
     border-top: 1px solid var(--line);
 }
+/* 移动端：登录卡片占满可用宽度，避免 380px 定宽在窄屏溢出或贴边 */
+@media (max-width: 900px) {
+    .login {
+        align-items: flex-start;
+        padding: 24px 0 32px;
+    }
+
+    .login-card {
+        width: auto;
+        max-width: none;
+        margin: 0 16px;
+        padding: 26px 20px 20px;
+    }
+}
 </style>

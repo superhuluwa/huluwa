@@ -208,4 +208,36 @@ export default {
     justify-content: flex-end;
     gap: 10px;
 }
+/* 移动端：容器内边距收紧，头部操作区换行铺满，表格横向滚动查看（列结构不变） */
+@media (max-width: 900px) {
+    .docker-volumes {
+        padding: 0;
+    }
+
+    .main-card {
+        padding: 14px 12px;
+        border-radius: 10px;
+    }
+
+    .header {
+        margin-bottom: 12px;
+    }
+
+    .header h2 {
+        font-size: 15px;
+    }
+
+    .actions {
+        width: 100%;
+        gap: 6px;
+    }
+
+    .actions :deep(.n-input) {
+        width: 100% !important;
+    }
+
+    .card-footer {
+        gap: 6px;
+    }
+}
 </style>

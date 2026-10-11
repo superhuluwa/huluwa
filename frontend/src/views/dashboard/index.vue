@@ -57,7 +57,7 @@
                     刷新
                 </n-button>
             </div>
-            <n-descriptions :column="2" label-placement="left" size="small" bordered>
+            <n-descriptions :column="isMobile ? 1 : 2" label-placement="left" size="small" bordered>
                 <n-descriptions-item label="应用名称">{{ overview.application || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="服务器时间">{{ overview.serverTime || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="系统状态">
@@ -75,9 +75,14 @@
 
 <script>
 import http from '@/libs/http'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 export default {
     name: 'DashboardPage',
+    setup() {
+        // 窄屏下描述列表收成单列，避免标签被压成竖排（桌面端仍为两列）
+        return { isMobile: useIsMobile() }
+    },
     data() {
         return {
             loading: false,

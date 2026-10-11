@@ -262,4 +262,40 @@ export default {
     opacity: 1;
     transform: scale(1.15);
 }
+/* 移动端：工具栏换行、统计卡片收窄留白；表格保持横向滚动，表单弹窗占满宽度 */
+@media (max-width: 900px) {
+    .stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .stat-card {
+        padding: 14px;
+    }
+
+    .stat-card .stat-value {
+        font-size: 22px;
+    }
+
+    .table-wrap {
+        padding: 12px;
+        border-radius: 10px;
+    }
+
+    .toolbar {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .toolbar-actions {
+        margin-left: auto;
+    }
+
+    .page-title {
+        font-size: 16px;
+        flex-wrap: wrap;
+        row-gap: 4px;
+        margin-bottom: 12px;
+    }
+}
 </style>

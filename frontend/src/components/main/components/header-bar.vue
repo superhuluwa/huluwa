@@ -1,8 +1,8 @@
 <template>
     <div class="header-bar">
         <button class="icon-btn" type="button" @click="$emit('on-coll-change', !collapsed)"
-            :title="collapsed ? '展开侧栏' : '收起侧栏'">
-            <i :class="collapsed ? 'fa-solid fa-indent' : 'fa-solid fa-outdent'"></i>
+            :title="mobile ? '打开菜单' : (collapsed ? '展开侧栏' : '收起侧栏')">
+            <i :class="mobile ? 'fa-solid fa-bars' : (collapsed ? 'fa-solid fa-indent' : 'fa-solid fa-outdent')"></i>
         </button>
 
         <n-breadcrumb class="crumb">
@@ -22,7 +22,9 @@
 export default {
     name: 'HeaderBar',
     props: {
-        collapsed: Boolean
+        collapsed: Boolean,
+        /** 移动端：顶栏按钮改为抽屉开关（汉堡图标），与桌面端的侧栏折叠按钮区分 */
+        mobile: Boolean
     },
     emits: ['on-coll-change'],
     computed: {
@@ -75,5 +77,21 @@ export default {
     display: flex;
     align-items: center;
     gap: 16px;
+}
+/* 移动端：顶栏宽度紧张，压缩间距并允许标题省略 */
+@media (max-width: 900px) {
+    .header-bar {
+        gap: 8px;
+        padding: 0 12px;
+    }
+
+    .crumb {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .custom-content-con {
+        gap: 10px;
+    }
 }
 </style>

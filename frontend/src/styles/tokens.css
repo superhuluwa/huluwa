@@ -144,3 +144,53 @@ html, body {
     font-size: 12px;
     color: var(--text-3);
 }
+
+/* ==========================================================================
+   移动端通用适配（<= 900px）
+   仅作用于窄屏：桌面端样式与布局完全不变。
+   ========================================================================== */
+
+/* 弹窗（n-modal preset="card"）在窄屏占满可用宽度，内部留白同步收紧 */
+@media (max-width: 900px) {
+    .n-modal {
+        width: auto !important;
+        max-width: calc(100vw - 24px) !important;
+        margin: 12px auto !important;
+    }
+
+    .n-modal .n-card-header {
+        padding: 16px 16px 14px !important;
+        font-size: 16px !important;
+    }
+
+    .n-modal .n-card-content {
+        padding: 4px 16px 0 !important;
+    }
+
+    .n-modal .n-card__footer {
+        padding: 12px 16px 16px !important;
+    }
+}
+
+/* 表单在窄屏改为标签置顶：桌面端的左右布局在手机上会把输入框挤到极窄 */
+@media (max-width: 900px) {
+    .n-form-item.n-form-item--left-labelled {
+        grid-template-areas:
+            "label"
+            "blank"
+            "feedback";
+        grid-template-columns: minmax(0, 100%);
+        grid-template-rows: minmax(var(--n-label-height), auto) 1fr;
+    }
+
+    .n-form-item.n-form-item--left-labelled .n-form-item-label {
+        width: auto !important;
+        height: auto;
+        min-height: 0;
+        padding: 0 0 4px;
+        text-align: left;
+        justify-content: flex-start;
+        display: flex;
+        grid-template-columns: none;
+    }
+}
