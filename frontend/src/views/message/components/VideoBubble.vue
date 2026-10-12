@@ -171,12 +171,16 @@ export default {
 
 <style scoped>
 .video-bubble {
-    min-width: 180px;
+    /* 桌面端保留 180px 的观感基准；窄屏（<300px 可用宽）时跟随容器收缩，
+       老内核不认识 min() 会退回上面的 0，同样不会顶破气泡。 */
+    min-width: 0;
+    min-width: min(180px, 100%);
 }
 
 /* 封面卡：固定宽高比让不同来源的封面视觉一致 */
 .video-cover {
     position: relative;
+    box-sizing: border-box;
     width: 320px;
     max-width: 100%;
     height: 180px;
@@ -238,7 +242,9 @@ export default {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-width: 220px;
+    /* 桌面端保留 220px 的观感基准；窄屏时跟随容器收缩，不会横向溢出 */
+    min-width: 0;
+    min-width: min(220px, 100%);
     cursor: pointer;
 }
 
@@ -267,6 +273,7 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 260px;
+    max-width: min(260px, 100%);
 }
 
 .compact-hint {
@@ -278,6 +285,7 @@ export default {
 /* 内联播放器：与封面同宽，竖屏视频限高避免撑爆消息流 */
 .inline-video {
     position: relative;
+    box-sizing: border-box;
     width: 320px;
     max-width: 100%;
 }
@@ -312,6 +320,7 @@ export default {
 }
 
 .video-fallback {
+    box-sizing: border-box;
     width: 100%;
     min-height: 150px;
     display: flex;

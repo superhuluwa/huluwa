@@ -312,6 +312,9 @@ export default {
     /* 极窄屏（如 320px）下长内容也不能把行撑出聊天区 */
     max-width: 100%;
     box-sizing: border-box;
+    /* 左右头像列总占宽 = 2 × 头像(38px) + 2 × 间距(10px)；
+       气泡可用宽度 = 100% − 这个值，保证长消息不会伸进对侧头像列。 */
+    --chat-rail-both: 96px;
 }
 
 .message-row.mine {
@@ -383,7 +386,14 @@ export default {
 
 .bubble {
     position: relative;
-    max-width: min(68%, 720px);
+    /* 项目没有全局 border-box：少了它 max-width 只算内容宽，
+       左右内边距会额外多占 20~26px，长消息气泡就会越进对侧头像列。 */
+    box-sizing: border-box;
+    /* 兜底：老 WebView 不认 min()（表现为整条 max-width 失效、气泡按内容撑开）。
+       calc + var 在该内核可用，扣除左右头像列后气泡在任何屏宽都不会越界。 */
+    max-width: calc(100% - var(--chat-rail-both, 96px));
+    /* 现代内核：再取「68% / 720px」的更严上限 */
+    max-width: min(68%, calc(100% - var(--chat-rail-both, 96px)), 720px);
     padding: 9px 12px;
     border-radius: 16px;
     border-bottom-left-radius: 4px;
@@ -394,22 +404,18 @@ export default {
     min-width: 0;
 }
 
-/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡。
-   与视频气泡同理显式声明 border-box：项目没有全局 border-box，
-   否则 max-width 只算内容宽，6px × 2 内边距会额外占位（同类对齐风险）。 */
+/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡（border-box 见 .bubble） */
 .bubble.is-cover {
-    box-sizing: border-box;
     padding: 6px;
-    max-width: min(46%, 320px);
+    max-width: calc(100% - var(--chat-rail-both, 96px));
+    max-width: min(46%, calc(100% - var(--chat-rail-both, 96px)), 320px);
 }
 
-/* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄。
-   box-sizing 必须显式声明：项目没有全局 border-box，缺了它 max-width 只算内容宽，
-   12px 内边距会额外占位，卡片右边缘就会越过聊天区右留白、与输入框对不齐。 */
+/* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄（border-box 见 .bubble） */
 .bubble.is-video {
-    box-sizing: border-box;
     padding: 6px;
-    max-width: min(62%, 360px);
+    max-width: calc(100% - var(--chat-rail-both, 96px));
+    max-width: min(62%, calc(100% - var(--chat-rail-both, 96px)), 360px);
 }
 
 .message-row.mine .bubble {
@@ -586,20 +592,29 @@ export default {
         height: 36px;
     }
 
+    .message-row {
+        /* 手机端头像 36px + 间距 10px，左右两列合计 92px */
+        --chat-rail-both: 92px;
+    }
+
     .bubble {
-        max-width: min(76%, 720px);
+        /* 兜底：老 WebView 不认 min() 时用 calc 扣除左右头像列，任何屏宽都不越界 */
+        max-width: calc(100% - var(--chat-rail-both, 92px));
+        /* 现代内核：取「74% / 扣除头像列 / 720px」的最严值 */
+        max-width: min(74%, calc(100% - var(--chat-rail-both, 92px)), 720px);
         padding: 10px 13px;
         border-radius: 17px;
     }
 
     .bubble.is-cover {
-        max-width: min(62%, 300px);
+        max-width: calc(100% - var(--chat-rail-both, 92px));
+        max-width: min(62%, calc(100% - var(--chat-rail-both, 92px)), 300px);
     }
 
-    /* 视频气泡：手机端宽度上限要扣除头像与间距，保证「头像 + 间距 + 卡片」正好占满一行，
-       卡片右边缘与输入框右边缘落在同一条垂直线上（配合 border-box 把内边距算进上限）。 */
+    /* 视频气泡：与普通气泡同一套上限，卡片不能一路顶到对侧头像列 */
     .bubble.is-video {
-        max-width: min(calc(100% - 36px - var(--chat-avatar-gap, 10px)), 360px);
+        max-width: calc(100% - var(--chat-rail-both, 92px));
+        max-width: min(74%, calc(100% - var(--chat-rail-both, 92px)), 360px);
     }
 
     .bubble-content {

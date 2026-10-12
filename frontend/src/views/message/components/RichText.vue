@@ -97,9 +97,10 @@ export default {
        否则无空格长串（磁力 / 长 URL / 连续英文）会把气泡撑出容器、压到对侧头像列。 */
     min-width: 0;
     max-width: 100%;
-    /* break-word 对无空格长串不生效，用 anywhere/overflow-wrap 双保险；
-       中文等正常文本仍按原语义在必要时断行。 */
+    /* 无空格长串（磁力 / 长 URL / 连续英文）必须能在任意位置断行：
+       break-word 是兼容老 WebView 的写法，anywhere 是新内核下更彻底的兜底。 */
     word-break: break-word;
+    overflow-wrap: break-word;
     overflow-wrap: anywhere;
 }
 

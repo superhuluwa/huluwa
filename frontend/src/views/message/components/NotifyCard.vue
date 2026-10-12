@@ -74,6 +74,9 @@ export default {
 <style scoped>
 .notify-card {
     position: relative;
+    /* 与消息气泡同理：没有 border-box 时 max-width 只算内容宽，正文长了会越进右侧头像列 */
+    box-sizing: border-box;
+    max-width: 86%;
     max-width: min(86%, 720px);
     border-radius: 16px;
     background: var(--bubble-bot, #1E293B);
