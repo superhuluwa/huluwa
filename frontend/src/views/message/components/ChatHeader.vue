@@ -33,6 +33,10 @@
             </n-popover>
             <!-- 桌面端：操作按钮常显 -->
             <template v-if="!compact">
+                <button v-if="magnet" class="icon-btn" type="button" title="qBittorrent 设置（仅磁力下载会话）"
+                    @click="$emit('qb-settings')">
+                    <i class="fa-solid fa-magnet"></i>
+                </button>
                 <button v-if="markable" class="icon-btn" type="button" title="全部标记已读" @click="$emit('mark-all')">
                     <i class="fa-solid fa-check-double"></i>
                 </button>
@@ -102,6 +106,11 @@ export default {
         showMenu: {
             type: Boolean,
             default: false
+        },
+        /** 当前是否为「磁力下载」会话：仅该会话提供 qBittorrent 设置入口 */
+        magnet: {
+            type: Boolean,
+            default: false
         }
     },
     emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings'],
@@ -129,8 +138,11 @@ export default {
             if (this.clearable) {
                 options.push({ label: '清空会话消息', key: 'clear', icon: () => h('i', { class: 'fa-solid fa-trash-can' }) })
             }
-            options.push({ type: 'divider', key: 'd0' })
-            options.push({ label: 'qBittorrent 设置', key: 'qb-settings', icon: () => h('i', { class: 'fa-solid fa-magnet' }) })
+            // qBittorrent 设置只属于「磁力下载」会话，不放进其它会话的更多菜单
+            if (this.magnet) {
+                options.push({ type: 'divider', key: 'd0' })
+                options.push({ label: 'qBittorrent 设置', key: 'qb-settings', icon: () => h('i', { class: 'fa-solid fa-magnet' }) })
+            }
             if (this.showMenu) {
                 options.push({ type: 'divider', key: 'd1' })
                 options.push({ label: '控制台菜单', key: 'shell', icon: () => h('i', { class: 'fa-solid fa-bars' }) })

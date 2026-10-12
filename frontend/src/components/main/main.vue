@@ -24,7 +24,6 @@
         <div class="main-body">
             <header-bar v-if="!shellHidden" :collapsed="headerCollapsed" :mobile="isMobile"
                 @on-coll-change="handleCollapsedChange">
-                <qb-settings-chip />
                 <user-chip />
             </header-bar>
 
@@ -48,7 +47,6 @@ import { isMobileDevice } from '@/composables/useIsMobile'
 import { onShellDrawerRequest, setFullscreenPage, useFullscreenPage } from '@/composables/useFullscreenPage'
 import HeaderBar from './components/header-bar.vue'
 import UserChip from './components/user-chip.vue'
-import QbSettingsChip from './components/qb-settings-chip.vue'
 
 /** 「消息中心」分组下的会话子项（对齐 quantum 的 chat-index /「会话」） */
 const MESSAGES_INDEX_KEY = 'messages-index'
@@ -61,7 +59,7 @@ const renderIcon = (iconClass) => {
 
 export default {
     name: 'MainLayout',
-    components: { HeaderBar, UserChip, QbSettingsChip },
+    components: { HeaderBar, UserChip },
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()

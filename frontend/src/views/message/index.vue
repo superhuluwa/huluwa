@@ -12,6 +12,7 @@
         <section v-if="showRoom" class="chat-room">
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
                 :compact="isMobile" :clearable="canSend" :markable="isSystem" :show-menu="isMobile"
+                :magnet="isMagnet"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
                 @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog" />
 
