@@ -4,7 +4,7 @@
             {{ intro }}
         </n-alert>
         <n-form ref="formRef" :model="form" :rules="rules" label-placement="top">
-            <n-form-item label="迅雷直连地址" path="url">
+            <n-form-item label="飞牛 NAS / 迅雷直连地址" path="url">
                 <n-input v-model:value="form.url" placeholder="http://192.168.3.202:5666"
                     @keyup.enter="submit" />
                 <template #feedback>
@@ -114,7 +114,7 @@ export default {
         },
         nativeFnos() {
             const url = this.form.url.trim()
-            return url.includes('/cgi/ThirdParty/xunlei/index.cgi') || /:5666(?:\/|$)/.test(url)
+            return !url || url.includes('/cgi/ThirdParty/xunlei/index.cgi') || /:5666(?:\/|$)/.test(url)
         },
         tokenPlaceholder() {
             if (this.tokenSet) return '留空表示沿用已保存的认证值'
