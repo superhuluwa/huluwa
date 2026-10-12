@@ -309,6 +309,9 @@ export default {
     align-items: flex-start;
     /* 行本身不许被子元素（超宽视频/封面）撑破，否则头像列与右侧留白会被挤掉 */
     min-width: 0;
+    /* 极窄屏（如 320px）下长内容也不能把行撑出聊天区 */
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .message-row.mine {
@@ -385,6 +388,10 @@ export default {
     border-radius: 16px;
     border-bottom-left-radius: 4px;
     background: var(--bubble-bot, #1E293B);
+    /* 允许在 flex 行内收缩到 max-width 以下：
+       没有这个约束时，无空格长串（磁力 / 长 URL）会把气泡按内容宽撑开，
+       越过右侧留白甚至压到对侧头像列。 */
+    min-width: 0;
 }
 
 /* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡。
@@ -457,6 +464,9 @@ export default {
 
 .bubble-content {
     font-size: 14px;
+    /* 正文容器同样允许收缩，把宽度约束传给 RichText */
+    min-width: 0;
+    max-width: 100%;
 }
 
 .cover {

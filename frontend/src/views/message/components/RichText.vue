@@ -93,7 +93,14 @@ export default {
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;
+    /* 气泡宽度由上一层 flex 决定：这里必须允许收缩，
+       否则无空格长串（磁力 / 长 URL / 连续英文）会把气泡撑出容器、压到对侧头像列。 */
+    min-width: 0;
+    max-width: 100%;
+    /* break-word 对无空格长串不生效，用 anywhere/overflow-wrap 双保险；
+       中文等正常文本仍按原语义在必要时断行。 */
     word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .rich-text.is-clamped {

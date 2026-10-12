@@ -118,6 +118,15 @@ export default {
     watch: {
         sessionKey() {
             this.resetPosition()
+            // 若切换时目标会话已缓存消息，挂载/切换后的下一帧直接落底，避免停在顶部
+            if (!this.positioned && !this.loading && this.messages.length) {
+                this.pinToBottom()
+            }
+        },
+        loading(next) {
+            if (!next && !this.positioned && this.messages.length) {
+                this.pinToBottom()
+            }
         },
         messages: {
             handler(next, prev) {
@@ -153,11 +162,16 @@ export default {
         // 封面异步加载会撑高内容：只要仍是贴底态就继续贴底
         if (typeof ResizeObserver !== 'undefined' && this.$refs.content) {
             this.resizeObserver = new ResizeObserver(() => {
-                if (this.stickBottom && this.positioned) {
+                if (this.stickBottom) {
                     this.scrollToBottom(false)
                 }
             })
             this.resizeObserver.observe(this.$refs.content)
+        }
+        // 手机端聊天区由 v-if 延迟挂载：组件创建时消息往往已经在 store 里，
+        // messages watcher 不会触发，必须在挂载时补一次首屏落底。
+        if (!this.positioned && !this.loading && this.messages.length) {
+            this.pinToBottom()
         }
     },
     beforeUnmount() {

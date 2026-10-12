@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,6 +47,52 @@ class MovieSubscriptionServiceTest {
         // 同一 info hash 只保留首次出现（站点会重复挂同一集）
         long distinct = magnets.stream().map(MovieSearchService.MagnetItem::hash).distinct().count();
         assertEquals(magnets.size(), distinct, "磁力列表不应有重复 info hash");
+    }
+
+    /**
+     * 「查看磁力」要求按集数倒序：接口层排序后最新一集在最前，且不能改坏订阅巡检依赖的原始解析顺序。
+     */
+    @Test
+    void compareEpisodeDescSortsLatestEpisodeFirst() throws Exception {
+        List<MovieSearchService.MagnetItem> magnets = MovieSearchService.parseMagnets(detailFixture());
+        List<MovieSearchService.MagnetItem> sorted = new ArrayList<>(magnets);
+        sorted.sort(MovieSubscriptionService::compareEpisodeDesc);
+
+        int latest = sorted.stream()
+                .map(MovieSearchService.MagnetItem::episode)
+                .filter(episode -> episode != null && !episode.isBlank())
+                .mapToInt(Integer::parseInt)
+                .max()
+                .orElseThrow();
+        assertEquals("214", String.valueOf(latest), "快照里的最新集数应稳定为 214");
+        assertEquals("214", sorted.get(0).episode(), "最新一集必须排在第一行");
+
+        int previous = Integer.MAX_VALUE;
+        for (MovieSearchService.MagnetItem item : sorted) {
+            int current = Integer.parseInt(item.episode());
+            assertTrue(current <= previous, "集数必须按倒序排列，异常位置：" + item.episode());
+            previous = current;
+        }
+
+        // 详情页解析顺序保持不变，订阅巡检仍按页面顺序处理基线
+        assertEquals("208", magnets.get(0).episode(), "解析层不应被接口层的倒序排序影响");
+    }
+
+    /** 无法识别集号的条目放在末尾，不会插到最新一集前面 */
+    @Test
+    void compareEpisodeDescKeepsUnknownEpisodesLast() {
+        List<MovieSearchService.MagnetItem> items = new ArrayList<>(List.of(
+                new MovieSearchService.MagnetItem("特别篇.1080p.mp4",
+                        "magnet:?xt=urn:btih:" + "a".repeat(40), "a".repeat(40), "1080P", null),
+                new MovieSearchService.MagnetItem("剧 第1季02.1080p.mp4",
+                        "magnet:?xt=urn:btih:" + "b".repeat(40), "b".repeat(40), "1080P", "2"),
+                new MovieSearchService.MagnetItem("剧 第1季10.1080p.mp4",
+                        "magnet:?xt=urn:btih:" + "c".repeat(40), "c".repeat(40), "1080P", "10")));
+        items.sort(MovieSubscriptionService::compareEpisodeDesc);
+
+        assertEquals("10", items.get(0).episode(), "两位数集号必须排在个位数之前");
+        assertEquals("2", items.get(1).episode());
+        assertEquals(null, items.get(2).episode(), "识别不出集号的条目排在最后");
     }
 
     @Test

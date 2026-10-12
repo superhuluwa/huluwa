@@ -853,6 +853,9 @@ public class MovieSubscriptionService {
      * <p>返回结果里带 {@code downloaded} 标记：该 info hash 是否已经在下载任务表里
      * （非 failed 状态），前端据此把按钮渲染成「已下载」避免重复提交。</p>
      *
+     * <p>列表按集数倒序返回（最新一集在最前），同集保持详情页原始顺序；
+     * 无法识别集号的条目排在最后，仅影响「查看磁力」弹窗，不改变订阅巡检使用的详情页顺序。</p>
+     *
      * @param detailUrl  电影港详情页地址
      * @param seriesTitle 片名（搜索结果里的名字，作为剧名与目录名基准）
      */
@@ -877,8 +880,11 @@ public class MovieSubscriptionService {
         Subscription subscription = findRowByUrl(url) == null ? null : toSubscription(findRowByUrl(url));
 
         Set<String> downloaded = downloadedKeys();
+        // 「查看磁力」按集数倒序（最新一集在最前）：详情页原顺序保留给订阅巡检，不在这里改动
+        List<MovieSearchService.MagnetItem> magnets = new ArrayList<>(detail.magnets());
+        magnets.sort(MovieSubscriptionService::compareEpisodeDesc);
         List<Map<String, Object>> items = new ArrayList<>();
-        for (MovieSearchService.MagnetItem item : detail.magnets()) {
+        for (MovieSearchService.MagnetItem item : magnets) {
             String key = item.hash() == null ? item.magnet() : item.hash();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("title", item.title());
@@ -899,6 +905,39 @@ public class MovieSubscriptionService {
         data.put("count", items.size());
         data.put("magnets", items);
         return data;
+    }
+
+    /**
+     * 「查看磁力」弹窗的排序：按集数倒序，最新一集在最前；识别不出集号的条目排最后。
+     *
+     * <p>同一集的多条磁力保持详情页内的相对顺序（稳定排序）。集号按数字比较，
+     * 因此「第 10 集」排在「第 9 集」前面，而不是按字符串比较。</p>
+     */
+    static int compareEpisodeDesc(MovieSearchService.MagnetItem left, MovieSearchService.MagnetItem right) {
+        Integer leftEpisode = episodeNumber(left == null ? null : left.episode());
+        Integer rightEpisode = episodeNumber(right == null ? null : right.episode());
+        if (leftEpisode == null && rightEpisode == null) {
+            return 0;
+        }
+        if (leftEpisode == null) {
+            return 1;
+        }
+        if (rightEpisode == null) {
+            return -1;
+        }
+        return Integer.compare(rightEpisode, leftEpisode);
+    }
+
+    /** 集号转数字用于倒序比较；非数字集号（如特别篇编号）按无法识别处理，排在最后 */
+    private static Integer episodeNumber(String episode) {
+        if (episode == null || episode.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(episode.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**

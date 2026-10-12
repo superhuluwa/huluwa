@@ -21,7 +21,7 @@
 
         <n-spin :show="loading">
             <div v-if="!items.length && !loading" class="mm-empty">该详情页没有解析到磁力链接</div>
-            <div class="mm-list">
+            <div ref="listRef" class="mm-list">
                 <div v-for="(m, index) in items" :key="m.hash || index" class="mm-row"
                     :class="{ downloaded: m.downloaded }">
                     <span class="mm-quality" :class="qualityClass(m.quality)">{{ m.quality }}</span>
@@ -61,7 +61,8 @@
  *  - 实时抓取电影港详情页的磁力，按清晰度给出色标；
  *  - 每行「下载」按钮直接提交 qBittorrent，保存目录为「下载根目录 / 剧名」，
  *    结果同时写入「磁力下载」会话；
- *  - 已在下载任务表里的条目渲染成「已下载」，避免重复提交。
+ *  - 已在下载任务表里的条目渲染成「已下载」，避免重复提交；
+ *  - 后端按集数倒序返回，默认展示最新一集（列表打开 / 刷新都回到顶部）。
  */
 import { PreviewMagnets, DownloadMagnet } from '@/api/chat'
 
@@ -118,6 +119,11 @@ export default {
                 const data = (await PreviewMagnets(this.url, this.title)) || {}
                 this.data = data
                 this.items = Array.isArray(data.magnets) ? data.magnets : []
+                // 后端已按集数倒序，打开 / 刷新后把滚动条定位到顶部，默认展示最新一集
+                await this.$nextTick()
+                if (this.$refs.listRef) {
+                    this.$refs.listRef.scrollTop = 0
+                }
             } catch (e) {
                 // 拦截器已提示
             } finally {
