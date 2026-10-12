@@ -8,9 +8,12 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.ByteArrayOutputStream;
+import java.net.ConnectException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.net.http.WebSocketHandshakeException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.SecureRandom;
@@ -20,7 +23,9 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -41,8 +46,9 @@ final class FnosLoginClient {
         }
         Inbox inbox = new Inbox();
         WebSocket socket = null;
+        URI wsUri = null;
         try {
-            URI wsUri = webSocketUri(nasUrl);
+            wsUri = webSocketUri(nasUrl);
             socket = http.newWebSocketBuilder().connectTimeout(TIMEOUT)
                     .buildAsync(wsUri, inbox).get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
 
@@ -107,7 +113,7 @@ final class FnosLoginClient {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            throw new BusinessException(400, "连接飞牛登录服务失败：" + safeMessage(e));
+            throw new BusinessException(400, explainConnectionFailure(e, wsUri));
         } finally {
             if (socket != null) {
                 socket.abort();
@@ -206,8 +212,26 @@ final class FnosLoginClient {
         return System.currentTimeMillis() + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
-    private static String safeMessage(Exception e) {
-        return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+    private static String explainConnectionFailure(Exception error, URI wsUri) {
+        Throwable cause = error;
+        while ((cause instanceof ExecutionException || cause instanceof CompletionException)
+                && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        String target = wsUri == null ? "飞牛地址" : wsUri.getHost() + ":" +
+                (wsUri.getPort() >= 0 ? wsUri.getPort() : "wss".equals(wsUri.getScheme()) ? 443 : 80);
+        if (cause instanceof ConnectException) {
+            return "连接飞牛登录服务失败：后端无法连接 " + target
+                    + "。请核对飞牛 IP 和端口，并确认后端所在机器或容器能访问该地址";
+        }
+        if (cause instanceof UnknownHostException) {
+            return "连接飞牛登录服务失败：无法解析 " + target + "，请检查飞牛地址";
+        }
+        if (cause instanceof WebSocketHandshakeException) {
+            return "飞牛 WebSocket 握手失败（" + target + "）：请检查协议、端口和反向代理的 WebSocket 转发";
+        }
+        String detail = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+        return "连接飞牛登录服务失败（" + target + "）：" + detail;
     }
 
     private static final class Inbox implements WebSocket.Listener {

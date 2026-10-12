@@ -46,7 +46,7 @@ public class XunleiService {
 
     /** 配置键：迅雷 CGI 地址，或可由端口推断 CGI 的服务根地址 */
     public static final String CFG_URL = "xl.url";
-    /** 配置键：保存路径（迅雷 App 新建任务页里选择的完整目录路径） */
+    /** Docker 版保存路径；飞牛原生版从迅雷读取默认下载目录 */
     public static final String CFG_SAVE_PATH = "xl.savepath";
     /** 配置键：原生模式手动 fnos-token Cookie 值 / Docker 模式 Authorization 头 */
     public static final String CFG_TOKEN = "xl.token";
@@ -103,6 +103,10 @@ public class XunleiService {
     private record XlSession(String cgi, String panToken, String deviceId, String auth, boolean nativeFnos) {
     }
 
+    /** 迅雷可用下载目录：建任务时路径和 ID 必须来自同一条记录。 */
+    private record DownloadFolder(String id, String path) {
+    }
+
     /** 迅雷接口响应（状态码 + 响应体） */
     private record Response(int status, String body) {
     }
@@ -133,7 +137,7 @@ public class XunleiService {
      * 保存配置。
      *
      * @param url      迅雷直连地址（必填，缺协议时自动补 http://）
-     * @param savePath 保存路径（必填，建任务时作为 parent_folder_path 透传给迅雷）
+     * @param savePath Docker 版保存路径；飞牛原生版忽略并使用迅雷默认目录
      * @param token    原生模式填 fnos-token 值，Docker 模式填 Authorization 头；留空沿用已保存值
      */
     public Map<String, Object> save(String url, String savePath, String token,
@@ -150,31 +154,32 @@ public class XunleiService {
         } catch (IllegalArgumentException e) {
             throw new BusinessException(400, "迅雷直连地址格式不正确：" + url);
         }
+        boolean nativeFnos = isNativeFnos(base);
         String path = savePath == null ? "" : savePath.trim();
-        if (path.isEmpty()) {
-            throw new BusinessException(400, "请填写迅雷保存路径（迅雷 App 新建任务页里选择的目录，如 /downloads/）");
+        if (!nativeFnos && path.isEmpty()) {
+            throw new BusinessException(400, "请填写 Docker 版迅雷保存路径");
         }
         String user = trim(fnosUsername);
         String auth = token != null && !token.isBlank() ? token.trim() : settings().token();
         String generatedToken = null;
         String password = null;
         String did = null;
-        if (isNativeFnos(base) && user != null) {
+        if (nativeFnos && user != null) {
             password = configuredPassword(user, fnosPassword);
             did = configuredDid(user);
             generatedToken = fnosLogin.login(base, user, password, twofaCode, did);
-        } else if (isNativeFnos(base) && (auth == null || auth.isBlank()
+        } else if (nativeFnos && (auth == null || auth.isBlank()
                 || invalidNativeToken(auth))) {
             throw new BusinessException(400, "请填写飞牛账号密码，或提供 fnos-token Cookie 的值");
         }
 
         configService.put(CFG_URL, base);
-        configService.put(CFG_SAVE_PATH, path);
+        configService.put(CFG_SAVE_PATH, nativeFnos ? "" : path);
         // 留空表示不修改已保存的认证值（前端不会拿到原值，避免明文回传）
         if (token != null && !token.isBlank()) {
             configService.put(CFG_TOKEN, token.trim());
         }
-        if (isNativeFnos(base) && user != null) {
+        if (nativeFnos && user != null) {
             configService.put(CFG_FNOS_USERNAME, user);
             configService.put(CFG_FNOS_PASSWORD, password);
             configService.put(CFG_FNOS_DID, did);
@@ -188,7 +193,7 @@ public class XunleiService {
         return describe();
     }
 
-    /** 只更新保存路径（「路径」指令用）：不动连接配置 */
+    /** 只更新 Docker 版保存路径（「路径」指令用）：不动连接配置 */
     public void saveSavePath(String savePath) {
         String path = savePath == null ? "" : savePath.trim();
         if (path.isEmpty()) {
@@ -279,7 +284,7 @@ public class XunleiService {
         return results;
     }
 
-    /** 单条磁力：迅雷资源解析 → 建任务（全部文件，保存到配置的路径） */
+    /** 单条磁力：迅雷资源解析 → 建任务；原生版使用迅雷默认目录 */
     private TaskResult submitMagnet(XlSession session, String magnet, String savePath) {
         // 1) 服务端解析磁力文件清单（取文件名 / 大小 / 数量供建任务）
         Response list;
@@ -321,11 +326,14 @@ public class XunleiService {
             }
         }
 
-        // 2) 原生 CGI 的保存目录要传文件夹 ID，不能仅传路径
+        // 2) 原生 CGI 的保存目录要传迅雷返回的文件夹 ID 与路径
         String folderId = "";
+        String folderPath = savePath;
         if (session.nativeFnos()) {
             try {
-                folderId = findNativeFolderId(session, savePath);
+                DownloadFolder folder = findNativeDefaultFolder(session);
+                folderId = folder.id();
+                folderPath = folder.path();
             } catch (Exception e) {
                 return new TaskResult(false, "获取迅雷保存目录失败：" + safeMessage(e),
                         taskName, totalSize, leaves.size(), null);
@@ -338,7 +346,7 @@ public class XunleiService {
         params.put("url", magnet);
         params.put("total_file_count", String.valueOf(leaves.size()));
         params.put("parent_folder_id", folderId);
-        params.put("parent_folder_path", savePath);
+        params.put("parent_folder_path", folderPath);
         params.put("sub_file_index", session.nativeFnos() ? "--1," : "--1");
         params.put("mime_type", session.nativeFnos() ? "" : firstMime);
         params.put("file_id", session.nativeFnos() ? "" : firstId);
@@ -385,10 +393,10 @@ public class XunleiService {
         }
     }
 
-    /** 飞牛原生迅雷用下载目录 ID 创建任务；路径取自迅雷自身可选的下载目录。 */
-    private String findNativeFolderId(XlSession session, String savePath) throws IOException, InterruptedException {
+    /** 飞牛原生迅雷自动使用其默认下载目录；未标记默认时选首个非系统目录。 */
+    private DownloadFolder findNativeDefaultFolder(XlSession session) throws IOException, InterruptedException {
         Response response = send(session, "/device/download_paths", null, INFO_TIMEOUT);
-        if (response.status() != 200) {
+        if (response.status() != 200 || responseHasError(response.body())) {
             throw new BusinessException(400, "下载目录查询返回 HTTP " + response.status() + " " + abbreviate(response.body()));
         }
         try {
@@ -396,33 +404,47 @@ public class XunleiService {
             if (paths.isObject()) {
                 paths = paths.path("paths");
             }
+            DownloadFolder first = null;
+            DownloadFolder firstNonSystem = null;
             if (paths.isArray()) {
                 for (JsonNode path : paths) {
-                    if (sameFolder(savePath, path.path("RealPath").asText(""))) {
-                        String id = path.path("Id").asText("");
-                        if (!id.isBlank()) {
-                            return id;
-                        }
+                    String id = path.path("Id").asText("");
+                    String realPath = path.path("RealPath").asText("");
+                    if (id.isBlank() || realPath.isBlank()) {
+                        continue;
+                    }
+                    DownloadFolder folder = new DownloadFolder(id, realPath);
+                    if (isDefaultFolder(path)) {
+                        return folder;
+                    }
+                    if (first == null) {
+                        first = folder;
+                    }
+                    if (firstNonSystem == null && !realPath.startsWith("/var/apps/")) {
+                        firstNonSystem = folder;
                     }
                 }
+            }
+            if (firstNonSystem != null) {
+                return firstNonSystem;
+            }
+            if (first != null) {
+                return first;
             }
         } catch (Exception e) {
             throw new BusinessException(400, "迅雷返回的下载目录列表无法解析");
         }
-        throw new BusinessException(400, "保存路径不在迅雷可选下载目录中：" + savePath
-                + "。请从迅雷新建任务页复制完整目录路径");
+        throw new BusinessException(400, "迅雷没有返回可用的默认下载目录，请先在迅雷 App 中设置下载目录");
     }
 
-    private static boolean sameFolder(String left, String right) {
-        return stripTrailingSlash(left).equals(stripTrailingSlash(right));
-    }
-
-    private static String stripTrailingSlash(String path) {
-        String value = path == null ? "" : path.trim();
-        while (value.length() > 1 && value.endsWith("/")) {
-            value = value.substring(0, value.length() - 1);
+    private static boolean isDefaultFolder(JsonNode path) {
+        for (String key : List.of("IsDefault", "isDefault", "Default", "default")) {
+            JsonNode flag = path.path(key);
+            if (flag.asBoolean(false) || "1".equals(flag.asText())) {
+                return true;
+            }
         }
-        return value;
+        return false;
     }
 
     private boolean responseHasError(String body) {

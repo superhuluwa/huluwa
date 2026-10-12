@@ -68,7 +68,7 @@ public class ChatService {
     private static final String XUNLEI_HELP_TASK = "帮助";
     /** 迅雷下载会话内的任务状态指令 */
     private static final String XUNLEI_STATUS_TASK = "状态";
-    /** 迅雷下载会话内的保存路径指令前缀（如「路径 /downloads/」） */
+    /** Docker 版迅雷会话内的保存路径指令前缀 */
     private static final String XUNLEI_PATH_PREFIX = "路径";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
@@ -617,7 +617,7 @@ public class ChatService {
         if (!configured) {
             replies.add(xunleiText(sessionId,
                     "已收到 " + magnets.size() + " 条磁力链接，但还没有配置迅雷。"
-                            + "\n请填写直连地址与保存路径，配置完成后本条磁力可直接重发。",
+                            + "\n请填写飞牛直连地址和登录信息，配置完成后本条磁力可直接重发。",
                     xunleiMeta("config", magnets)));
             return replies;
         }
@@ -655,7 +655,9 @@ public class ChatService {
         }
         StringBuilder sb = new StringBuilder("迅雷配置：\n");
         sb.append("• 直连地址：").append(settings.url()).append('\n');
-        sb.append("• 保存路径：").append(settings.savePath()).append('\n');
+        sb.append("• 保存路径：")
+                .append(XunleiService.isNativeFnos(settings.url()) ? "迅雷默认目录（自动）" : settings.savePath())
+                .append('\n');
         Map<String, Object> probe = xunleiService.test(settings.url(), settings.token());
         boolean online = Boolean.TRUE.equals(probe.get("success"));
         sb.append("• 连接状态：").append(online ? "" : "不").append("在线")
@@ -664,10 +666,13 @@ public class ChatService {
         return xunleiText(sessionId, sb.toString(), xunleiMeta(true));
     }
 
-    /** 「路径 xxx」指令：修改保存路径（迅雷必须指定路径，不允许清空） */
+    /** Docker 版可用「路径 xxx」修改保存路径；飞牛原生版固定使用迅雷默认目录。 */
     private ChatMessage xunleiSavePath(String sessionId, String path) {
         if (!xunleiService.settings().configured()) {
             return xunleiText(sessionId, "请先完成迅雷连接配置，再设置保存路径。", xunleiMeta(false));
+        }
+        if (XunleiService.isNativeFnos(xunleiService.settings().url())) {
+            return xunleiText(sessionId, "飞牛原生迅雷自动使用迅雷 App 的默认下载目录，无需设置路径。", xunleiMeta(true));
         }
         if (path.isEmpty()) {
             return xunleiText(sessionId,
@@ -682,18 +687,18 @@ public class ChatService {
     private static String xunleiHelpText(boolean configured) {
         if (!configured) {
             return """
-                    还没有配置迅雷，无法提交下载任务。请按下面两步完成配置：
+                    还没有配置迅雷，无法提交下载任务。请完成配置：
                     1. 飞牛原生迅雷直连地址形如 http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi；
-                    2. 填写迅雷 App 新建任务页里可选的完整保存路径；
-                    3. 填写飞牛 NAS 登录账号和密码，程序会获取并续取 fnos-token（pan-auth 也会自动获取）。
+                    2. 填写飞牛 NAS 登录账号和密码，程序会获取并续取 fnos-token（pan-auth 也会自动获取）。
+                    飞牛原生迅雷自动使用迅雷 App 的默认下载目录，无需填写保存路径。
                     启用两步验证时，首次登录需填写当前验证码；也可改用手动 fnos-token。
-                    Docker 版可填写其 2345 端口地址；配置只保存在本机。""";
+                    Docker 版可填写其 2345 端口地址及保存路径；配置只保存在本机。""";
         }
         return """
                 迅雷远程下载已就绪，把磁力链接直接发给我即可：
                 1. 一条消息可放多个磁力链接（空格或换行分隔），逐条在迅雷创建下载任务（含全部文件）；
                 2. 输入「状态」查看当前配置与迅雷在线状态；
-                3. 输入「路径 /downloads/」修改保存目录；
+                3. 飞牛原生迅雷自动使用迅雷默认目录；Docker 版可用「路径」指令修改保存目录；
                 4. NAS 版迅雷每日任务数有限额，超额提交会被迅雷拒绝。""";
     }
 

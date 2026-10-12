@@ -11,7 +11,10 @@
                     飞牛原生迅雷填 NAS 地址和端口，程序自动补全 CGI 路径；Docker 版可填 http://NAS_IP:2345
                 </template>
             </n-form-item>
-            <n-form-item label="保存路径" path="savePath">
+            <n-alert v-if="nativeFnos" type="info" :show-icon="false" style="margin-bottom: 14px">
+                下载文件会保存到迅雷 App 的默认目录，无需在这里设置路径。
+            </n-alert>
+            <n-form-item v-else label="Docker 版保存路径" path="savePath">
                 <n-input v-model:value="form.savePath" placeholder="迅雷 App 新建任务页里选择的完整目录路径" />
             </n-form-item>
             <template v-if="nativeFnos">
@@ -93,14 +96,17 @@ export default {
             loading: false,
             saving: false,
             testing: false,
-            testResult: null,
-            rules: {
-                url: { required: true, message: '请填写迅雷直连地址', trigger: ['input', 'blur'] },
-                savePath: { required: true, message: '请填写保存路径（迅雷 App 新建任务页里选择的目录）', trigger: ['input', 'blur'] }
-            }
+            testResult: null
         }
     },
     computed: {
+        rules() {
+            const rules = { url: { required: true, message: '请填写迅雷直连地址', trigger: ['input', 'blur'] } }
+            if (!this.nativeFnos) {
+                rules.savePath = { required: true, message: '请填写 Docker 版迅雷保存路径', trigger: ['input', 'blur'] }
+            }
+            return rules
+        },
         visible: {
             get() {
                 return this.show
@@ -160,7 +166,7 @@ export default {
         payload() {
             return {
                 url: this.form.url.trim(),
-                savePath: this.form.savePath.trim(),
+                savePath: this.nativeFnos ? '' : this.form.savePath.trim(),
                 token: this.form.token,
                 fnosUsername: this.nativeFnos ? this.form.fnosUsername.trim() : '',
                 fnosPassword: this.nativeFnos ? this.form.fnosPassword : '',
