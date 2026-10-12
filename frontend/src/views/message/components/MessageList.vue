@@ -237,7 +237,8 @@ export default {
     overflow-y: auto;
     overflow-x: hidden;
     position: relative;
-    padding: 14px 16px 4px;
+    /* 左右留白与顶栏 / 输入框共用同一组变量，保证头像列上下对齐 */
+    padding: 14px var(--chat-gutter-right, 16px) 4px var(--chat-gutter-left, 16px);
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
 }
@@ -303,7 +304,8 @@ export default {
 /* 手机端：消息流左右留白收紧、气泡吃满更多宽度，回到底部按钮放大触控目标 */
 @media (max-width: 900px) {
     .message-stream {
-        padding: 10px 12px 2px;
+        padding-top: 10px;
+        padding-bottom: 2px;
     }
 
     .stream-hint {

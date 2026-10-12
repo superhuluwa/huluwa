@@ -121,7 +121,8 @@ export default {
 .composer {
     flex: none;
     border-top: 1px solid var(--line);
-    padding: 6px 8px 4px;
+    /* 左右留白与顶栏 / 消息流共用同一组变量，输入框与头像列上下对齐 */
+    padding: 6px var(--chat-gutter-right, 16px) 4px var(--chat-gutter-left, 16px);
     background: var(--bg);
 }
 
@@ -200,7 +201,8 @@ export default {
    手机端：输入区像聊天软件一样贴底，末段留出系统手势安全距离
    ========================================================================== */
 .composer.mobile {
-    padding: 8px max(10px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-right));
+    padding-top: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
     background: rgba(11, 15, 25, .96);
     backdrop-filter: blur(10px);
 }

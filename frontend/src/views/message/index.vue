@@ -364,6 +364,14 @@ export default {
 
 <style scoped>
 .message-page {
+    /* ======================================================================
+       聊天区统一水平留白：顶栏标题 / 消息流头像列 / 输入框三者的左右边缘
+       必须落在同一条垂直线上，否则会出现「头像、气泡、输入框各对齐各」的错位。
+       子组件（ChatHeader / MessageList / ChatComposer）统一读这两个变量。
+       ====================================================================== */
+    --chat-gutter-left: 16px;   /* 左右留白：桌面 16px / 移动端 14px + 安全区 */
+    --chat-gutter-right: 16px;
+    --chat-avatar-gap: 10px;    /* 头像与气泡的水平间距 */
     display: flex;
     height: 100%;
     min-height: 0;
@@ -406,23 +414,23 @@ export default {
     background: var(--bg);
 }
 
-/* 二级聊天页：顶栏 → 消息流 → 输入区 三段式，末段留出系统手势安全距离 */
+/* ==========================================================================
+   二级聊天页：顶栏 → 消息流 → 输入区 三段式，末段留出系统手势安全距离。
+   三者共用同一组左右留白变量（含刘海屏安全区），保证头像列与输入框上下对齐。
+   ========================================================================== */
+.message-page.mobile {
+    --chat-gutter-left: max(14px, env(safe-area-inset-left));
+    --chat-gutter-right: max(14px, env(safe-area-inset-right));
+    --chat-avatar-gap: 10px;
+}
+
 .message-page.mobile :deep(.chat-header) {
-    padding-left: max(10px, env(safe-area-inset-left));
-    padding-right: max(10px, env(safe-area-inset-right));
     padding-top: env(safe-area-inset-top);
     height: calc(58px + env(safe-area-inset-top));
 }
 
-.message-page.mobile :deep(.message-stream) {
-    padding-left: max(14px, env(safe-area-inset-left));
-    padding-right: max(14px, env(safe-area-inset-right));
-}
-
 .message-page.mobile :deep(.composer) {
     padding-bottom: max(4px, env(safe-area-inset-bottom));
-    padding-left: max(8px, env(safe-area-inset-left));
-    padding-right: max(8px, env(safe-area-inset-right));
 }
 
 /* 非全屏（桌面端）：卡片四周留出安全边距，避免贴边显示 */
@@ -440,13 +448,17 @@ export default {
 
 /* 窄视口（桌面端窗口拖窄 / 平板）：会话列表铺满，仅保留卡片圆角 */
 @media (max-width: 900px) {
+    .message-page {
+        --chat-gutter-left: 14px;
+        --chat-gutter-right: 14px;
+    }
+
     .message-page :deep(.conversation-list) {
         width: 100%;
         border-right: 0;
     }
 
     .chat-room :deep(.chat-header) {
-        padding: 0 10px;
         gap: 8px;
     }
 }

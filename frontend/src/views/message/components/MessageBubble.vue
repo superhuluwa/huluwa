@@ -238,7 +238,8 @@ export default {
 <style scoped>
 .message-row {
     display: flex;
-    gap: 8px;
+    /* 头像与气泡的水平间距由消息中心统一下发（左右两侧一致） */
+    gap: var(--chat-avatar-gap, 10px);
     margin-bottom: 8px;
     align-items: flex-start;
 }
@@ -434,7 +435,6 @@ export default {
    ========================================================================== */
 @media (max-width: 900px) {
     .message-row {
-        gap: 7px;
         margin-bottom: 10px;
     }
 

@@ -204,7 +204,8 @@ export default {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 0 16px;
+    /* 左右留白与消息流 / 输入框共用同一组变量，标题与头像列上下对齐 */
+    padding: 0 var(--chat-gutter-right, 16px) 0 var(--chat-gutter-left, 16px);
     border-bottom: 1px solid var(--line);
     background: rgba(11, 15, 25, .92);
     backdrop-filter: blur(10px);
@@ -213,7 +214,8 @@ export default {
 .back {
     width: 34px;
     height: 34px;
-    margin-left: -6px;
+    /* 负外边距让图标视觉上与下方头像列左边缘对齐（图标本身有内边距） */
+    margin-left: -7px;
     flex: none;
     border: 0;
     border-radius: 50%;
