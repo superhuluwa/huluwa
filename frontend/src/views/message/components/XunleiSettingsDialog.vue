@@ -5,20 +5,34 @@
         </n-alert>
         <n-form ref="formRef" :model="form" :rules="rules" label-placement="top">
             <n-form-item label="迅雷直连地址" path="url">
-                <n-input v-model:value="form.url" placeholder="http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi"
+                <n-input v-model:value="form.url" placeholder="http://192.168.3.202:5666"
                     @keyup.enter="submit" />
                 <template #feedback>
-                    飞牛应用中心原生迅雷填完整 CGI 地址；Docker 版可填 http://NAS_IP:2345
+                    飞牛原生迅雷填 NAS 地址和端口，程序自动补全 CGI 路径；Docker 版可填 http://NAS_IP:2345
                 </template>
             </n-form-item>
             <n-form-item label="保存路径" path="savePath">
                 <n-input v-model:value="form.savePath" placeholder="迅雷 App 新建任务页里选择的完整目录路径" />
             </n-form-item>
-            <n-form-item :label="nativeFnos ? '飞牛 fnos-token（Cookie 值）' : 'Authorization 认证头（可选）'" path="token">
+            <template v-if="nativeFnos">
+                <n-form-item label="飞牛登录账号" path="fnosUsername">
+                    <n-input v-model:value="form.fnosUsername" placeholder="飞牛 NAS 登录账号" />
+                </n-form-item>
+                <n-form-item label="飞牛登录密码" path="fnosPassword">
+                    <n-input v-model:value="form.fnosPassword" type="password" show-password-on="click"
+                        :placeholder="passwordPlaceholder" />
+                    <template #feedback>密码保存在本机服务端配置库，界面不会回显；留空沿用已保存的密码</template>
+                </n-form-item>
+                <n-form-item label="两步验证码（启用时填写）" path="twofaCode">
+                    <n-input v-model:value="form.twofaCode" maxlength="6" placeholder="当前 6 位验证码；不保存" />
+                </n-form-item>
+            </template>
+            <n-form-item v-if="!nativeFnos || !form.fnosUsername.trim()"
+                :label="nativeFnos ? '手动 fnos-token（备用）' : 'Authorization 认证头（可选）'" path="token">
                 <n-input v-model:value="form.token" type="password" show-password-on="click"
                     :placeholder="tokenPlaceholder" />
                 <template #feedback>
-                    {{ nativeFnos ? '在已登录飞牛的浏览器开发者工具 → 应用 → Cookie 中复制 fnos-token 的值；无需填写 pan-auth 或“Cookie:”前缀' : '仅迅雷前端加了 Basic 认证时填写，如 Basic xxx' }}
+                    {{ nativeFnos ? '不用账号密码时，可手动填写 fnos-token Cookie 的值；无需填写 pan-auth 或前缀' : '仅迅雷前端加了 Basic 认证时填写，如 Basic xxx' }}
                 </template>
             </n-form-item>
         </n-form>
@@ -43,8 +57,8 @@
 <script>
 /**
  * 迅雷远程下载连接配置表单（「迅雷下载」会话首次使用与顶栏入口共用）：
- * 直连地址、保存路径和认证值；原生模式使用 fnos-token Cookie，Docker 模式使用可选 Authorization。
- * 「测试连接」用表单里的最新值直接探测；认证值留空表示沿用服务端已保存值。
+ * 原生模式可用飞牛账号密码自动登录并续取 fnos-token，也保留手动 Cookie 入口。
+ * 两步验证码只用于当前登录请求；密码与认证值只写不读。
  */
 import { GetXunleiSettings, SaveXunleiSettings, TestXunleiConnection } from '@/api/xunlei'
 
@@ -67,9 +81,14 @@ export default {
             form: {
                 url: '',
                 savePath: '',
-                token: ''
+                token: '',
+                fnosUsername: '',
+                fnosPassword: '',
+                twofaCode: ''
             },
             tokenSet: false,
+            fnosPasswordSet: false,
+            savedUsername: '',
             configured: false,
             loading: false,
             saving: false,
@@ -100,6 +119,10 @@ export default {
         tokenPlaceholder() {
             if (this.tokenSet) return '留空表示沿用已保存的认证值'
             return this.nativeFnos ? '粘贴 fnos-token 的值' : '如 Basic xxx（一般留空）'
+        },
+        passwordPlaceholder() {
+            return this.fnosPasswordSet && this.form.fnosUsername.trim() === this.savedUsername
+                ? '留空表示沿用已保存的密码' : '飞牛 NAS 登录密码'
         }
     },
     watch: {
@@ -119,9 +142,14 @@ export default {
                 this.form = {
                     url: settings.url || '',
                     savePath: settings.savePath || '',
-                    token: ''
+                    token: '',
+                    fnosUsername: settings.fnosUsername || '',
+                    fnosPassword: '',
+                    twofaCode: ''
                 }
                 this.tokenSet = !!settings.tokenSet
+                this.fnosPasswordSet = !!settings.fnosPasswordSet
+                this.savedUsername = settings.fnosUsername || ''
                 this.configured = !!settings.configured
             } catch (error) {
                 // 拦截器已提示
@@ -133,8 +161,10 @@ export default {
             return {
                 url: this.form.url.trim(),
                 savePath: this.form.savePath.trim(),
-                // 空串表示沿用已保存的认证头（服务端只写不读）
-                token: this.form.token
+                token: this.form.token,
+                fnosUsername: this.nativeFnos ? this.form.fnosUsername.trim() : '',
+                fnosPassword: this.nativeFnos ? this.form.fnosPassword : '',
+                twofaCode: this.nativeFnos ? this.form.twofaCode.trim() : ''
             }
         },
         async test() {
@@ -158,8 +188,12 @@ export default {
                 try {
                     const data = await SaveXunleiSettings(this.payload())
                     this.tokenSet = !!data?.tokenSet
+                    this.fnosPasswordSet = !!data?.fnosPasswordSet
+                    this.savedUsername = data?.fnosUsername || ''
                     this.configured = !!data?.configured
                     this.form.token = ''
+                    this.form.fnosPassword = ''
+                    this.form.twofaCode = ''
                     this.$message.success('迅雷配置已保存')
                     this.visible = false
                     this.$emit('saved', data)

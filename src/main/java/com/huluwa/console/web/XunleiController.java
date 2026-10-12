@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * 迅雷远程下载连接配置接口（供「迅雷下载」会话的配置表单调用）。
  *
- * <p>认证值只写不读：飞牛原生模式为 fnos-token Cookie 值，Docker 模式为 Authorization 头；
- * 查询只返回「是否已设置」，保存时留空表示沿用原值。</p>
+ * <p>飞牛账号密码与认证值只写不读；查询只返回账号和「是否已设置」，
+ * 密码与认证值留空表示沿用原值。两步验证码只用于当前请求。</p>
  */
 @RestController
 @RequestMapping("/api/xunlei")
@@ -38,17 +38,20 @@ public class XunleiController {
         if (body == null) {
             return ApiResult.fail(400, "缺少配置内容");
         }
-        return ApiResult.ok(xunleiService.save(body.url(), body.savePath(), body.token()));
+        return ApiResult.ok(xunleiService.save(body.url(), body.savePath(), body.token(),
+                body.fnosUsername(), body.fnosPassword(), body.twofaCode()));
     }
 
     /** 测试连接：地址 / 认证值留空时用已保存的配置 */
     @PostMapping("/test")
     public ApiResult<Map<String, Object>> test(@RequestBody(required = false) SettingsRequest body) {
-        SettingsRequest value = body == null ? new SettingsRequest(null, null, null) : body;
-        return ApiResult.ok(xunleiService.test(value.url(), value.token()));
+        SettingsRequest value = body == null ? new SettingsRequest(null, null, null, null, null, null) : body;
+        return ApiResult.ok(xunleiService.test(value.url(), value.token(),
+                value.fnosUsername(), value.fnosPassword(), value.twofaCode()));
     }
 
     /** 表单载荷：token 为 null / 空串表示「沿用已保存的认证值」 */
-    public record SettingsRequest(String url, String savePath, String token) {
+    public record SettingsRequest(String url, String savePath, String token,
+                                  String fnosUsername, String fnosPassword, String twofaCode) {
     }
 }

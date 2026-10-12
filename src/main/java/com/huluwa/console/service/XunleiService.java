@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,8 +36,8 @@ import java.util.regex.Pattern;
  *   <li>建任务同时检查 HTTP 状态码与响应体错误字段。</li>
  * </ul>
  *
- * <p>配置存放 sys_config（xl.url / xl.savepath / xl.token）。原生模式的 xl.token 是
- * fnos-token Cookie 值，Docker 模式是可选的 Authorization 头；只写不读。</p>
+ * <p>配置存放 sys_config。飞牛原生模式优先用账号密码获取并续取 fnos-token；
+ * 也可手动填 Cookie 值。Docker 模式仍使用可选的 Authorization 头。</p>
  */
 @Service
 public class XunleiService {
@@ -47,8 +48,13 @@ public class XunleiService {
     public static final String CFG_URL = "xl.url";
     /** 配置键：保存路径（迅雷 App 新建任务页里选择的完整目录路径） */
     public static final String CFG_SAVE_PATH = "xl.savepath";
-    /** 配置键：原生模式 fnos-token Cookie 值 / Docker 模式 Authorization 头 */
+    /** 配置键：原生模式手动 fnos-token Cookie 值 / Docker 模式 Authorization 头 */
     public static final String CFG_TOKEN = "xl.token";
+    /** 飞牛账号登录配置；密码与生成的登录态只在服务端保存 */
+    public static final String CFG_FNOS_USERNAME = "xl.fnos.username";
+    public static final String CFG_FNOS_PASSWORD = "xl.fnos.password";
+    public static final String CFG_FNOS_TOKEN = "xl.fnos.token";
+    public static final String CFG_FNOS_DID = "xl.fnos.did";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(8);
     private static final Duration HOME_TIMEOUT = Duration.ofSeconds(20);
@@ -70,6 +76,7 @@ public class XunleiService {
             Pattern.compile("([A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)");
 
     private final ConfigService configService;
+    private final FnosLoginClient fnosLogin = new FnosLoginClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
@@ -116,6 +123,8 @@ public class XunleiService {
         data.put("url", settings.url());
         data.put("savePath", settings.savePath());
         data.put("tokenSet", settings.token() != null && !settings.token().isBlank());
+        data.put("fnosUsername", trim(configService.get(CFG_FNOS_USERNAME)));
+        data.put("fnosPasswordSet", trim(configService.get(CFG_FNOS_PASSWORD)) != null);
         data.put("configured", settings.configured());
         return data;
     }
@@ -127,7 +136,8 @@ public class XunleiService {
      * @param savePath 保存路径（必填，建任务时作为 parent_folder_path 透传给迅雷）
      * @param token    原生模式填 fnos-token 值，Docker 模式填 Authorization 头；留空沿用已保存值
      */
-    public Map<String, Object> save(String url, String savePath, String token) {
+    public Map<String, Object> save(String url, String savePath, String token,
+                                    String fnosUsername, String fnosPassword, String twofaCode) {
         String base = normalizeBaseUrl(url);
         if (base.isBlank()) {
             throw new BusinessException(400, "请填写迅雷直连地址，例如 http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi");
@@ -144,11 +154,18 @@ public class XunleiService {
         if (path.isEmpty()) {
             throw new BusinessException(400, "请填写迅雷保存路径（迅雷 App 新建任务页里选择的目录，如 /downloads/）");
         }
+        String user = trim(fnosUsername);
         String auth = token != null && !token.isBlank() ? token.trim() : settings().token();
-        if (isNativeFnos(base) && (auth == null || auth.isBlank()
-                || auth.startsWith("Basic ") || auth.startsWith("Bearer ")
-                || auth.startsWith("fnos-token=") || auth.startsWith("Cookie:"))) {
-            throw new BusinessException(400, "飞牛原生迅雷请填写 fnos-token Cookie 的值（不含 fnos-token= 前缀）");
+        String generatedToken = null;
+        String password = null;
+        String did = null;
+        if (isNativeFnos(base) && user != null) {
+            password = configuredPassword(user, fnosPassword);
+            did = configuredDid(user);
+            generatedToken = fnosLogin.login(base, user, password, twofaCode, did);
+        } else if (isNativeFnos(base) && (auth == null || auth.isBlank()
+                || invalidNativeToken(auth))) {
+            throw new BusinessException(400, "请填写飞牛账号密码，或提供 fnos-token Cookie 的值");
         }
 
         configService.put(CFG_URL, base);
@@ -156,6 +173,17 @@ public class XunleiService {
         // 留空表示不修改已保存的认证值（前端不会拿到原值，避免明文回传）
         if (token != null && !token.isBlank()) {
             configService.put(CFG_TOKEN, token.trim());
+        }
+        if (isNativeFnos(base) && user != null) {
+            configService.put(CFG_FNOS_USERNAME, user);
+            configService.put(CFG_FNOS_PASSWORD, password);
+            configService.put(CFG_FNOS_DID, did);
+            configService.put(CFG_FNOS_TOKEN, generatedToken);
+        } else {
+            configService.put(CFG_FNOS_USERNAME, "");
+            configService.put(CFG_FNOS_PASSWORD, "");
+            configService.put(CFG_FNOS_TOKEN, "");
+            configService.put(CFG_FNOS_DID, "");
         }
         return describe();
     }
@@ -173,6 +201,11 @@ public class XunleiService {
 
     /** 测试连接：首页提 pan_auth + 取设备ID，成功即认为迅雷在线（token 留空复用已保存的值） */
     public Map<String, Object> test(String url, String token) {
+        return test(url, token, null, null, null);
+    }
+
+    public Map<String, Object> test(String url, String token, String fnosUsername,
+                                    String fnosPassword, String twofaCode) {
         Map<String, Object> result = new LinkedHashMap<>();
         Settings saved = settings();
         String base = normalizeBaseUrl(url);
@@ -189,7 +222,16 @@ public class XunleiService {
         }
         String auth = token != null && !token.isBlank() ? token.trim() : saved.token();
         try {
-            XlSession session = openSession(new Settings(base, saved.savePath(), auth));
+            XlSession session;
+            String user = trim(fnosUsername);
+            if (isNativeFnos(base) && user != null) {
+                String generated = fnosLogin.login(base, user,
+                        configuredPassword(user, fnosPassword), twofaCode, configuredDid(user));
+                session = openSessionUsingToken(new Settings(base, saved.savePath(), auth), generated);
+            } else {
+                boolean manualOnly = fnosUsername != null;
+                session = openSession(new Settings(base, saved.savePath(), auth), manualOnly);
+            }
             String deviceId = session.deviceId();
             result.put("success", true);
             result.put("message", "连接成功：迅雷在线（设备ID "
@@ -393,18 +435,78 @@ public class XunleiService {
         }
     }
 
+    private String configuredPassword(String username, String supplied) {
+        String password = supplied == null || supplied.isBlank() ? null : supplied;
+        if (password == null && username.equals(trim(configService.get(CFG_FNOS_USERNAME)))) {
+            password = configService.get(CFG_FNOS_PASSWORD);
+        }
+        if (password == null || password.isBlank()) {
+            throw new BusinessException(400, "请填写飞牛登录密码");
+        }
+        return password;
+    }
+
+    private String configuredDid(String username) {
+        String saved = trim(configService.get(CFG_FNOS_DID));
+        return username.equals(trim(configService.get(CFG_FNOS_USERNAME))) && saved != null
+                ? saved : UUID.randomUUID().toString();
+    }
+
+    private static boolean invalidNativeToken(String auth) {
+        return auth.startsWith("Basic ") || auth.startsWith("Bearer ")
+                || auth.startsWith("fnos-token=") || auth.startsWith("Cookie:");
+    }
+
     // ------------------------------------------------------------------ 迅雷会话
 
     /** 建立迅雷会话：首页提 pan_auth，再按 CGI 类型获取设备ID */
     private XlSession openSession(Settings settings) throws IOException, InterruptedException {
+        return openSession(settings, false);
+    }
+
+    private XlSession openSession(Settings settings, boolean manualOnly) throws IOException, InterruptedException {
+        if (isNativeFnos(settings.url()) && !manualOnly) {
+            String username = trim(configService.get(CFG_FNOS_USERNAME));
+            String password = configService.get(CFG_FNOS_PASSWORD);
+            if (username != null && password != null && !password.isBlank()) {
+                String token = trim(configService.get(CFG_FNOS_TOKEN));
+                if (token == null) {
+                    token = refreshFnosToken(settings.url(), username, password);
+                }
+                try {
+                    return openSessionUsingToken(settings, token);
+                } catch (BusinessException e) {
+                    if (!shouldRefreshFnos(e)) {
+                        throw e;
+                    }
+                    // CGI 登录态失效时，用已配置账号重新登录一次。
+                    String refreshed = refreshFnosToken(settings.url(), username, password);
+                    return openSessionUsingToken(settings, refreshed);
+                }
+            }
+        }
+        return openSessionUsingToken(settings, settings.token());
+    }
+
+    private String refreshFnosToken(String url, String username, String password) {
+        String token = fnosLogin.login(url, username, password, null, configuredDid(username));
+        configService.put(CFG_FNOS_TOKEN, token);
+        return token;
+    }
+
+    private static boolean shouldRefreshFnos(BusinessException e) {
+        String message = e.getMessage();
+        return message != null && (message.contains("fnos-token 已失效")
+                || message.contains("HTTP 401") || message.contains("HTTP 403"));
+    }
+
+    private XlSession openSessionUsingToken(Settings settings, String auth) throws IOException, InterruptedException {
         boolean nativeFnos = isNativeFnos(settings.url());
         String cgi = cgiUrl(settings.url());
-        String auth = settings.token();
         if (nativeFnos && (auth == null || auth.isBlank())) {
-            throw new BusinessException(400, "飞牛原生迅雷需要 fnos-token：在已登录飞牛的浏览器 Cookie 中复制 fnos-token 的值，填入迅雷设置的认证栏");
+            throw new BusinessException(400, "请填写飞牛账号密码，或配置 fnos-token Cookie 的值");
         }
-        if (nativeFnos && (auth.startsWith("Basic ") || auth.startsWith("Bearer ")
-                || auth.startsWith("fnos-token=") || auth.startsWith("Cookie:"))) {
+        if (nativeFnos && invalidNativeToken(auth)) {
             throw new BusinessException(400, "飞牛原生迅雷的认证栏应填写 fnos-token Cookie 的值，不是 Authorization 头");
         }
 
@@ -421,7 +523,7 @@ public class XunleiService {
         HttpResponse<String> home = http.send(homeBuilder.build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (nativeFnos && home.body().contains("invalid token")) {
-            throw new BusinessException(400, "飞牛 fnos-token 已失效，请重新登录飞牛并更新迅雷设置中的 Cookie 值");
+            throw new BusinessException(400, "飞牛 fnos-token 已失效");
         }
         String panToken = extractPanAuth(home.body());
         if (panToken == null) {

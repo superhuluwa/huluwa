@@ -38,7 +38,7 @@
             @saved="onVideoSaved" />
 
         <!-- 首次在「迅雷下载」会话提交磁力时，自动弹出迅雷配置表单 -->
-        <XunleiSettingsDialog v-model:show="xunleiDialog" intro="提交下载任务前需要先配置迅雷的直连地址与保存路径。"
+        <XunleiSettingsDialog v-model:show="xunleiDialog" intro="提交下载任务前请配置飞牛地址、登录账号密码和迅雷保存路径。"
             @saved="onXunleiSaved" />
     </div>
 </template>

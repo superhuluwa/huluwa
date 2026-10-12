@@ -685,7 +685,8 @@ public class ChatService {
                     还没有配置迅雷，无法提交下载任务。请按下面两步完成配置：
                     1. 飞牛原生迅雷直连地址形如 http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi；
                     2. 填写迅雷 App 新建任务页里可选的完整保存路径；
-                    3. 从已登录飞牛的浏览器 Cookie 中复制 fnos-token 的值，填入认证栏（pan-auth 由程序自动获取）。
+                    3. 填写飞牛 NAS 登录账号和密码，程序会获取并续取 fnos-token（pan-auth 也会自动获取）。
+                    启用两步验证时，首次登录需填写当前验证码；也可改用手动 fnos-token。
                     Docker 版可填写其 2345 端口地址；配置只保存在本机。""";
         }
         return """

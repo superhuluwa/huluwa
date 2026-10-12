@@ -133,7 +133,7 @@ INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('video', '视频解析', 'video', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- 内置会话：迅雷下载（把磁力链接提交给飞牛迅雷（迅雷 NAS 版）建下载任务；
--- 直连地址与保存路径存 sys_config：xl.url / xl.savepath / xl.token，幂等）
+-- 直连地址、保存路径、手动 Cookie / 飞牛账号登录配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('xunlei', '迅雷下载', 'xunlei', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
