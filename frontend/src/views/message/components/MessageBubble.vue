@@ -34,6 +34,10 @@
                             <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
                             {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
                         </button>
+                        <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
+                            <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
+                            查看磁力
+                        </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                 </template>
@@ -45,12 +49,20 @@
                             <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
                             {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
                         </button>
+                        <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
+                            <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
+                            查看磁力
+                        </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                 </template>
             </div>
         </div>
     </div>
+
+    <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」直接提交 qBittorrent -->
+    <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
+        @downloaded="onMagnetDownloaded" />
 </template>
 
 <script>
@@ -62,19 +74,20 @@
  */
 import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
-import { SubscribeMovie } from '@/api/chat'
+import MagnetListDialog from './MagnetListDialog.vue'
+import { SubscribeMovie, PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard },
+    components: { RichText, NotifyCard, MagnetListDialog },
     props: {
         message: {
             type: Object,
             required: true
         }
     },
-    emits: ['open-cover', 'delete', 'subscribed'],
+    emits: ['open-cover', 'delete', 'subscribed', 'magnet-downloaded'],
     data() {
         return {
             loadError: false,
@@ -82,7 +95,11 @@ export default {
             holdOpen: false,
             /** 本地订阅状态覆盖：服务端载荷里的 subscribed 只在渲染时读取，点按后立即切换 */
             subscribedLocal: null,
-            busy: false
+            busy: false,
+            /** 「查看磁力」按钮的加载态（抓详情页较慢，避免重复点击） */
+            magnetsLoading: false,
+            /** 磁力列表弹窗状态 */
+            magnetDialog: { show: false, url: '', title: '' }
         }
     },
     computed: {
@@ -207,6 +224,26 @@ export default {
         },
         openCover() {
             this.$emit('open-cover', { url: this.message.content, title: this.coverTitle })
+        },
+        /**
+         * 打开「查看磁力」弹窗：弹窗内部自己去抓详情页（带 loading 与缓存状态），
+         * 这里只做一次轻量预检，保证卡片上有可用链接。
+         */
+        async openMagnets() {
+            const url = this.parsedPayload.url
+            if (!url) {
+                window.$message?.error('这条卡片缺少电影港链接，无法查看磁力')
+                return
+            }
+            this.magnetDialog = {
+                show: true,
+                url,
+                title: this.parsedPayload.title || ''
+            }
+        },
+        /** 手动下载成功：通知父级（会话页可据此刷新下载态） */
+        onMagnetDownloaded(result) {
+            this.$emit('magnet-downloaded', result)
         },
         /** 订阅该剧：落库片名 + 电影港具体链接，并把详情页每集磁力存为对比基线 */
         async onSubscribe() {
@@ -380,6 +417,33 @@ export default {
 .cover-caption {
     padding: 8px 6px 4px;
     font-size: 13px;
+}
+
+/* 「查看磁力」按钮：与订阅按钮同排，仅影视卡片出现 */
+.magnet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(96, 165, 250, .4);
+    background: rgba(96, 165, 250, .10);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+
+.magnet-btn:hover:not(:disabled) {
+    background: rgba(96, 165, 250, .18);
+    border-color: rgba(96, 165, 250, .6);
+}
+
+.magnet-btn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
 }
 
 /* 影视卡片的订阅操作条：与配文同色系，点按后切换成「已订阅」静止态 */

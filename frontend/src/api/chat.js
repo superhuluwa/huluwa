@@ -72,3 +72,13 @@ export function SubscriptionMagnets(id) {
 export function SubscriptionDownloads(id = 0) {
     return http.get('/chat/subscriptions/downloads', { id })
 }
+
+/** 详情页磁力清单（搜索结果卡片「查看磁力」）：实时抓取，不写基线库 */
+export function PreviewMagnets(url, title) {
+    return http.get('/chat/subscriptions/magnets/preview', { url, title })
+}
+
+/** 手动下载一条磁力：magnet 直传原文，或用 magnetId 指定订阅库记录 */
+export function DownloadMagnet(payload) {
+    return http.post('/chat/subscriptions/magnets/download', payload, { timeout: 60000 })
+}

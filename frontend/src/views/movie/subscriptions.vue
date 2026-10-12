@@ -70,12 +70,21 @@
                 </div>
                 <div v-if="magnetsOpen === item.id" class="magnet-panel">
                     <div v-if="!magnets.length" class="magnet-empty">暂无磁力记录</div>
-                    <div v-for="m in magnets" :key="m.id" class="magnet-row">
+                    <div v-for="m in magnets" :key="m.id" class="magnet-row" :class="{ downloaded: m.downloaded }">
                         <span class="magnet-quality">{{ m.quality }}</span>
                         <span v-if="m.episode" class="magnet-ep">第 {{ m.episode }} 集</span>
                         <span class="magnet-title">{{ m.title || '（无标题）' }}</span>
                         <span v-if="m.baseline" class="magnet-tag">基线</span>
                         <span class="magnet-time">{{ m.firstSeenAt }}</span>
+                        <n-button v-if="m.downloaded" size="tiny" disabled>
+                            <template #icon><i class="fa-solid fa-check"></i></template>
+                            已下载
+                        </n-button>
+                        <n-button v-else size="tiny" type="primary" :loading="downloading === m.id"
+                            @click="downloadMagnet(m)">
+                            <template #icon><i class="fa-solid fa-download"></i></template>
+                            下载
+                        </n-button>
                     </div>
                 </div>
             </div>
@@ -103,7 +112,7 @@
  */
 import {
     GetSubscriptions, CheckSubscription, UnsubscribeMovie, SubscribeMovie,
-    DeleteSubscription, SubscriptionMagnets, SubscriptionDownloads
+    DeleteSubscription, SubscriptionMagnets, SubscriptionDownloads, DownloadMagnet
 } from '@/api/chat'
 
 const STATUS_LABEL = {
@@ -127,6 +136,7 @@ export default {
             magnetsOpen: 0,
             magnets: [],
             checking: 0,
+            downloading: 0,
             downloadColumns: [
                 { title: '剧名', key: 'seriesTitle', ellipsis: { tooltip: true } },
                 { title: '集号', key: 'episode', width: 70 },
@@ -192,6 +202,24 @@ export default {
             this.magnets = []
             const list = await SubscriptionMagnets(item.id)
             this.magnets = Array.isArray(list) ? list : []
+        },
+        /** 手动下载订阅库里的一条磁力：与订阅巡检共用后端逻辑（目录 / 剧名 / 通知一致） */
+        async downloadMagnet(m) {
+            this.downloading = m.id
+            try {
+                const result = await DownloadMagnet({ magnetId: m.id })
+                if (result && result.ok) {
+                    window.$message?.success(result.message || '已提交下载')
+                    m.downloaded = true
+                    await this.loadDownloads()
+                } else {
+                    window.$message?.warning((result && result.message) || '提交失败')
+                }
+            } catch (e) {
+                // 拦截器已提示
+            } finally {
+                this.downloading = 0
+            }
         },
         async unsubscribe(item) {
             await UnsubscribeMovie(item.id)
@@ -382,6 +410,10 @@ export default {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.magnet-row.downloaded {
+    opacity: .62;
 }
 
 .magnet-panel {

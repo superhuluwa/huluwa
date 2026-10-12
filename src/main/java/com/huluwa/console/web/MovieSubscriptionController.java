@@ -120,10 +120,50 @@ public class MovieSubscriptionController {
         return ApiResult.ok(subscriptionService.magnets(id));
     }
 
+    /**
+     * 详情页磁力清单（搜索结果卡片的「查看磁力」）：实时抓取该剧详情页，不写入基线库。
+     *
+     * <p>返回体里每条磁力附带 {@code downloaded} 标记，前端据此禁用「已下载」按钮。</p>
+     */
+    @GetMapping("/magnets/preview")
+    public ApiResult<Map<String, Object>> previewMagnets(@RequestParam String url,
+                                                         @RequestParam(required = false) String title) {
+        if (url == null || url.isBlank()) {
+            throw new BusinessException(400, "缺少电影港详情页链接");
+        }
+        return ApiResult.ok(subscriptionService.detailMagnets(url, title));
+    }
+
+    /**
+     * 手动下载一条磁力：保存目录仍是「下载根目录 / 剧名」，结果推送到「磁力下载」会话。
+     *
+     * <p>两种调用方式：{@code magnet} 直接给磁力原文（查看磁力列表），
+     * 或 {@code magnetId} 指定订阅库里的磁力记录（订阅页磁力列表）。</p>
+     */
+    @PostMapping("/magnets/download")
+    public ApiResult<Map<String, Object>> downloadMagnet(@RequestBody DownloadMagnetRequest body) {
+        if (body == null) {
+            throw new BusinessException(400, "缺少请求参数");
+        }
+        if (body.magnetId() != null && body.magnetId() > 0) {
+            return ApiResult.ok(subscriptionService.downloadStoredMagnet(body.magnetId()));
+        }
+        if (body.magnet() == null || body.magnet().isBlank()) {
+            throw new BusinessException(400, "缺少磁力链接");
+        }
+        return ApiResult.ok(subscriptionService.downloadMagnet(
+                body.url(), body.title(), body.magnet(), body.quality(), body.episode()));
+    }
+
     /** 某订阅触发的下载任务（默认最近 100 条；id=0 表示全部） */
     @GetMapping("/downloads")
     public ApiResult<List<Map<String, Object>>> downloads(@RequestParam(defaultValue = "0") long id) {
         return ApiResult.ok(subscriptionService.downloads(id));
+    }
+
+    /** 手动下载请求体：magnet 直传原文；magnetId 表示用订阅库里的磁力记录 */
+    public record DownloadMagnetRequest(Long magnetId, String url, String title,
+                                        String magnet, String quality, String episode) {
     }
 
     /** 订阅请求体：与聊天消息里的影视卡片载荷同形（id/title/year/origin/genre/cover/url） */

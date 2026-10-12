@@ -475,7 +475,25 @@ public class MovieSubscriptionService {
         if (alreadySubmitted(magnet)) {
             return false;
         }
-        String savePath = savePathOf(subscription.title());
+        Map<String, Object> result = submitOne(subscription.id(), subscription.title(), item.episode(),
+                item.quality(), magnet, item.hash(), savePathOf(subscription.title()));
+        return Boolean.TRUE.equals(result.get("ok"));
+    }
+
+    /**
+     * 提交一条磁力到 qBittorrent（订阅巡检与手动下载共用）。
+     *
+     * <p>保存目录固定为「根目录 / 剧名子目录」，任务表里记录剧名与集号：
+     * 之后下载跟踪补文件名、以及巡检去重（同一集不重复下）都依赖这两个字段。</p>
+     *
+     * @param subscriptionId 订阅 id；手动下载时可为 null（不参与订阅巡检去重）
+     * @return { ok, duplicate, inserted, taskId, savePath, status, message }
+     */
+    private Map<String, Object> submitOne(Long subscriptionId, String seriesTitle, String episode,
+                                          String quality, String magnet, String hash, String savePath) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("savePath", savePath);
+        out.put("seriesTitle", seriesTitle);
         String stamp = now();
         int inserted = jdbcTemplate.update("""
                 INSERT INTO movie_download_task
@@ -483,12 +501,10 @@ public class MovieSubscriptionService {
                      save_path, status, message, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?)
                 ON CONFLICT(magnet) DO NOTHING
-                """, subscription.id(), subscription.title(), item.episode(), item.quality(), magnet,
-                item.hash(), savePath, stamp, stamp);
-        if (inserted == 0) {
-            return false;
-        }
+                """, subscriptionId, seriesTitle, episode, quality, magnet, hash, savePath, stamp, stamp);
         long taskId = taskIdOf(magnet);
+        out.put("taskId", taskId);
+        out.put("inserted", inserted > 0);
 
         String status;
         String headline;
@@ -509,20 +525,35 @@ public class MovieSubscriptionService {
             } else if (result != null && result.ok()) {
                 status = "added";
                 headline = (result.duplicate() ? "已在下载列表" : "✅ 已提交下载")
-                        + "：清晰度 " + item.quality();
+                        + (quality == null || quality.isBlank() ? "" : "：清晰度 " + quality);
             } else {
                 status = "failed";
                 headline = "⚠️ 提交失败：" + (result == null ? "qBittorrent 未返回结果" : result.message());
             }
         }
-
-        String detail = describe(item, subscription);
         jdbcTemplate.update("""
                 UPDATE movie_download_task SET status = ?, message = ?, updated_at = ?
                  WHERE id = ?
                 """, status, headline, now(), taskId);
+
+        String detail = describeParts(episode, quality, seriesTitle);
         magnetNotice(headline, detail, savePath, "failed".equals(status) ? "config" : "ready");
-        return !"failed".equals(status);
+        out.put("status", status);
+        out.put("ok", !"failed".equals(status));
+        out.put("headline", headline);
+        return out;
+    }
+
+    /** 通知里的条目描述：集号 + 清晰度 + 标题 */
+    static String describeParts(String episode, String quality, String title) {
+        StringBuilder sb = new StringBuilder();
+        if (episode != null && !episode.isBlank()) {
+            sb.append("第 ").append(episode).append(" 集 ");
+        }
+        String grade = quality == null || quality.isBlank() ? "未知清晰度" : quality;
+        sb.append('[').append(grade).append("] ");
+        sb.append(title == null || title.isBlank() ? "未命名剧集" : title);
+        return sb.toString();
     }
 
     /** 提交前重复判定：已完成 / 排队 / 下载中的不重复提交；提交失败（如未配置 qB）允许重试 */
@@ -751,27 +782,230 @@ public class MovieSubscriptionService {
         return keys;
     }
 
-    /** 订阅磁力明细（前端订阅页展开查看；不含磁力全文，避免页面过长） */
+    /** 订阅磁力明细（前端订阅页展开查看；带磁力原文与下载状态，可直接点按钮下载） */
     public List<Map<String, Object>> magnets(long subscriptionId) {
+        Set<String> downloaded = downloadedKeys();
         List<Map<String, Object>> list = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList("""
-                SELECT id, title, magnet_key, quality, episode, baseline, first_seen_at
+                SELECT id, title, magnet, magnet_key, quality, episode, baseline, first_seen_at
                   FROM movie_subscription_magnet
                  WHERE subscription_id = ?
                  ORDER BY first_seen_at DESC, id DESC
                  LIMIT 500
                 """, subscriptionId)) {
+            String magnet = string(row.get("magnet"));
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", row.get("id"));
             item.put("title", row.get("title"));
+            item.put("magnet", magnet);
             item.put("hash", row.get("magnet_key"));
             item.put("quality", row.get("quality"));
             item.put("episode", row.get("episode"));
             item.put("baseline", number(row.get("baseline")) == 1);
+            item.put("downloaded", isDownloaded(downloaded, magnet, string(row.get("magnet_key"))));
             item.put("firstSeenAt", row.get("first_seen_at"));
             list.add(item);
         }
         return list;
+    }
+
+    /** 下载去重判定：info hash 优先，无 hash 时退化为磁力原文比较 */
+    private static boolean isDownloaded(Set<String> keys, String magnet, String hash) {
+        if (hash != null && keys.contains(hash.toLowerCase(Locale.ROOT))) {
+            return true;
+        }
+        if (magnet == null || magnet.isBlank()) {
+            return false;
+        }
+        String computed = MovieSearchService.hashOf(magnet);
+        return keys.contains(computed == null ? magnet : computed.toLowerCase(Locale.ROOT));
+    }
+
+    /** 按订阅磁力记录 id 手动下载（订阅页磁力列表的下载按钮） */
+    public Map<String, Object> downloadStoredMagnet(long magnetId) {
+        Map<String, Object> row = jdbcTemplate.queryForList("""
+                SELECT m.*, s.title AS series_title, s.detail_url AS detail_url
+                  FROM movie_subscription_magnet m
+                  JOIN movie_subscription s ON s.id = m.subscription_id
+                 WHERE m.id = ?
+                """, magnetId).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(404, "磁力记录不存在"));
+        return downloadMagnet(string(row.get("detail_url")), string(row.get("series_title")),
+                string(row.get("magnet")), string(row.get("quality")), string(row.get("episode")));
+    }
+
+    // ------------------------------------------------------------------ 详情页磁力（结果卡片「查看磁力」）
+
+    /**
+     * 抓取某部剧详情页的磁力清单（不落基线库），供搜索结果卡片的「查看磁力」使用。
+     *
+     * <p>返回结果里带 {@code downloaded} 标记：该 info hash 是否已经在下载任务表里
+     * （非 failed 状态），前端据此把按钮渲染成「已下载」避免重复提交。</p>
+     *
+     * @param detailUrl  电影港详情页地址
+     * @param seriesTitle 片名（搜索结果里的名字，作为剧名与目录名基准）
+     */
+    public Map<String, Object> detailMagnets(String detailUrl, String seriesTitle) {
+        String url = movieSearchService.absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
+        if (url.isBlank() || "null".equals(url)) {
+            throw new BusinessException(400, "缺少电影港详情页链接，无法查看磁力");
+        }
+        MovieSearchService.DetailPage detail;
+        try {
+            detail = movieSearchService.fetchDetail(url);
+        } catch (Exception e) {
+            throw new BusinessException(502, "抓取详情页失败：" + safeMessage(e));
+        }
+        String title = text(seriesTitle);
+        if (title == null) {
+            title = text(detail.title());
+        }
+        if (title == null) {
+            title = movieSearchService.idFrom(url) == null ? "未命名剧集" : ("电影港 " + movieSearchService.idFrom(url));
+        }
+        Subscription subscription = findRowByUrl(url) == null ? null : toSubscription(findRowByUrl(url));
+
+        Set<String> downloaded = downloadedKeys();
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (MovieSearchService.MagnetItem item : detail.magnets()) {
+            String key = item.hash() == null ? item.magnet() : item.hash();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("title", item.title());
+            row.put("magnet", item.magnet());
+            row.put("hash", item.hash());
+            row.put("quality", item.quality());
+            row.put("episode", item.episode());
+            row.put("downloaded", downloaded.contains(key));
+            items.add(row);
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("url", url);
+        data.put("title", title);
+        data.put("siteTitle", detail.title());
+        data.put("subscribed", subscription != null && subscription.enabled());
+        data.put("subscriptionId", subscription == null ? null : subscription.id());
+        data.put("savePath", savePathOf(title));
+        data.put("count", items.size());
+        data.put("magnets", items);
+        return data;
+    }
+
+    /**
+     * 找到某条磁力在详情页里的原始标题（用于推断集号 / 清晰度）。
+     *
+     * <p>前端「查看磁力」已经带有标题，正常路径不会走到这里；仅当调用方只给了磁力原文时，
+     * 才回查一次详情页（失败返回 null，由调用方用 OTHER 兜底）。</p>
+     */
+    private String magnetTitleOf(String url, String hash, String magnet) {
+        if (url == null || url.isBlank() || "null".equals(url)) {
+            return null;
+        }
+        try {
+            for (MovieSearchService.MagnetItem item : movieSearchService.fetchMagnets(url)) {
+                if (hash != null && hash.equalsIgnoreCase(item.hash())) {
+                    return item.title();
+                }
+                if (magnet != null && magnet.equals(item.magnet())) {
+                    return item.title();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("回查详情页推断集号失败：{}", safeMessage(e));
+        }
+        return null;
+    }
+
+    /** 已进入下载流程的磁力键集合（info hash 优先，无 hash 用磁力原文），用于去重展示 */
+    private Set<String> downloadedKeys() {
+        Set<String> keys = new LinkedHashSet<>();
+        for (Map<String, Object> row : jdbcTemplate.queryForList(
+                "SELECT magnet, torrent_hash FROM movie_download_task WHERE status <> 'failed'")) {
+            String hash = text(string(row.get("torrent_hash")));
+            if (hash != null) {
+                keys.add(hash.toLowerCase(Locale.ROOT));
+            }
+            String magnet = text(string(row.get("magnet")));
+            if (magnet != null) {
+                String computed = MovieSearchService.hashOf(magnet);
+                keys.add(computed == null ? magnet : computed.toLowerCase(Locale.ROOT));
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * 手动下载单条磁力（结果卡片「查看磁力」列表里的下载按钮）。
+     *
+     * <p>与订阅巡检共用同一套提交逻辑，因此同样保证：</p>
+     * <ul>
+     *   <li>保存目录 = 下载根目录 / 剧名子目录（同名剧归到同一文件夹）；</li>
+     *   <li>任务表记录剧名与集号，下载完成的文件名补全与结果通知照常生效；</li>
+     *   <li>提交结果写入「磁力下载」会话。</li>
+     * </ul>
+     *
+     * @param detailUrl   详情页地址（用于关联订阅与兜底剧名）
+     * @param seriesTitle 片名（决定子目录名与文件前缀）
+     * @param magnet      磁力链接原文
+     * @param quality     清晰度（可为空，从标题推断兜底）
+     * @param episode     集号（可为空，从标题推断兜底）
+     * @return 提交结果（含保存目录、状态与提示文案）
+     */
+    public Map<String, Object> downloadMagnet(String detailUrl, String seriesTitle, String magnet,
+                                              String quality, String episode) {
+        String link = text(magnet);
+        if (link == null || !link.toLowerCase(Locale.ROOT).startsWith("magnet:?xt=urn:btih:")) {
+            throw new BusinessException(400, "磁力链接格式不正确");
+        }
+        String url = movieSearchService.absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
+        Map<String, Object> subscriptionRow = url.isBlank() ? null : findRowByUrl(url);
+        Long subscriptionId = subscriptionRow == null ? null : number(subscriptionRow.get("id"));
+
+        String title = text(seriesTitle);
+        if (title == null && subscriptionRow != null) {
+            title = text(string(subscriptionRow.get("title")));
+        }
+        if (title == null) {
+            String id = movieSearchService.idFrom(url);
+            title = id == null ? "未命名剧集" : ("电影港 " + id);
+        }
+
+        String hash = MovieSearchService.hashOf(link);
+        String grade = text(quality);
+        String ep = text(episode);
+        // 前端可能只给磁力原文：用站点标题兜底推断集号 / 清晰度，保证任务行与通知信息完整
+        if (grade == null || grade.isBlank() || ep == null || ep.isBlank()) {
+            String probe = magnetTitleOf(url, hash, link);
+            if (grade == null || grade.isBlank()) {
+                grade = probe == null ? null : MovieSearchService.qualityOf(probe);
+            }
+            if (ep == null || ep.isBlank()) {
+                ep = probe == null ? null : MovieSearchService.episodeOf(probe);
+            }
+        }
+        if (grade == null || grade.isBlank()) {
+            grade = "OTHER";
+        }
+        String savePath = savePathOf(title);
+        if (alreadySubmitted(link)) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ok", true);
+            data.put("duplicate", true);
+            data.put("status", "added");
+            data.put("savePath", savePath);
+            data.put("seriesTitle", title);
+            data.put("episode", ep);
+            data.put("quality", grade);
+            data.put("message", "该磁力已在下载列表中，未重复提交。");
+            return data;
+        }
+        Map<String, Object> result = submitOne(subscriptionId, title, ep, grade, link, hash, savePath);
+        Map<String, Object> data = new LinkedHashMap<>(result);
+        data.put("episode", ep);
+        data.put("quality", grade);
+        data.put("message", result.get("ok") != Boolean.TRUE
+                ? String.valueOf(result.get("headline"))
+                : "已提交下载：" + describeParts(ep, grade, title) + "，保存到 " + savePath);
+        return data;
     }
 
     /** 下载任务明细（订阅页查看进度；默认最近 100 条） */

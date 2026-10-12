@@ -142,6 +142,26 @@ class MovieSubscriptionServiceTest {
         assertEquals("5", MovieSearchService.episodeOf("剧 第1季05.2160p.mp4"));
     }
 
+    /** 手动下载的条目描述：集号 + 清晰度 + 剧名；缺字段时也要能给出可读文案 */
+    @Test
+    void describePartsCoversManualDownloadNotice() {
+        assertEquals("第 12 集 [2160P] 斗破苍穹 第5季",
+                MovieSubscriptionService.describeParts("12", "2160P", "斗破苍穹 第5季"));
+        assertEquals("[1080P] 某剧", MovieSubscriptionService.describeParts(null, "1080P", "某剧"));
+        assertEquals("[未知清晰度] 某剧", MovieSubscriptionService.describeParts("", null, "某剧"));
+        assertEquals("[1080P] 未命名剧集", MovieSubscriptionService.describeParts(null, "1080P", null));
+    }
+
+    /** 手动下载同样落到「根目录 / 剧名」，且与订阅巡检使用同一套目录规则 */
+    @Test
+    void manualDownloadUsesSameFolderRuleAsSubscription() {
+        String folder = MovieSubscriptionService.savePathUnder("/downloads", "斗破苍穹 第5季");
+        assertEquals("/downloads/斗破苍穹 第5季", folder);
+        // 剧名里的斜杠不会造成多级目录穿透
+        assertEquals("/downloads/剧名 A_B", MovieSubscriptionService.savePathUnder("/downloads", "剧名 A/B"));
+        assertEquals(folder, MovieSubscriptionService.savePathUnder(MovieSubscriptionService.DEFAULT_SAVE_ROOT, "斗破苍穹 第5季"));
+    }
+
     @Test
     void completedStatesCoverSeedingPhases() {
         assertTrue(MovieSubscriptionService.isCompletedState("uploading"));
