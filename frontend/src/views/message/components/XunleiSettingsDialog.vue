@@ -5,17 +5,20 @@
         </n-alert>
         <n-form ref="formRef" :model="form" :rules="rules" label-placement="top">
             <n-form-item label="迅雷直连地址" path="url">
-                <n-input v-model:value="form.url" placeholder="http://192.168.3.202:2345"
+                <n-input v-model:value="form.url" placeholder="http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi"
                     @keyup.enter="submit" />
+                <template #feedback>
+                    飞牛应用中心原生迅雷填完整 CGI 地址；Docker 版可填 http://NAS_IP:2345
+                </template>
             </n-form-item>
             <n-form-item label="保存路径" path="savePath">
-                <n-input v-model:value="form.savePath" placeholder="如 /downloads/，迅雷 App 新建任务页里选择的目录" />
+                <n-input v-model:value="form.savePath" placeholder="迅雷 App 新建任务页里选择的完整目录路径" />
             </n-form-item>
-            <n-form-item label="Authorization 认证头（可选）" path="token">
+            <n-form-item :label="nativeFnos ? '飞牛 fnos-token（Cookie 值）' : 'Authorization 认证头（可选）'" path="token">
                 <n-input v-model:value="form.token" type="password" show-password-on="click"
                     :placeholder="tokenPlaceholder" />
                 <template #feedback>
-                    迅雷前端加了 Basic 认证时填写（如 Basic xxx），飞牛直连端口一般不需要
+                    {{ nativeFnos ? '在已登录飞牛的浏览器开发者工具 → 应用 → Cookie 中复制 fnos-token 的值；无需填写 pan-auth 或“Cookie:”前缀' : '仅迅雷前端加了 Basic 认证时填写，如 Basic xxx' }}
                 </template>
             </n-form-item>
         </n-form>
@@ -40,9 +43,8 @@
 <script>
 /**
  * 迅雷远程下载连接配置表单（「迅雷下载」会话首次使用与顶栏入口共用）：
- * 直连地址、保存路径、可选 Authorization 认证头；「测试连接」用表单里的最新值直接探测，
- * 认证头留空表示沿用服务端已保存的值（接口不回传明文）。
- * 直连地址与保存路径的口径来自参考脚本 qBittorrentXunleiTransfer.cs 的 xlURL / xlSavePath。
+ * 直连地址、保存路径和认证值；原生模式使用 fnos-token Cookie，Docker 模式使用可选 Authorization。
+ * 「测试连接」用表单里的最新值直接探测；认证值留空表示沿用服务端已保存值。
  */
 import { GetXunleiSettings, SaveXunleiSettings, TestXunleiConnection } from '@/api/xunlei'
 
@@ -91,8 +93,13 @@ export default {
         title() {
             return this.configured ? '迅雷连接设置' : '配置迅雷连接'
         },
+        nativeFnos() {
+            const url = this.form.url.trim()
+            return url.includes('/cgi/ThirdParty/xunlei/index.cgi') || /:5666(?:\/|$)/.test(url)
+        },
         tokenPlaceholder() {
-            return this.tokenSet ? '留空表示沿用已保存的认证头' : '如 Basic xxx（一般留空）'
+            if (this.tokenSet) return '留空表示沿用已保存的认证值'
+            return this.nativeFnos ? '粘贴 fnos-token 的值' : '如 Basic xxx（一般留空）'
         }
     },
     watch: {

@@ -13,7 +13,8 @@ import java.util.Map;
 /**
  * 迅雷远程下载连接配置接口（供「迅雷下载」会话的配置表单调用）。
  *
- * <p>Authorization 认证头只写不读：查询只返回「是否已设置」，保存时留空表示沿用原值。</p>
+ * <p>认证值只写不读：飞牛原生模式为 fnos-token Cookie 值，Docker 模式为 Authorization 头；
+ * 查询只返回「是否已设置」，保存时留空表示沿用原值。</p>
  */
 @RestController
 @RequestMapping("/api/xunlei")
@@ -25,7 +26,7 @@ public class XunleiController {
         this.xunleiService = xunleiService;
     }
 
-    /** 当前配置（不含 Authorization 头明文） */
+    /** 当前配置（不含认证值明文） */
     @GetMapping("/settings")
     public ApiResult<Map<String, Object>> settings() {
         return ApiResult.ok(xunleiService.describe());
@@ -40,14 +41,14 @@ public class XunleiController {
         return ApiResult.ok(xunleiService.save(body.url(), body.savePath(), body.token()));
     }
 
-    /** 测试连接：地址 / 认证头留空时用已保存的配置（认证头留空表示沿用原值） */
+    /** 测试连接：地址 / 认证值留空时用已保存的配置 */
     @PostMapping("/test")
     public ApiResult<Map<String, Object>> test(@RequestBody(required = false) SettingsRequest body) {
         SettingsRequest value = body == null ? new SettingsRequest(null, null, null) : body;
         return ApiResult.ok(xunleiService.test(value.url(), value.token()));
     }
 
-    /** 表单载荷：token 为 null / 空串表示「沿用已保存的 Authorization 认证头」 */
+    /** 表单载荷：token 为 null / 空串表示「沿用已保存的认证值」 */
     public record SettingsRequest(String url, String savePath, String token) {
     }
 }

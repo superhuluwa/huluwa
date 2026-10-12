@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 迅雷下载会话的纯函数单测：pan_auth 提取 / resource/list 文件清单解析 / 服务地址归一化。
- * 迅雷接口路径依赖真实飞牛迅雷，不在此覆盖（由「测试连接」在前端联调）。
+ * CGI 地址解析覆盖飞牛原生与 Docker；真实接口联调仍由设置页「测试连接」完成。
  */
 class XunleiServiceTest {
 
@@ -21,6 +21,8 @@ class XunleiServiceTest {
     void panAuthPrefersUiauthFunction() {
         String html = "<script>function uiauth(value){ return \"abc.def.ghi\"; }</script>";
         assertEquals("abc.def.ghi", XunleiService.extractPanAuth(html));
+        assertEquals("abc.def.ghi", XunleiService.extractPanAuth(
+                "<script>function uiauth(value){return \"abc.def.ghi\"}</script>"));
     }
 
     /** 首页没有 uiauth 函数时，兜底匹配页面里的 JWT 形态串（三段 base64url） */
@@ -67,6 +69,16 @@ class XunleiServiceTest {
         assertEquals("http://192.168.3.202:2345", XunleiService.normalizeBaseUrl(" http://192.168.3.202:2345/ "));
         assertEquals("http://xl.local:2345", XunleiService.normalizeBaseUrl("http://xl.local:2345//"));
         assertEquals("", XunleiService.normalizeBaseUrl(null));
+    }
+
+    @Test
+    void nativeAndDockerCgiAddressesStayDistinct() {
+        String nativeUrl = "http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi";
+        assertEquals(nativeUrl, XunleiService.cgiUrl(nativeUrl));
+        assertEquals(nativeUrl, XunleiService.cgiUrl("http://192.168.3.202:5666"));
+        assertTrue(XunleiService.isNativeFnos(nativeUrl));
+        assertEquals("http://192.168.3.202:2345/webman/3rdparty/pan-xunlei-com/index.cgi",
+                XunleiService.cgiUrl("http://192.168.3.202:2345"));
     }
 
     @Test

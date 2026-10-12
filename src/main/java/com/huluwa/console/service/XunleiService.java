@@ -23,33 +23,31 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 迅雷远程下载对接（对齐 quantum 参考工程的 qBittorrentXunleiTransfer.cs）：
- * 飞牛应用中心的迅雷 = 迅雷 NAS 版容器，接口为社区逆向口径，迅雷升级可能变动。
+ * 迅雷远程下载对接：支持飞牛原生 CGI 与 Docker 版 CGI，接口为社区逆向口径。
  *
  * <ul>
- *   <li>会话：GET {直连地址}/webman/3rdparty/pan-xunlei-com/index.cgi/ 首页提 pan_auth
- *       （uiauth 函数，兜底 JWT 形态）→ POST device/info/watch 取设备ID。
+ *   <li>会话：GET CGI 首页提 pan_auth（uiauth 函数，兜底 JWT 形态）；
+ *       飞牛原生通过 user#runner 任务获取设备ID，Docker 版通过 device/info/watch 获取。
  *       每次提交前重建会话、不做缓存（与参考脚本「每轮一次」的口径一致，
  *       避免拿失效 pan_auth 反复失败）；</li>
  *   <li>提交：POST drive/v1/resource/list 服务端解析磁力文件清单
- *       → POST drive/v1/task 建任务（sub_file_index=--1 下载全部文件，
- *       parent_folder_path=配置的保存路径，与参考脚本的载荷字段一致）；</li>
- *   <li>成败按 HTTP 状态码判定：建任务 HTTP 200 即视为成功，其余把响应体带给用户。</li>
+ *       → POST drive/v1/task 建任务（sub_file_index=--1 下载全部文件）；</li>
+ *   <li>建任务同时检查 HTTP 状态码与响应体错误字段。</li>
  * </ul>
  *
- * <p>配置存放 sys_config（xl.url / xl.savepath / xl.token），由「迅雷下载」会话首次使用时引导填写；
- * Authorization 认证头（迅雷前端加了 Basic 认证时用，飞牛直连端口一般不需要）只写不读。</p>
+ * <p>配置存放 sys_config（xl.url / xl.savepath / xl.token）。原生模式的 xl.token 是
+ * fnos-token Cookie 值，Docker 模式是可选的 Authorization 头；只写不读。</p>
  */
 @Service
 public class XunleiService {
 
     private static final Logger log = LoggerFactory.getLogger(XunleiService.class);
 
-    /** 配置键：迅雷直连地址（飞牛「应用中心 → 迅雷」详情页的访问端口） */
+    /** 配置键：迅雷 CGI 地址，或可由端口推断 CGI 的服务根地址 */
     public static final String CFG_URL = "xl.url";
-    /** 配置键：保存路径（迅雷 App 新建任务页里选择的目录，如 /downloads/） */
+    /** 配置键：保存路径（迅雷 App 新建任务页里选择的完整目录路径） */
     public static final String CFG_SAVE_PATH = "xl.savepath";
-    /** 配置键：Authorization 认证头（可选，只写不读；如 Basic xxx） */
+    /** 配置键：原生模式 fnos-token Cookie 值 / Docker 模式 Authorization 头 */
     public static final String CFG_TOKEN = "xl.token";
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(8);
@@ -66,7 +64,7 @@ public class XunleiService {
 
     /** 首页 pan_auth 的首选取法：uiauth 函数返回值（与官方前端一致） */
     private static final Pattern PAN_AUTH_UIAUTH =
-            Pattern.compile("function uiauth\\(value\\)\\{ return \"([^\"]+)\" \\}");
+            Pattern.compile("function\\s+uiauth\\(value\\)\\s*\\{\\s*return\\s*\"([^\"]+)\"");
     /** 兜底取法：页面里的 JWT 形态串（三段 base64url，中划线下划线允许） */
     private static final Pattern PAN_AUTH_JWT =
             Pattern.compile("([A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)");
@@ -82,7 +80,7 @@ public class XunleiService {
         this.configService = configService;
     }
 
-    /** 迅雷的连接配置（Authorization 头只写不读，tokenSet 表达是否已设置） */
+    /** 迅雷的连接配置（认证值只写不读，tokenSet 表达是否已设置） */
     public record Settings(String url, String savePath, String token) {
 
         public boolean configured() {
@@ -94,8 +92,8 @@ public class XunleiService {
     public record TaskResult(boolean ok, String message, String name, long size, int fileCount, String taskId) {
     }
 
-    /** 迅雷会话：cgi 基址 + pan_auth + 设备ID + 可选 Authorization 认证头 */
-    private record XlSession(String cgi, String panToken, String deviceId, String auth) {
+    /** 迅雷会话：CGI 基址 + pan_auth + 设备ID + 对应模式的认证值 */
+    private record XlSession(String cgi, String panToken, String deviceId, String auth, boolean nativeFnos) {
     }
 
     /** 迅雷接口响应（状态码 + 响应体） */
@@ -111,7 +109,7 @@ public class XunleiService {
                 trim(configService.get(CFG_TOKEN)));
     }
 
-    /** 下发前端的配置视图：绝不回传 Authorization 头明文，只回传是否已设置 */
+    /** 下发前端的配置视图：不回传认证值明文，只回传是否已设置 */
     public Map<String, Object> describe() {
         Settings settings = settings();
         Map<String, Object> data = new LinkedHashMap<>();
@@ -127,12 +125,12 @@ public class XunleiService {
      *
      * @param url      迅雷直连地址（必填，缺协议时自动补 http://）
      * @param savePath 保存路径（必填，建任务时作为 parent_folder_path 透传给迅雷）
-     * @param token    Authorization 认证头；为 null 或空串表示「保持已保存的值不变」
+     * @param token    原生模式填 fnos-token 值，Docker 模式填 Authorization 头；留空沿用已保存值
      */
     public Map<String, Object> save(String url, String savePath, String token) {
         String base = normalizeBaseUrl(url);
         if (base.isBlank()) {
-            throw new BusinessException(400, "请填写迅雷直连地址，例如 http://192.168.3.202:2345");
+            throw new BusinessException(400, "请填写迅雷直连地址，例如 http://192.168.3.202:5666/cgi/ThirdParty/xunlei/index.cgi");
         }
         if (!base.startsWith("http://") && !base.startsWith("https://")) {
             base = "http://" + base;
@@ -146,10 +144,16 @@ public class XunleiService {
         if (path.isEmpty()) {
             throw new BusinessException(400, "请填写迅雷保存路径（迅雷 App 新建任务页里选择的目录，如 /downloads/）");
         }
+        String auth = token != null && !token.isBlank() ? token.trim() : settings().token();
+        if (isNativeFnos(base) && (auth == null || auth.isBlank()
+                || auth.startsWith("Basic ") || auth.startsWith("Bearer ")
+                || auth.startsWith("fnos-token=") || auth.startsWith("Cookie:"))) {
+            throw new BusinessException(400, "飞牛原生迅雷请填写 fnos-token Cookie 的值（不含 fnos-token= 前缀）");
+        }
 
         configService.put(CFG_URL, base);
         configService.put(CFG_SAVE_PATH, path);
-        // 留空表示不修改已保存的认证头（前端不会拿到原值，避免明文回传）
+        // 留空表示不修改已保存的认证值（前端不会拿到原值，避免明文回传）
         if (token != null && !token.isBlank()) {
             configService.put(CFG_TOKEN, token.trim());
         }
@@ -243,8 +247,11 @@ public class XunleiService {
         } catch (Exception e) {
             return new TaskResult(false, "迅雷解析磁力失败：" + safeMessage(e), null, 0, 0, null);
         }
-        if (list.status() != 200) {
-            return new TaskResult(false, "迅雷解析磁力失败：HTTP " + list.status() + " " + abbreviate(list.body()),
+        if (list.status() != 200 || responseHasError(list.body())) {
+            String detail = list.body().contains("unauthenticated")
+                    ? "迅雷账号登录态已失效，请在飞牛迅雷 App 重新登录或绑定账号后重试；若测试连接也失败，请更新 fnos-token。"
+                    : "HTTP " + list.status() + " " + abbreviate(list.body());
+            return new TaskResult(false, "迅雷解析磁力失败：" + detail,
                     null, 0, 0, null);
         }
         List<JsonNode> leaves = extractLeaves(list.body());
@@ -259,23 +266,46 @@ public class XunleiService {
         String firstName = first.path("name").asText("");
         String firstMime = first.path("meta").path("mime_type").asText("");
         String firstId = first.path("id").asText("");
+        String taskName = firstName;
+        if (session.nativeFnos()) {
+            try {
+                String rootName = objectMapper.readTree(list.body())
+                        .path("list").path("resources").path(0).path("name").asText("");
+                if (!rootName.isBlank()) {
+                    taskName = rootName;
+                }
+            } catch (Exception e) {
+                // 保留首个文件名作为兜底
+            }
+        }
 
-        // 2) 建下载任务（全部文件；字段与参考脚本一致）
+        // 2) 原生 CGI 的保存目录要传文件夹 ID，不能仅传路径
+        String folderId = "";
+        if (session.nativeFnos()) {
+            try {
+                folderId = findNativeFolderId(session, savePath);
+            } catch (Exception e) {
+                return new TaskResult(false, "获取迅雷保存目录失败：" + safeMessage(e),
+                        taskName, totalSize, leaves.size(), null);
+            }
+        }
+
+        // 3) 建下载任务（全部文件）
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("target", "device_id#" + session.deviceId());
+        params.put("target", session.deviceId());
         params.put("url", magnet);
         params.put("total_file_count", String.valueOf(leaves.size()));
-        params.put("parent_folder_id", "");
+        params.put("parent_folder_id", folderId);
         params.put("parent_folder_path", savePath);
-        params.put("sub_file_index", "--1");
-        params.put("mime_type", firstMime);
-        params.put("file_id", firstId);
+        params.put("sub_file_index", session.nativeFnos() ? "--1," : "--1");
+        params.put("mime_type", session.nativeFnos() ? "" : firstMime);
+        params.put("file_id", session.nativeFnos() ? "" : firstId);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("type", "user#download-url");
-        payload.put("name", firstName);
-        payload.put("file_name", firstName);
+        payload.put("name", taskName);
+        payload.put("file_name", taskName);
         payload.put("file_size", String.valueOf(totalSize));
-        payload.put("space", "device_id#" + session.deviceId());
+        payload.put("space", session.deviceId());
         payload.put("params", params);
 
         Response task;
@@ -284,17 +314,17 @@ public class XunleiService {
             taskBody = objectMapper.writeValueAsString(payload);
             task = send(session, "/drive/v1/task", taskBody, TASK_TIMEOUT);
         } catch (Exception e) {
-            return new TaskResult(false, "迅雷建任务失败：" + safeMessage(e), firstName, totalSize, leaves.size(), null);
+            return new TaskResult(false, "迅雷建任务失败：" + safeMessage(e), taskName, totalSize, leaves.size(), null);
         }
-        if (task.status() != 200) {
+        if (task.status() != 200 || responseHasError(task.body())) {
             return new TaskResult(false, "迅雷建任务失败：HTTP " + task.status() + " " + abbreviate(task.body()),
-                    firstName, totalSize, leaves.size(), null);
+                    taskName, totalSize, leaves.size(), null);
         }
         String taskId = readTaskId(task.body());
         log.info("迅雷任务已创建（磁力 {}…，{} 个文件，任务ID {}）",
                 magnet.substring(0, Math.min(24, magnet.length())), leaves.size(),
                 taskId == null ? "未返回" : taskId);
-        return new TaskResult(true, "已创建迅雷任务", firstName, totalSize, leaves.size(), taskId);
+        return new TaskResult(true, "已创建迅雷任务", taskName, totalSize, leaves.size(), taskId);
     }
 
     /** 建任务响应里的任务ID（task.id 或顶层 id，取不到返回 null，不影响提交结果） */
@@ -313,36 +343,105 @@ public class XunleiService {
         }
     }
 
+    /** 飞牛原生迅雷用下载目录 ID 创建任务；路径取自迅雷自身可选的下载目录。 */
+    private String findNativeFolderId(XlSession session, String savePath) throws IOException, InterruptedException {
+        Response response = send(session, "/device/download_paths", null, INFO_TIMEOUT);
+        if (response.status() != 200) {
+            throw new BusinessException(400, "下载目录查询返回 HTTP " + response.status() + " " + abbreviate(response.body()));
+        }
+        try {
+            JsonNode paths = objectMapper.readTree(response.body());
+            if (paths.isObject()) {
+                paths = paths.path("paths");
+            }
+            if (paths.isArray()) {
+                for (JsonNode path : paths) {
+                    if (sameFolder(savePath, path.path("RealPath").asText(""))) {
+                        String id = path.path("Id").asText("");
+                        if (!id.isBlank()) {
+                            return id;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new BusinessException(400, "迅雷返回的下载目录列表无法解析");
+        }
+        throw new BusinessException(400, "保存路径不在迅雷可选下载目录中：" + savePath
+                + "。请从迅雷新建任务页复制完整目录路径");
+    }
+
+    private static boolean sameFolder(String left, String right) {
+        return stripTrailingSlash(left).equals(stripTrailingSlash(right));
+    }
+
+    private static String stripTrailingSlash(String path) {
+        String value = path == null ? "" : path.trim();
+        while (value.length() > 1 && value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value;
+    }
+
+    private boolean responseHasError(String body) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            return (root.hasNonNull("error") && !root.path("error").asText("").isBlank())
+                    || (root.has("HttpStatus") && root.path("HttpStatus").asInt(0) != 0);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------ 迅雷会话
 
-    /** 建立迅雷会话：首页提 pan_auth（uiauth 函数，兜底 JWT 形态）→ device/info/watch 取设备ID */
+    /** 建立迅雷会话：首页提 pan_auth，再按 CGI 类型获取设备ID */
     private XlSession openSession(Settings settings) throws IOException, InterruptedException {
-        String cgi = settings.url() + "/webman/3rdparty/pan-xunlei-com/index.cgi";
+        boolean nativeFnos = isNativeFnos(settings.url());
+        String cgi = cgiUrl(settings.url());
         String auth = settings.token();
+        if (nativeFnos && (auth == null || auth.isBlank())) {
+            throw new BusinessException(400, "飞牛原生迅雷需要 fnos-token：在已登录飞牛的浏览器 Cookie 中复制 fnos-token 的值，填入迅雷设置的认证栏");
+        }
+        if (nativeFnos && (auth.startsWith("Basic ") || auth.startsWith("Bearer ")
+                || auth.startsWith("fnos-token=") || auth.startsWith("Cookie:"))) {
+            throw new BusinessException(400, "飞牛原生迅雷的认证栏应填写 fnos-token Cookie 的值，不是 Authorization 头");
+        }
 
         HttpRequest.Builder homeBuilder = HttpRequest.newBuilder(URI.create(cgi + "/"))
                 .timeout(HOME_TIMEOUT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("User-Agent", USER_AGENT)
                 .GET();
-        if (auth != null && !auth.isBlank()) {
+        if (nativeFnos) {
+            homeBuilder.header("Cookie", "fnos-token=" + auth);
+        } else if (auth != null && !auth.isBlank()) {
             homeBuilder.header("Authorization", auth);
         }
         HttpResponse<String> home = http.send(homeBuilder.build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (nativeFnos && home.body().contains("invalid token")) {
+            throw new BusinessException(400, "飞牛 fnos-token 已失效，请重新登录飞牛并更新迅雷设置中的 Cookie 值");
+        }
         String panToken = extractPanAuth(home.body());
         if (panToken == null) {
             throw new BusinessException(400, "迅雷首页未解析到 pan_auth（HTTP " + home.statusCode()
                     + "）：请核对直连地址是否正确、迅雷是否已完成账号绑定");
         }
 
-        Response info = send(new XlSession(cgi, panToken, "", auth), "/device/info/watch", "{}", INFO_TIMEOUT);
-        if (info.status() != 200) {
+        XlSession initial = new XlSession(cgi, panToken, "", auth, nativeFnos);
+        Response info = nativeFnos
+                ? send(initial, "/drive/v1/tasks?type=user%23runner", null, INFO_TIMEOUT)
+                : send(initial, "/device/info/watch", "{}", INFO_TIMEOUT);
+        if (info.status() != 200 || responseHasError(info.body())) {
             throw new BusinessException(400, "迅雷取设备ID失败：HTTP " + info.status() + " " + abbreviate(info.body()));
         }
         String target = "";
         try {
-            target = objectMapper.readTree(info.body()).path("target").asText("");
+            JsonNode root = objectMapper.readTree(info.body());
+            target = nativeFnos
+                    ? root.path("tasks").path(0).path("params").path("target").asText("")
+                    : root.path("target").asText("");
         } catch (Exception e) {
             // 按 target 缺失处理
         }
@@ -350,9 +449,9 @@ public class XunleiService {
         if (idx < 0 || idx + 1 >= target.length()) {
             throw new BusinessException(400, "迅雷设备信息响应缺少设备ID：" + abbreviate(info.body()));
         }
-        String deviceId = target.substring(idx + 1);
+        String deviceId = target;
         log.info("迅雷会话就绪（pan_auth 已取，设备ID {}…）", deviceId.substring(0, Math.min(8, deviceId.length())));
-        return new XlSession(cgi, panToken, deviceId, auth);
+        return new XlSession(cgi, panToken, deviceId, auth, nativeFnos);
     }
 
     /** 首页提 pan_auth：先按 uiauth 函数取，取不到再兜底 JWT 形态（与参考脚本同口径） */
@@ -368,17 +467,21 @@ public class XunleiService {
         return matcher.find() ? matcher.group(1) : null;
     }
 
-    /** 迅雷接口统一发送：pan_auth 走查询参数与请求头双通道（与官方前端一致） */
+    /** 迅雷接口统一发送：原生 CGI 使用 fnos-token Cookie，pan_auth 走查询参数与请求头。 */
     private Response send(XlSession session, String path, String json, Duration timeout)
             throws IOException, InterruptedException {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(
-                        session.cgi() + path + "?pan_auth=" + encode(session.panToken()) + "&device_space="))
+                        session.cgi() + path + (path.contains("?") ? "&" : "?")
+                                + "pan_auth=" + encode(session.panToken()) + "&device_space="))
                 .timeout(timeout)
                 .header("Accept", "application/json, text/plain, */*")
                 .header("pan-auth", session.panToken())
                 .header("device-space", "")
+                .header("Referer", session.cgi() + "/")
                 .header("User-Agent", USER_AGENT);
-        if (session.auth() != null && !session.auth().isBlank()) {
+        if (session.nativeFnos()) {
+            builder.header("Cookie", "fnos-token=" + session.auth());
+        } else if (session.auth() != null && !session.auth().isBlank()) {
             builder.header("Authorization", session.auth());
         }
         if (json != null) {
@@ -432,6 +535,34 @@ public class XunleiService {
             value = value.substring(0, value.length() - 1);
         }
         return value.trim();
+    }
+
+    /** 完整 CGI 地址优先；服务根地址按飞牛 5666 / Docker 端口分别补全。 */
+    static String cgiUrl(String url) {
+        String base = normalizeBaseUrl(url);
+        if (base.endsWith("/cgi/ThirdParty/xunlei/index.cgi")
+                || base.endsWith("/webman/3rdparty/pan-xunlei-com/index.cgi")) {
+            return base;
+        }
+        return base + (isNativeFnos(base)
+                ? "/cgi/ThirdParty/xunlei/index.cgi"
+                : "/webman/3rdparty/pan-xunlei-com/index.cgi");
+    }
+
+    static boolean isNativeFnos(String url) {
+        String base = normalizeBaseUrl(url);
+        if (base.contains("/cgi/ThirdParty/xunlei/index.cgi")) {
+            return true;
+        }
+        if (base.contains("/webman/3rdparty/pan-xunlei-com/index.cgi")) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(base);
+            return uri.getPort() == 5666;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 查询参数编码（pan_auth 里的 JWT 串含点与下划线，整体编码后拼进 URL） */
