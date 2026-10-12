@@ -80,12 +80,12 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
 
--- 消息中心会话（聊天对象）：当前内置「电影港」搜索、「磁力下载」与「视频解析」会话；
+-- 消息中心会话（聊天对象）：当前内置「电影港」搜索、「磁力下载」、「视频解析」与「迅雷下载」会话；
 -- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | magnet | video | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | magnet | video | xunlei | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -131,6 +131,11 @@ VALUES ('magnet', '磁力下载', 'magnet', datetime('now', 'localtime'), dateti
 -- 服务地址与账号存 sys_config：video.url / video.username / video.password，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('video', '视频解析', 'video', datetime('now', 'localtime'), datetime('now', 'localtime'));
+
+-- 内置会话：迅雷下载（把磁力链接提交给飞牛迅雷（迅雷 NAS 版）建下载任务；
+-- 直连地址与保存路径存 sys_config：xl.url / xl.savepath / xl.token，幂等）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('xunlei', '迅雷下载', 'xunlei', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- ============================================================
 -- 电影港订阅（对齐 quantum 的 dygangs_search.cs / dygangs.cs）：

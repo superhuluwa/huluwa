@@ -38,7 +38,7 @@ export default {
             type: String,
             default: ''
         },
-        /** 会话类型：movie 搜索 / magnet 提交磁力 / video 解析口令 / system 只读 / chat 普通对话 */
+        /** 会话类型：movie 搜索 / magnet 提交磁力 / video 解析口令 / xunlei 提交迅雷 / system 只读 / chat 普通对话 */
         kind: {
             type: String,
             default: 'chat'
@@ -79,18 +79,24 @@ export default {
                     ? '粘贴抖音等分享口令'
                     : '把抖音等 App 的分享口令整段贴进来（含链接），回车开始解析'
             }
+            if (this.kind === 'xunlei') {
+                return this.mobile ? '粘贴磁力链接提交迅雷' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交迅雷；可一次贴多条'
+            }
             return this.mobile ? '输入消息…' : '输入消息…（Enter 发送 / Shift+Enter 换行）'
         },
         canSend() {
             return !this.readonly && !this.sending && this.draft.trim().length > 0
         },
-        /** 发送中的提示文案与图标：磁力会话提交任务、视频会话解析口令，都不是搜索 */
+        /** 发送中的提示文案与图标：磁力会话提交任务、视频会话解析口令、迅雷会话建下载任务，都不是搜索 */
         busyText() {
             if (this.kind === 'magnet') {
                 return '正在提交到 qBittorrent，请稍候…'
             }
             if (this.kind === 'video') {
                 return '正在解析分享口令，视频较大时可能需要十几秒…'
+            }
+            if (this.kind === 'xunlei') {
+                return '正在提交到迅雷，解析磁力文件清单可能需要十几秒…'
             }
             return '正在搜索，请稍候…'
         },
@@ -100,6 +106,9 @@ export default {
             }
             if (this.kind === 'video') {
                 return 'fa-solid fa-clapperboard'
+            }
+            if (this.kind === 'xunlei') {
+                return 'fa-solid fa-bolt'
             }
             return 'fa-solid fa-magnifying-glass'
         }

@@ -43,7 +43,7 @@
 /**
  * 会话列表（对齐 quantum ConversationList 的视觉）：
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
- * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 + 系统通知虚拟会话），列表不做删除。
+ * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载 + 系统通知虚拟会话），列表不做删除。
  *
  * 手机端（mobile）：列表本身就是一级「全屏页面」——标题区留出状态栏安全区、行高与触控目标放大、
  * 右侧加箭头提示可进入聊天详情，因此不再需要高亮当前会话。
@@ -111,6 +111,9 @@ export default {
             if (item.kind === 'video') {
                 return 'fa-solid fa-clapperboard'
             }
+            if (item.kind === 'xunlei') {
+                return 'fa-solid fa-bolt'
+            }
             return 'fa-regular fa-comments'
         },
         iconClass(item) {
@@ -118,6 +121,7 @@ export default {
                 movie: item.kind === 'movie',
                 magnet: item.kind === 'magnet',
                 video: item.kind === 'video',
+                xunlei: item.kind === 'xunlei',
                 system: item.kind === 'system'
             }
         }
@@ -222,6 +226,11 @@ export default {
 .conv-icon.video {
     background: rgba(6, 182, 212, .16);
     color: #67E8F9;
+}
+
+.conv-icon.xunlei {
+    background: rgba(0, 169, 255, .16);
+    color: #67D8FF;
 }
 
 .conv-icon.system {

@@ -12,10 +12,10 @@
         <section v-if="showRoom" class="chat-room">
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
                 :compact="isMobile" :clearable="canSend" :markable="isSystem" :show-menu="isMobile"
-                :magnet="isMagnet" :video="isVideoSession"
+                :magnet="isMagnet" :video="isVideoSession" :xunlei="isXunleiSession"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
                 @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog"
-                @video-settings="openVideoDialog" />
+                @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
@@ -36,6 +36,10 @@
         <!-- 首次在「视频解析」会话提交口令时，自动弹出解析服务配置表单 -->
         <VideoSettingsDialog v-model:show="videoDialog" intro="解析分享口令前需要先配置视频解析服务的连接信息。"
             @saved="onVideoSaved" />
+
+        <!-- 首次在「迅雷下载」会话提交磁力时，自动弹出迅雷配置表单 -->
+        <XunleiSettingsDialog v-model:show="xunleiDialog" intro="提交下载任务前需要先配置迅雷的直连地址与保存路径。"
+            @saved="onXunleiSaved" />
     </div>
 </template>
 
@@ -51,6 +55,7 @@
  *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
  *  - 内置「磁力下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
+ *  - 内置「迅雷下载」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
  *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
  *
  * 手机端（触屏 + 窄视口）的页面形态：
@@ -70,6 +75,7 @@ import ChatComposer from './components/ChatComposer.vue'
 import CoverViewer from './components/CoverViewer.vue'
 import QbSettingsDialog from './components/QbSettingsDialog.vue'
 import VideoSettingsDialog from './components/VideoSettingsDialog.vue'
+import XunleiSettingsDialog from './components/XunleiSettingsDialog.vue'
 
 /** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
 const PREFERRED_SESSION = 'movie'
@@ -83,7 +89,8 @@ export default {
         ChatComposer,
         CoverViewer,
         QbSettingsDialog,
-        VideoSettingsDialog
+        VideoSettingsDialog,
+        XunleiSettingsDialog
     },
     setup() {
         // 手机端会话页由路由守卫标记为全屏沉浸（壳层收起）；桌面端恒为 false
@@ -104,7 +111,11 @@ export default {
             /** 首次提交视频口令且尚未配置时自动弹出的配置表单 */
             videoDialog: false,
             /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
-            videoPrompted: false
+            videoPrompted: false,
+            /** 首次提交迅雷磁力且尚未配置时自动弹出的配置表单 */
+            xunleiDialog: false,
+            /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
+            xunleiPrompted: false
         }
     },
     computed: {
@@ -133,6 +144,7 @@ export default {
                 movie: '影视搜索',
                 magnet: '磁力下载',
                 video: '分享口令解析',
+                xunlei: '迅雷远程下载',
                 system: '系统事件与运行通知'
             }[this.currentSession.kind] || '会话'
             return kindText + ' · ' + count + ' 条消息'
@@ -161,6 +173,9 @@ export default {
         isVideoSession() {
             return this.currentSession?.kind === 'video'
         },
+        isXunleiSession() {
+            return this.currentSession?.kind === 'xunlei'
+        },
         emptyTitle() {
             if (this.currentKind === 'movie') {
                 return '还没有搜索记录'
@@ -170,6 +185,9 @@ export default {
             }
             if (this.currentKind === 'video') {
                 return '还没有视频解析记录'
+            }
+            if (this.currentKind === 'xunlei') {
+                return '还没有迅雷下载记录'
             }
             return '暂无消息'
         },
@@ -187,6 +205,11 @@ export default {
                     ? '把抖音等 App 的分享口令整段粘贴到下方，发送即解析'
                     : '把抖音等 App 的分享口令整段粘贴到下方输入框，回车即解析并回复视频'
             }
+            if (this.currentKind === 'xunlei') {
+                return this.isMobile
+                    ? '把磁力链接粘贴到下方输入框，发送即提交迅雷下载'
+                    : '把磁力链接粘贴到下方输入框，回车即创建迅雷下载任务'
+            }
             return '系统事件与运行通知会显示在这里'
         },
         composerHint() {
@@ -203,6 +226,9 @@ export default {
             }
             if (this.currentKind === 'video') {
                 return this.isMobile ? '' : '粘贴分享口令回车即解析；输入「状态」看配置，「帮助」看用法'
+            }
+            if (this.currentKind === 'xunlei') {
+                return this.isMobile ? '' : '粘贴磁力链接回车即提交迅雷；输入「状态」看配置，「帮助」看用法'
             }
             return ''
         }
@@ -225,6 +251,10 @@ export default {
                 if (payload.kind === 'video' && this.isVideoSession && !this.videoPrompted) {
                     this.videoPrompted = true
                     this.videoDialog = true
+                }
+                if (payload.kind === 'xunlei' && this.isXunleiSession && !this.xunleiPrompted) {
+                    this.xunleiPrompted = true
+                    this.xunleiDialog = true
                 }
             } catch (e) {
                 // 损坏的载荷按无引导处理
@@ -378,6 +408,15 @@ export default {
         onVideoSaved() {
             this.videoPrompted = true
             this.videoDialog = false
+        },
+        /** 打开迅雷连接配置表单（顶栏入口与配置引导共用） */
+        openXunleiDialog() {
+            this.xunleiDialog = true
+        },
+        /** 配置保存后标记已引导过，避免再次自动弹出配置表单 */
+        onXunleiSaved() {
+            this.xunleiPrompted = true
+            this.xunleiDialog = false
         },
         /** 系统通知「全部已读」：沿用消息中心既有接口 */
         async onMarkAll() {

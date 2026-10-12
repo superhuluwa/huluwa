@@ -6,10 +6,12 @@
 
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
-        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie, magnet: isMagnet, video: isVideoSession }">
+        <div v-if="!isMine" class="avatar bot"
+            :class="{ movie: isMovie, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
             <i v-if="isMovie" class="fa-solid fa-film"></i>
             <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
             <i v-else-if="isVideoSession" class="fa-solid fa-clapperboard"></i>
+            <i v-else-if="isXunleiSession" class="fa-solid fa-bolt"></i>
             <template v-else>Q</template>
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
@@ -171,6 +173,10 @@ export default {
         /** 视频解析会话的机器人回复显示场记板头像 */
         isVideoSession() {
             return this.payload.kind === 'video'
+        },
+        /** 迅雷下载会话的机器人回复显示闪电头像 */
+        isXunleiSession() {
+            return this.payload.kind === 'xunlei'
         },
         /** 大图标题：优先用载荷里的片名 */
         coverTitle() {
@@ -375,6 +381,12 @@ export default {
 .avatar.bot.video {
     background: linear-gradient(135deg, #06B6D4, #3B82F6);
     color: #F8FAFC;
+    font-size: 15px;
+}
+
+.avatar.bot.xunlei {
+    background: linear-gradient(135deg, #00C6FB, #005BEA);
+    color: #04121B;
     font-size: 15px;
 }
 

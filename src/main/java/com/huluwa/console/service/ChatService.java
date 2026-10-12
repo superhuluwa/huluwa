@@ -21,7 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析）/ 已读 / 清空 / 检索。
+ * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析、迅雷下载）/ 已读 / 清空 / 检索。
  *
  * 数据来源两条线：
  *  - 「电影港」等聊天会话：chat_session + chat_message（用户发送与机器人回复都落库）；
@@ -52,6 +52,8 @@ public class ChatService {
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
     public static final String VIDEO_SESSION = "video";
+    /** 迅雷下载会话键（schema 内置） */
+    public static final String XUNLEI_SESSION = "xunlei";
     /** 磁力下载会话内的配置引导指令 */
     private static final String MAGNET_HELP_TASK = "帮助";
     /** 磁力下载会话内的任务状态指令 */
@@ -62,6 +64,12 @@ public class ChatService {
     private static final String VIDEO_HELP_TASK = "帮助";
     /** 视频解析会话内的连接状态指令 */
     private static final String VIDEO_STATUS_TASK = "状态";
+    /** 迅雷下载会话内的配置引导指令 */
+    private static final String XUNLEI_HELP_TASK = "帮助";
+    /** 迅雷下载会话内的任务状态指令 */
+    private static final String XUNLEI_STATUS_TASK = "状态";
+    /** 迅雷下载会话内的保存路径指令前缀（如「路径 /downloads/」） */
+    private static final String XUNLEI_PATH_PREFIX = "路径";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
 
@@ -81,6 +89,7 @@ public class ChatService {
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
     private final VideoParseService videoParseService;
+    private final XunleiService xunleiService;
     private final ChatRequestService chatRequestService;
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -88,7 +97,8 @@ public class ChatService {
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
-                       VideoParseService videoParseService, ChatRequestService chatRequestService,
+                       VideoParseService videoParseService, XunleiService xunleiService,
+                       ChatRequestService chatRequestService,
                        ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
@@ -96,6 +106,7 @@ public class ChatService {
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
         this.videoParseService = videoParseService;
+        this.xunleiService = xunleiService;
         this.chatRequestService = chatRequestService;
         this.chatPushService = chatPushService;
     }
@@ -335,6 +346,9 @@ public class ChatService {
             } else if ("video".equals(kind)) {
                 // 视频解析会话：把分享口令交给解析服务，回复视频 / 图集气泡
                 replies.addAll(runVideoParseTask(sessionId, text));
+            } else if ("xunlei".equals(kind)) {
+                // 迅雷会话：submit = 提交磁力给迅雷建下载任务（未配置时引导配置），状态 / 帮助为内置指令
+                replies.addAll(runXunleiTask(sessionId, text));
             }
             touch(sessionId);
             chatRequestService.markDone(requestId);
@@ -562,6 +576,146 @@ public class ChatService {
     }
 
     private ChatMessage magnetText(String sessionId, String content, String payload) {
+        return append(sessionId, "bot", "text", content, null, payload);
+    }
+
+    // ------------------------------------------------------------------ 迅雷下载
+
+    /**
+     * 迅雷下载会话的一次发送：识别内置指令（帮助 / 状态 / 路径），否则按磁力提交给迅雷。
+     *
+     * <p>首次使用（未配置直连地址）时返回「配置引导」气泡（payload.kind=xunlei），前端据此弹出配置表单；
+     * 提交口径对齐参考脚本 qBittorrentXunleiTransfer.cs：服务端解析磁力文件清单 → 建任务（全部文件）。</p>
+     */
+    private List<ChatMessage> runXunleiTask(String sessionId, String text) {
+        List<ChatMessage> replies = new ArrayList<>();
+        String task = text == null ? "" : text.trim();
+        boolean configured = xunleiService.settings().configured();
+
+        if (task.isEmpty() || XUNLEI_HELP_TASK.equals(task)) {
+            replies.add(xunleiText(sessionId, xunleiHelpText(configured), xunleiMeta(configured)));
+            return replies;
+        }
+        if (XUNLEI_STATUS_TASK.equals(task)) {
+            replies.add(xunleiStatus(sessionId));
+            return replies;
+        }
+        if (task.startsWith(XUNLEI_PATH_PREFIX + " ") || task.equals(XUNLEI_PATH_PREFIX)) {
+            String path = task.length() > XUNLEI_PATH_PREFIX.length()
+                    ? task.substring(XUNLEI_PATH_PREFIX.length()).trim() : "";
+            replies.add(xunleiSavePath(sessionId, path));
+            return replies;
+        }
+
+        List<String> magnets = QBittorrentService.extractMagnets(task);
+        if (magnets.isEmpty()) {
+            replies.add(xunleiText(sessionId,
+                    "没有识别到磁力链接，把 magnet:?xt=urn:btih:… 整段发给我即可创建迅雷下载任务。",
+                    xunleiMeta(configured)));
+            return replies;
+        }
+        if (!configured) {
+            replies.add(xunleiText(sessionId,
+                    "已收到 " + magnets.size() + " 条磁力链接，但还没有配置迅雷。"
+                            + "\n请填写直连地址与保存路径，配置完成后本条磁力可直接重发。",
+                    xunleiMeta("config", magnets)));
+            return replies;
+        }
+
+        List<XunleiService.TaskResult> results;
+        try {
+            results = xunleiService.add(magnets);
+        } catch (Exception e) {
+            replies.add(xunleiText(sessionId, "提交失败：" + safeMessage(e), xunleiMeta(true)));
+            return replies;
+        }
+
+        for (XunleiService.TaskResult result : results) {
+            if (result.ok()) {
+                String headline = "✅ 已创建迅雷任务：《" + result.name() + "》\n"
+                        + "大小：" + QBittorrentService.humanSize(result.size()) + " / " + result.fileCount() + " 个文件"
+                        + (string(result.taskId()) == null ? "" : "\n迅雷任务ID：" + result.taskId());
+                replies.add(xunleiText(sessionId, headline, xunleiMeta(true)));
+            } else {
+                replies.add(xunleiText(sessionId, "⚠️ 提交失败：" + result.message(), xunleiMeta(true)));
+            }
+        }
+        // 磁力链接很长，逐条单独成气泡（可整体复制）
+        for (String magnet : magnets) {
+            replies.add(append(sessionId, "bot", "text", magnet, null, xunleiMeta(true)));
+        }
+        return replies;
+    }
+
+    /** 「状态」指令：展示当前配置并实时探测迅雷在线状态 */
+    private ChatMessage xunleiStatus(String sessionId) {
+        XunleiService.Settings settings = xunleiService.settings();
+        if (!settings.configured()) {
+            return xunleiText(sessionId, "尚未配置迅雷直连地址，请先完成配置。", xunleiMeta(false));
+        }
+        StringBuilder sb = new StringBuilder("迅雷配置：\n");
+        sb.append("• 直连地址：").append(settings.url()).append('\n');
+        sb.append("• 保存路径：").append(settings.savePath()).append('\n');
+        Map<String, Object> probe = xunleiService.test(settings.url(), settings.token());
+        boolean online = Boolean.TRUE.equals(probe.get("success"));
+        sb.append("• 连接状态：").append(online ? "" : "不").append("在线")
+                .append("（").append(probe.get("message")).append('）').append('\n');
+        sb.append("• 用法：把磁力链接直接发给我即可创建下载任务。");
+        return xunleiText(sessionId, sb.toString(), xunleiMeta(true));
+    }
+
+    /** 「路径 xxx」指令：修改保存路径（迅雷必须指定路径，不允许清空） */
+    private ChatMessage xunleiSavePath(String sessionId, String path) {
+        if (!xunleiService.settings().configured()) {
+            return xunleiText(sessionId, "请先完成迅雷连接配置，再设置保存路径。", xunleiMeta(false));
+        }
+        if (path.isEmpty()) {
+            return xunleiText(sessionId,
+                    "迅雷必须指定保存路径，不能清空。当前路径：" + xunleiService.settings().savePath(), xunleiMeta(true));
+        }
+        xunleiService.saveSavePath(path);
+        return xunleiText(sessionId, "已设置迅雷保存路径：" + path
+                + "\n（路径需与迅雷 App 新建任务页里可选的目录一致）", xunleiMeta(true));
+    }
+
+    /** 配置引导文案：未配置时是「首次使用向导」，已配置时是帮助卡片 */
+    private static String xunleiHelpText(boolean configured) {
+        if (!configured) {
+            return """
+                    还没有配置迅雷，无法提交下载任务。请按下面两步完成配置：
+                    1. 在飞牛「应用中心 → 迅雷」详情页查看访问端口，直连地址形如 http://192.168.3.202:2345；
+                    2. 在本会话里填写直连地址与保存路径（迅雷 App 新建任务页里选择的目录，如 /downloads/）。
+                    配置只保存在本机；迅雷前端若加了 Basic 认证，再填 Authorization 认证头。""";
+        }
+        return """
+                迅雷远程下载已就绪，把磁力链接直接发给我即可：
+                1. 一条消息可放多个磁力链接（空格或换行分隔），逐条在迅雷创建下载任务（含全部文件）；
+                2. 输入「状态」查看当前配置与迅雷在线状态；
+                3. 输入「路径 /downloads/」修改保存目录；
+                4. NAS 版迅雷每日任务数有限额，超额提交会被迅雷拒绝。""";
+    }
+
+    /** 迅雷会话消息的结构化载荷（前端据此渲染闪电头像与配置入口） */
+    private String xunleiMeta(boolean configured) {
+        return xunleiMeta(configured ? "ready" : "config");
+    }
+
+    private String xunleiMeta(String status) {
+        return xunleiMeta(status, null);
+    }
+
+    private String xunleiMeta(String status, List<String> magnets) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("kind", "xunlei");
+        meta.put("status", status);
+        meta.put("settings", xunleiService.describe());
+        if (magnets != null && !magnets.isEmpty()) {
+            meta.put("magnets", magnets);
+        }
+        return toJson(meta);
+    }
+
+    private ChatMessage xunleiText(String sessionId, String content, String payload) {
         return append(sessionId, "bot", "text", content, null, payload);
     }
 
