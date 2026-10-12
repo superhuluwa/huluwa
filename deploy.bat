@@ -30,6 +30,12 @@ set PROJECT_DIR=%CD%
 set TARBALL=%TEMP%\huluwa-src.tar.gz
 set OUT_LOG=%TEMP%\huluwa_deploy_out.log
 
+REM ---------- 0. 拉取最新代码 ----------
+echo 正在拉取最新代码...
+git pull --ff-only
+if errorlevel 1 goto :git_pull_fail
+echo.
+
 echo ========== 葫芦娃助手 一键部署 ==========
 echo.
 
@@ -142,6 +148,10 @@ goto :fail
 :need_python
 echo [错误] 首次安装公钥需要 Python 3 + paramiko。
 echo        请安装 Python 3 后重试, 或手动把 %SSH_KEY%.pub 内容追加到服务器 /root/.ssh/authorized_keys
+goto :fail
+
+:git_pull_fail
+echo [错误] 拉取最新代码失败, 请检查 Git 凭据、网络或本地仓库状态。
 goto :fail
 
 :tar_fail
