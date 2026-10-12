@@ -34,6 +34,17 @@ FRP_DIR="$(grep -E '^HULUWA_FRP_DIR=' .env | tail -n1 | cut -d= -f2- || true)"
 FRP_DIR="${FRP_DIR:-$FRP_DIR_DEFAULT}"
 if [ -f "${FRP_DIR}/frpc.ini" ]; then
   log "Frp 配置目录：${FRP_DIR}/frpc.ini"
+  # 容器内进程以 10001 运行，需要该目录可写才能创建临时文件并原子替换 frpc.ini。
+  # 优先用 ACL（不动属主）；没有 setfacl 时只调整目录自身属主与权限，不改动目录内其它文件。
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:10001:rwx "${FRP_DIR}" 2>/dev/null && log "已授予 uid 10001 对 ${FRP_DIR} 的访问（ACL）"
+    setfacl -m u:10001:rw "${FRP_DIR}/frpc.ini" 2>/dev/null || true
+  else
+    chown 10001:10001 "${FRP_DIR}"
+    chmod u+rwx "${FRP_DIR}"
+    chown 10001:10001 "${FRP_DIR}/frpc.ini"
+    log "已调整 ${FRP_DIR} 属主，允许容器内 10001 读写（安装 setfacl 可改为 ACL 方式）"
+  fi
 else
   log "警告：未找到 ${FRP_DIR}/frpc.ini，Frp 管理页将无法读写配置"
 fi

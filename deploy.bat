@@ -99,7 +99,7 @@ if errorlevel 1 goto :fail
 
 REM ---------- 5. 重建容器（单容器，挂载宿主机 docker.sock） ----------
 echo [5/5] 重建容器 %CONTAINER% ...
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker compose down --remove-orphans >/dev/null 2>&1; docker rm -f %CONTAINER% huluwa-docker-proxy >/dev/null 2>&1; mkdir -p %DATA_DIR%; chown -R 10001:10001 %DATA_DIR%; docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker compose down --remove-orphans >/dev/null 2>&1; docker rm -f %CONTAINER% huluwa-docker-proxy >/dev/null 2>&1; mkdir -p %DATA_DIR%; chown -R 10001:10001 %DATA_DIR%; if [ -d /root/frp ]; then if command -v setfacl >/dev/null 2>&1; then setfacl -m u:10001:rwx /root/frp 2>/dev/null; setfacl -m u:10001:rw /root/frp/frpc.ini 2>/dev/null; else chown 10001:10001 /root/frp; chmod u+rwx /root/frp; chown 10001:10001 /root/frp/frpc.ini; fi; fi; docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12"
 if errorlevel 1 goto :fail
 
 REM ---------- 5b. 校验容器内可访问宿主机 Docker socket ----------
