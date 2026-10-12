@@ -1,6 +1,6 @@
 # Docker 部署（CentOS 服务器）
 
-项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 会先构建前端，再把前端静态资源打进后端 JAR，最终由**一个容器**在 **8089** 端口同时提供页面和 API，不需要另起 Nginx 或数据库容器。
+项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 会先构建前端，再把前端静态资源打进后端 JAR，最终由**一个容器**在 **8000** 端口同时提供页面和 API，不需要另起 Nginx 或数据库容器。
 
 **只跑一个容器**。该容器挂载宿主机的 `/var/run/docker.sock`，通过 docker-java SDK 直连 Docker 守护进程，在“Docker 管理”页面管理**宿主机上的容器 / 镜像 / 网络 / 卷**。
 
@@ -9,7 +9,7 @@
 ```
 CentOS 宿主机
 ├── Docker Engine / containerd
-│   ├── huluwa-console 容器（本控制台，8089）
+│   ├── huluwa-console 容器（本控制台，8000）
 │   │     └── docker-java SDK ──unix socket──▶ 宿主机守护进程
 │   ├── /var/run/docker.sock  ──挂载──▶ 容器内 /var/run/docker.sock
 │   └── 被管理的业务容器 / 镜像 / 网络 / 卷
@@ -41,18 +41,18 @@ sudo ./deploy-centos.sh
 
 ```shell
 # 方式 A：SSH 隧道（推荐，初始化阶段最安全）
-ssh -L 8089:127.0.0.1:8089 <用户>@<服务器IP>
-# 然后浏览器打开 http://127.0.0.1:8089 完成管理员初始化
+ssh -L 8000:127.0.0.1:8000 <用户>@<服务器IP>
+# 然后浏览器打开 http://127.0.0.1:8000 完成管理员初始化
 
 # 方式 B：直接在服务器上验证
-curl -sS http://127.0.0.1:8089/api/auth/status
+curl -sS http://127.0.0.1:8000/api/auth/status
 ```
 
 完成管理员初始化后，把 `.env` 改为对外监听并重启：
 
 ```dotenv
 HULUWA_BIND_ADDRESS=0.0.0.0
-HULUWA_PORT=8089
+HULUWA_PORT=8000
 ```
 
 ```shell
@@ -83,7 +83,7 @@ docker compose logs -f huluwa
 docker build -t huluwa-console:latest .
 docker run -d --name huluwa-console \
   --restart unless-stopped --init \
-  -p 0.0.0.0:8008:8089 \
+  -p 0.0.0.0:8000:8000 \
   -e DOCKER_HOST=unix:///var/run/docker.sock \
   --group-add "$(stat -c '%g' /var/run/docker.sock)" \
   -v /var/run/docker.sock:/var/run/docker.sock \

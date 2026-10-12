@@ -39,7 +39,7 @@ if errorlevel 1 (
 )
 
 echo Preparing frontend assets and starting 葫芦娃助手...
-echo Open http://localhost:8089 after startup completes.
+echo Open http://localhost:8000 after startup completes.
 echo.
 
 rem Refresh static assets before the backend serves the login page.

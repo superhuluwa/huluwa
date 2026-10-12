@@ -11,8 +11,8 @@ set REMOTE_DIR=/root/huluwa-src
 set DATA_DIR=/root/huluwa
 set CONTAINER=huluwa-console
 set IMAGE=huluwa-console:latest
-set HOST_PORT=8008
-set CONTAINER_PORT=8089
+set HOST_PORT=8000
+set CONTAINER_PORT=8000
 set SSH_RETRY=3
 set SSH_WAIT=3
 

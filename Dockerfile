@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.m2,sharing=locked \
 FROM eclipse-temurin:21-jre-noble AS runtime
 WORKDIR /app
 ENV TZ=Asia/Shanghai \
-    SERVER_PORT=8089 \
+    SERVER_PORT=8000 \
     HULUWA_DATA_DIR=/app/data \
     HOME=/app/data \
     JAVA_TOOL_OPTIONS="-Duser.timezone=Asia/Shanghai"
@@ -39,12 +39,12 @@ COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
 
 USER 10001:10001
 VOLUME ["/app/data"]
-EXPOSE 8089
+EXPOSE 8000
 
 # This public endpoint also queries SQLite and works before initial setup.
 # curl is already included in the Temurin Ubuntu runtime image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl --fail --silent --show-error --max-time 3 \
-        "http://127.0.0.1:${SERVER_PORT:-8089}/api/auth/status" || exit 1
+        "http://127.0.0.1:${SERVER_PORT:-8000}/api/auth/status" || exit 1
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

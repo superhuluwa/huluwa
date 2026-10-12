@@ -10,7 +10,7 @@ services:
     stop_grace_period: 30s
     # Keep initial administrator setup local by default.
     ports:
-      - "${HULUWA_BIND_ADDRESS:-127.0.0.1}:${HULUWA_PORT:-8089}:8089"
+      - "${HULUWA_BIND_ADDRESS:-127.0.0.1}:${HULUWA_PORT:-8000}:8000"
     environment:
       # docker-java SDK 直连宿主机 Docker 守护进程，无需容器内安装 docker CLI。
       DOCKER_HOST: unix:///var/run/docker.sock

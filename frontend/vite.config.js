@@ -14,12 +14,12 @@ export default defineConfig({
         port: 5173,
         proxy: {
             '/api': {
-                target: 'http://127.0.0.1:8089',
+                target: 'http://127.0.0.1:8000',
                 changeOrigin: true
             },
             // 聊天 WebSocket 通道（dev 代理转发到后端；生产同源直连不需要）
             '/ws': {
-                target: 'http://127.0.0.1:8089',
+                target: 'http://127.0.0.1:8000',
                 ws: true,
                 changeOrigin: true
             }

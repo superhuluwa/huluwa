@@ -77,11 +77,11 @@ log "容器状态：$(docker inspect -f '{{.State.Status}} / 健康：{{if .Stat
 
 if grep -q '^HULUWA_BIND_ADDRESS=127.0.0.1' .env; then
   log "服务已启动，且仅监听 127.0.0.1。"
-  log "在服务器本机执行以下命令创建 SSH 隧道后，用浏览器打开 http://127.0.0.1:8089 ："
-  log "  ssh -L 8089:127.0.0.1:8089 <你的CentOS用户>@<服务器IP>"
+  log "在服务器本机执行以下命令创建 SSH 隧道后，用浏览器打开 http://127.0.0.1:8000 ："
+  log "  ssh -L 8000:127.0.0.1:8000 <你的CentOS用户>@<服务器IP>"
   log "完成管理员初始化后，把 .env 中 HULUWA_BIND_ADDRESS 改为 0.0.0.0 并执行 docker compose up -d 即可远程访问。"
 else
-  log "服务已启动，请通过 http://<服务器IP>:${HULUWA_PORT:-8089} 访问。"
+  log "服务已启动，请通过 http://<服务器IP>:${HULUWA_PORT:-8000} 访问。"
 fi
 
 log "查看日志：docker compose logs -f huluwa"
