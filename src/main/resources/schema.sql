@@ -80,17 +80,18 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
 
--- 消息中心会话（聊天对象）：当前内置「电影港」搜索会话与「磁力下载」会话；
+-- 消息中心会话（聊天对象）：当前内置「电影港」搜索、「磁力下载」与「视频解析」会话；
 -- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | magnet | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | magnet | video | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
 
--- 会话消息：role=user 用户发送 / role=bot 机器人回复；type=text 纯文本 / image 图片气泡（封面+配文）/ error 错误提示
+-- 会话消息：role=user 用户发送 / role=bot 机器人回复；
+-- type=text 纯文本 / image 图片气泡（封面+配文）/ video 视频气泡（可内联播放）/ audio 音频气泡 / error 错误提示
 CREATE TABLE IF NOT EXISTS chat_message (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT NOT NULL,
@@ -111,6 +112,11 @@ VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('n
 -- 内置会话：磁力下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('magnet', '磁力下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));
+
+-- 内置会话：视频解析（把抖音等分享口令交给内网解析服务，回复视频 / 图集气泡；
+-- 服务地址与账号存 sys_config：video.url / video.username / video.password，幂等）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('video', '视频解析', 'video', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- ============================================================
 -- 电影港订阅（对齐 quantum 的 dygangs_search.cs / dygangs.cs）：

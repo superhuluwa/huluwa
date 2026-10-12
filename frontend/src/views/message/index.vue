@@ -12,9 +12,10 @@
         <section v-if="showRoom" class="chat-room">
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
                 :compact="isMobile" :clearable="canSend" :markable="isSystem" :show-menu="isMobile"
-                :magnet="isMagnet"
+                :magnet="isMagnet" :video="isVideoSession"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
-                @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog" />
+                @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog"
+                @video-settings="openVideoDialog" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
@@ -30,6 +31,10 @@
         <!-- 首次在「磁力下载」会话提交磁力时，自动弹出 qBittorrent 配置表单 -->
         <QbSettingsDialog v-model:show="qbDialog" intro="提交磁力前需要先配置 qBittorrent 的连接信息。"
             @saved="onQbSaved" />
+
+        <!-- 首次在「视频解析」会话提交口令时，自动弹出解析服务配置表单 -->
+        <VideoSettingsDialog v-model:show="videoDialog" intro="解析分享口令前需要先配置视频解析服务的连接信息。"
+            @saved="onVideoSaved" />
     </div>
 </template>
 
@@ -43,6 +48,7 @@
  *  - 实时性由 store 轮询提供（8s），发送时同步等待服务端处理完成；
  *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
  *  - 内置「磁力下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
+ *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
  *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
  *
  * 手机端（触屏 + 窄视口）的页面形态：
@@ -61,6 +67,7 @@ import MessageList from './components/MessageList.vue'
 import ChatComposer from './components/ChatComposer.vue'
 import CoverViewer from './components/CoverViewer.vue'
 import QbSettingsDialog from './components/QbSettingsDialog.vue'
+import VideoSettingsDialog from './components/VideoSettingsDialog.vue'
 
 /** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
 const PREFERRED_SESSION = 'movie'
@@ -73,7 +80,8 @@ export default {
         MessageList,
         ChatComposer,
         CoverViewer,
-        QbSettingsDialog
+        QbSettingsDialog,
+        VideoSettingsDialog
     },
     setup() {
         // 手机端会话页由路由守卫标记为全屏沉浸（壳层收起）；桌面端恒为 false
@@ -90,7 +98,11 @@ export default {
             /** 首次提交磁力且尚未配置时自动弹出的配置表单 */
             qbDialog: false,
             /** 已自动弹过一次就不再打扰（用户可在页脚状态条手动打开） */
-            qbPrompted: false
+            qbPrompted: false,
+            /** 首次提交视频口令且尚未配置时自动弹出的配置表单 */
+            videoDialog: false,
+            /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
+            videoPrompted: false
         }
     },
     computed: {
@@ -118,6 +130,7 @@ export default {
             const kindText = {
                 movie: '影视搜索',
                 magnet: '磁力下载',
+                video: '分享口令解析',
                 system: '系统事件与运行通知'
             }[this.currentSession.kind] || '会话'
             return kindText + ' · ' + count + ' 条消息'
@@ -134,12 +147,18 @@ export default {
         isMagnet() {
             return this.currentSession?.kind === 'magnet'
         },
+        isVideoSession() {
+            return this.currentSession?.kind === 'video'
+        },
         emptyTitle() {
             if (this.currentKind === 'movie') {
                 return '还没有搜索记录'
             }
             if (this.currentKind === 'magnet') {
                 return '还没有磁力下载记录'
+            }
+            if (this.currentKind === 'video') {
+                return '还没有视频解析记录'
             }
             return '暂无消息'
         },
@@ -151,6 +170,11 @@ export default {
                 return this.isMobile
                     ? '把磁力链接粘贴到下方输入框，发送即提交下载'
                     : '把磁力链接粘贴到下方输入框，回车即提交 qBittorrent 下载'
+            }
+            if (this.currentKind === 'video') {
+                return this.isMobile
+                    ? '把抖音等 App 的分享口令整段粘贴到下方，发送即解析'
+                    : '把抖音等 App 的分享口令整段粘贴到下方输入框，回车即解析并回复视频'
             }
             return '系统事件与运行通知会显示在这里'
         },
@@ -165,6 +189,9 @@ export default {
             if (this.currentKind === 'magnet') {
                 // 手机端：placeholder 与状态条已说明用法，再堆一行提示会把输入区顶得很高
                 return this.isMobile ? '' : '粘贴磁力链接回车即提交 qB；输入「状态」看任务，「帮助」看用法'
+            }
+            if (this.currentKind === 'video') {
+                return this.isMobile ? '' : '粘贴分享口令回车即解析；输入「状态」看配置，「帮助」看用法'
             }
             return ''
         }
@@ -299,13 +326,18 @@ export default {
                 // 失败文案由 axios 拦截器提示
             }
             // 磁力会话：后端在未配置时会回一条配置引导，此处据此自动打开配置表单
-            if (this.isMagnet && !this.qbPrompted && this.hasConfigPrompt()) {
+            if (this.isMagnet && !this.qbPrompted && this.hasConfigPrompt('magnet')) {
                 this.qbPrompted = true
                 this.qbDialog = true
             }
+            // 视频解析会话：同上，引导填写解析服务地址与账号
+            if (this.isVideoSession && !this.videoPrompted && this.hasConfigPrompt('video')) {
+                this.videoPrompted = true
+                this.videoDialog = true
+            }
         },
-        /** 最近一条回复是否在提示配置 qBittorrent */
-        hasConfigPrompt() {
+        /** 最近一条回复是否在提示配置（kind=magnet 为 qB，kind=video 为视频解析服务） */
+        hasConfigPrompt(kind) {
             const rows = this.currentMessages
             if (!rows.length) {
                 return false
@@ -316,7 +348,7 @@ export default {
             }
             try {
                 const payload = JSON.parse(last.payload)
-                return payload && payload.kind === 'magnet' && payload.status === 'config'
+                return !!payload && payload.kind === kind && payload.status === 'config'
             } catch (e) {
                 return false
             }
@@ -329,6 +361,15 @@ export default {
         onQbSaved() {
             this.qbPrompted = true
             this.qbDialog = false
+        },
+        /** 打开视频解析配置表单（顶栏入口与配置引导共用） */
+        openVideoDialog() {
+            this.videoDialog = true
+        },
+        /** 配置保存后标记已引导过，避免再次自动弹出配置表单 */
+        onVideoSaved() {
+            this.videoPrompted = true
+            this.videoDialog = false
         },
         /** 系统通知「全部已读」：沿用消息中心既有接口 */
         async onMarkAll() {

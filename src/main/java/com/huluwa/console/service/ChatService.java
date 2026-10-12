@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载）/ 已读 / 清空 / 检索。
+ * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析）/ 已读 / 清空 / 检索。
  *
  * 数据来源两条线：
  *  - 「电影港」等聊天会话：chat_session + chat_message（用户发送与机器人回复都落库）；
@@ -23,6 +23,12 @@ import java.util.Set;
  * 摘要一条 + 每条结果一个「封面图 + 配文」气泡（配文含标题/年代/产地/类型与详情页链接）。
  * 每条结果的结构化载荷里额外带 subscribed 标记与订阅所需字段，前端据此渲染「订阅 / 已订阅」按钮，
  * 点击后由 /api/chat/subscriptions 落库并把该剧详情页的全部磁力存为对比基线。
+ *
+ * 发送「视频解析」消息即同步调用内网解析服务（对齐 quantum 的 quantum-video-parse.cs，约 5-30 秒），
+ * 把抖音等分享口令解析出的作品按气泡形态逐条落库：
+ *  - 有视频直链 → 一条 video 气泡（封面作预览图，配文=标题/作者，点按端内播放）；
+ *  - 无视频直链（图文作品）→ 逐张 image 气泡，实况照片按 video 气泡推、图片作预览图；
+ *  - 音乐直链不单独推气泡，只落在日志与加载回复里。
  */
 @Service
 public class ChatService {
@@ -35,12 +41,18 @@ public class ChatService {
     public static final String MOVIE_SESSION = "movie";
     /** 磁力下载会话键（schema 内置） */
     public static final String MAGNET_SESSION = "magnet";
+    /** 视频解析会话键（schema 内置） */
+    public static final String VIDEO_SESSION = "video";
     /** 磁力下载会话内的配置引导指令 */
     private static final String MAGNET_HELP_TASK = "帮助";
     /** 磁力下载会话内的任务状态指令 */
     private static final String MAGNET_STATUS_TASK = "状态";
     /** 磁力下载会话内的保存路径指令前缀（如「路径 D:/Downloads/电影」） */
     private static final String MAGNET_PATH_PREFIX = "路径";
+    /** 视频解析会话内的配置引导指令 */
+    private static final String VIDEO_HELP_TASK = "帮助";
+    /** 视频解析会话内的连接状态指令 */
+    private static final String VIDEO_STATUS_TASK = "状态";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
 
@@ -49,16 +61,19 @@ public class ChatService {
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
+    private final VideoParseService videoParseService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
                        QBittorrentService qBittorrentService, MessageService messageService,
-                       MovieSubscriptionService movieSubscriptionService) {
+                       MovieSubscriptionService movieSubscriptionService,
+                       VideoParseService videoParseService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
+        this.videoParseService = videoParseService;
     }
 
     /** 会话消息（前后端统一形状，camelCase 下发） */
@@ -259,6 +274,9 @@ public class ChatService {
         } else if ("magnet".equals(kind)) {
             // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
             produced.addAll(runMagnetTask(sessionId, text));
+        } else if ("video".equals(kind)) {
+            // 视频解析会话：把分享口令交给解析服务，回复视频 / 图集气泡
+            produced.addAll(runVideoParseTask(sessionId, text));
         }
         touch(sessionId);
         return produced;
@@ -514,6 +532,141 @@ public class ChatService {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT kind FROM chat_session WHERE id = ?", sessionId);
         return rows.isEmpty() ? "chat" : string(rows.get(0).get("kind"));
+    }
+
+    // ------------------------------------------------------------------ 视频解析
+
+    /**
+     * 视频解析会话的一次发送：识别内置指令（帮助 / 状态），否则整条输入交给解析服务。
+     *
+     * <p>解析服务未配置时返回「配置引导」气泡（带 payload.status=config），前端据此弹出配置表单；
+     * 解析成功后按作品类型回复视频 / 图集气泡（形态对齐 quantum 的 quantum-video-parse.cs）。</p>
+     */
+    private List<ChatMessage> runVideoParseTask(String sessionId, String text) {
+        List<ChatMessage> replies = new ArrayList<>();
+        String task = text == null ? "" : text.trim();
+        boolean configured = videoParseService.settings().configured();
+
+        if (task.isEmpty() || VIDEO_HELP_TASK.equals(task)) {
+            replies.add(videoText(sessionId, videoHelpText(configured),
+                    videoMeta(configured ? "ready" : "config")));
+            return replies;
+        }
+        if (VIDEO_STATUS_TASK.equals(task)) {
+            replies.add(videoStatus(sessionId));
+            return replies;
+        }
+        if (!configured) {
+            replies.add(videoText(sessionId, videoHelpText(false), videoMeta("config")));
+            return replies;
+        }
+
+        VideoParseService.VideoItem item;
+        try {
+            item = videoParseService.parse(task);
+        } catch (Exception e) {
+            replies.add(append(sessionId, "bot", "error", "解析失败：" + safeMessage(e), null,
+                    videoMeta("error")));
+            return replies;
+        }
+
+        String title = notBlank(item.title()) ? item.title() : "未知标题";
+        String author = notBlank(item.author()) ? item.author() : "未知作者";
+        String caption = "标题：" + title + "\n作者：" + author;
+        String payload = videoMeta("ready", item);
+
+        if (notBlank(item.videoUrl())) {
+            // 视频作品：单条视频气泡（封面作播放预览）
+            replies.add(append(sessionId, "bot", "video", item.videoUrl(), caption, payload));
+            return replies;
+        }
+
+        if (!item.images().isEmpty()) {
+            // 图文作品：逐张图片气泡；live_photo_url 非空的实况照片按视频气泡推、图片作预览
+            boolean first = true;
+            for (VideoParseService.ImageItem image : item.images()) {
+                String imageCaption = first ? caption : null;
+                if (notBlank(image.livePhotoUrl())) {
+                    replies.add(append(sessionId, "bot", "video", image.livePhotoUrl(),
+                            imageCaption, videoMeta("ready", item, image.url())));
+                } else {
+                    replies.add(append(sessionId, "bot", "image", image.url(), imageCaption, payload));
+                }
+                first = false;
+            }
+            return replies;
+        }
+
+        if (notBlank(item.coverUrl())) {
+            replies.add(append(sessionId, "bot", "image", item.coverUrl(), caption, payload));
+            return replies;
+        }
+
+        replies.add(append(sessionId, "bot", "error",
+                "解析成功但没有拿到可播放的视频或图片直链，可能是作品已删除或服务端解析能力有限。",
+                null, videoMeta("error")));
+        return replies;
+    }
+
+    /** 「状态」指令：展示解析服务的连接配置与启停摘要 */
+    private ChatMessage videoStatus(String sessionId) {
+        boolean configured = videoParseService.settings().configured();
+        if (!configured) {
+            return videoText(sessionId, "尚未配置视频解析服务地址，请先完成配置。", videoMeta("config"));
+        }
+        StringBuilder sb = new StringBuilder("视频解析服务已就绪：\n");
+        sb.append("• 服务地址：").append(videoParseService.settings().url()).append('\n');
+        String username = videoParseService.settings().username();
+        sb.append("• 登录账号：").append(notBlank(username) ? username : "（匿名访问）").append('\n');
+        sb.append("• 用法：把抖音等 App 的分享口令整段发进来即可。");
+        return videoText(sessionId, sb.toString(), videoMeta("ready"));
+    }
+
+    /** 配置引导文案：未配置时是「首次使用向导」，已配置时是帮助卡片 */
+    private static String videoHelpText(boolean configured) {
+        if (!configured) {
+            return """
+                    还没有配置视频解析服务，无法解析分享口令。请按下面两步完成配置：
+                    1. 在本会话里填写视频解析服务地址（自建服务形如 http://192.168.3.202:8080）；
+                    2. 按需填写该服务的登录账号密码（服务端若用 IP 白名单放行，账号可以留空）。
+                    配置只保存在本机，密码不回传到页面。""";
+        }
+        return """
+                视频解析已就绪，把分享口令整段发给我即可：
+                1. 支持抖音、快手等 App 的分享口令（形如「7.68 复制打开抖音…https://v.douyin.com/xxxx/」）；
+                2. 视频作品回复一条可播放的视频气泡，图文作品逐张回复图片，实况照片按视频回复；
+                3. 输入「状态」查看当前解析服务配置，「帮助」随时回到本说明。""";
+    }
+
+    /** 视频解析会话消息的结构化载荷（前端据此渲染头像、媒体气泡与配置入口） */
+    private String videoMeta(String status) {
+        return videoMeta(status, null, null);
+    }
+
+    private String videoMeta(String status, VideoParseService.VideoItem item) {
+        return videoMeta(status, item, null);
+    }
+
+    private String videoMeta(String status, VideoParseService.VideoItem item, String posterOverride) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("kind", "video");
+        meta.put("status", status);
+        meta.put("settings", videoParseService.describe());
+        if (item != null) {
+            meta.put("title", item.title());
+            meta.put("author", item.author());
+            // poster 供视频气泡的封面位使用（视频作品取作品封面，实况照片取对应的图片）
+            meta.put("poster", notBlank(posterOverride) ? posterOverride : item.coverUrl());
+            meta.put("cover", notBlank(posterOverride) ? posterOverride : item.coverUrl());
+            meta.put("video", item.videoUrl());
+            meta.put("music", item.musicUrl());
+            meta.put("imageCount", item.images().size());
+        }
+        return toJson(meta);
+    }
+
+    private ChatMessage videoText(String sessionId, String content, String payload) {
+        return append(sessionId, "bot", "text", content, null, payload);
     }
 
     // ------------------------------------------------------------------ 已读 / 清空 / 检索

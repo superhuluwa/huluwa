@@ -21,6 +21,7 @@
  * - Enter 发送 / Shift+Enter 换行（量子端 Enter 发送、最多 4 行；桌面端补 Shift+Enter）
  * - 电影港会话：整条输入即搜索关键字，发送后由服务端返回结果气泡
  * - 磁力下载会话：整条输入可含多个磁力链接，发送后由服务端提交 qB 并回复结果
+ * - 视频解析会话：整条输入即分享口令，发送后由服务端解析并回复视频 / 图集气泡
  */
 export default {
     name: 'ChatComposer',
@@ -37,7 +38,7 @@ export default {
             type: String,
             default: ''
         },
-        /** 会话类型：movie 搜索 / magnet 提交磁力 / system 只读 / chat 普通对话 */
+        /** 会话类型：movie 搜索 / magnet 提交磁力 / video 解析口令 / system 只读 / chat 普通对话 */
         kind: {
             type: String,
             default: 'chat'
@@ -73,17 +74,34 @@ export default {
             if (this.kind === 'magnet') {
                 return this.mobile ? '粘贴磁力链接提交下载' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交；可一次贴多条'
             }
+            if (this.kind === 'video') {
+                return this.mobile
+                    ? '粘贴抖音等分享口令'
+                    : '把抖音等 App 的分享口令整段贴进来（含链接），回车开始解析'
+            }
             return this.mobile ? '输入消息…' : '输入消息…（Enter 发送 / Shift+Enter 换行）'
         },
         canSend() {
             return !this.readonly && !this.sending && this.draft.trim().length > 0
         },
-        /** 发送中的提示文案与图标：磁力会话是提交任务，不是搜索 */
+        /** 发送中的提示文案与图标：磁力会话提交任务、视频会话解析口令，都不是搜索 */
         busyText() {
-            return this.kind === 'magnet' ? '正在提交到 qBittorrent，请稍候…' : '正在搜索，请稍候…'
+            if (this.kind === 'magnet') {
+                return '正在提交到 qBittorrent，请稍候…'
+            }
+            if (this.kind === 'video') {
+                return '正在解析分享口令，视频较大时可能需要十几秒…'
+            }
+            return '正在搜索，请稍候…'
         },
         busyIcon() {
-            return this.kind === 'magnet' ? 'fa-solid fa-cloud-arrow-up' : 'fa-solid fa-magnifying-glass'
+            if (this.kind === 'magnet') {
+                return 'fa-solid fa-cloud-arrow-up'
+            }
+            if (this.kind === 'video') {
+                return 'fa-solid fa-clapperboard'
+            }
+            return 'fa-solid fa-magnifying-glass'
         }
     },
     methods: {

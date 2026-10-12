@@ -10,7 +10,7 @@ import {
 /**
  * 消息中心会话状态层（对齐量子端 stores/chat 的职责划分，按本项目接口收敛）：
  *  - 会话列表与消息流都由后端持库，本 store 只做「拉取 + 合并 + 乐观追加」；
- *  - 发送（POST）同步等待服务端完成电影港搜索 / 磁力提交并返回本轮新增消息，直接并入列表；
+ *  - 发送（POST）同步等待服务端完成电影港搜索 / 磁力提交 / 视频解析并返回本轮新增消息，直接并入列表；
  *  - 轮询（POLL_MS）刷新会话列表与当前会话的尾部新消息，覆盖系统通知等外部写入。
  *
  * 与量子端的差异：本项目后端无 WS 通道，实时性由轮询提供；消息不做本地持久化。
@@ -64,7 +64,7 @@ export const useChatStore = defineStore('chat', {
         totalUnread(state) {
             return state.sessions.reduce((sum, item) => sum + (item.unread || 0), 0)
         },
-        /** 电影港 / 磁力下载等聊天会话可发送；系统通知为只读 */
+        /** 电影港 / 磁力下载 / 视频解析等聊天会话可发送；系统通知为只读 */
         canSend(state) {
             const session = state.sessions.find((item) => item.id === state.currentKey)
             return !!session && session.kind !== 'system'
@@ -73,6 +73,11 @@ export const useChatStore = defineStore('chat', {
         isMagnet(state) {
             const session = state.sessions.find((item) => item.id === state.currentKey)
             return !!session && session.kind === 'magnet'
+        },
+        /** 判断会话是不是「视频解析」（配置引导只在该会话出现） */
+        isVideo(state) {
+            const session = state.sessions.find((item) => item.id === state.currentKey)
+            return !!session && session.kind === 'video'
         }
     },
     actions: {

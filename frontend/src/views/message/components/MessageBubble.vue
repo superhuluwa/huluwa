@@ -6,13 +6,14 @@
 
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
-        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie, magnet: isMagnet }">
+        <div v-if="!isMine" class="avatar bot" :class="{ movie: isMovie, magnet: isMagnet, video: isVideoSession }">
             <i v-if="isMovie" class="fa-solid fa-film"></i>
             <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
+            <i v-else-if="isVideoSession" class="fa-solid fa-clapperboard"></i>
             <template v-else>Q</template>
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
-        <div class="bubble" :class="{ 'is-cover': isImage, 'is-error': isError, 'hold-open': holdOpen }"
+        <div class="bubble" :class="{ 'is-cover': isImage, 'is-video': isVideo, 'is-error': isError, 'hold-open': holdOpen }"
             :title="fullTime" @touchstart.passive="onHoldStart" @touchend="endHold" @touchcancel="endHold"
             @touchmove.passive="endHold">
             <div class="bubble-tools">
@@ -41,6 +42,8 @@
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                 </template>
+                <!-- 视频气泡（视频解析会话）：封面 + 内联播放，点按在气泡内播放 -->
+                <VideoBubble v-else-if="isVideo" :message="message" @open-cover="$emit('open-cover', $event)" />
                 <template v-else>
                     <RichText :text="message.content" />
                     <div v-if="isMovie" class="movie-actions">
@@ -69,18 +72,20 @@
 /**
  * 消息气泡外壳（自 quantum-web 的 MessageBubble.vue 迁移）：
  * 头像 38px、机器人左/用户右、靠头像侧下角 4px 收尾、圆角 16、内边距 9/12、最大宽 min(68%,720px)。
- * 本项目消息类型：text（纯文本，详情链接自动可点）、image（封面 + 配文）、notify（系统通知卡）、error（错误提示）。
- * 头像按会话类型区分：电影港=胶片、磁力下载=磁铁。
+ * 本项目消息类型：text（纯文本，详情链接自动可点）、image（封面 + 配文）、video（视频封面 + 内联播放）、
+ * notify（系统通知卡）、error（错误提示）。
+ * 头像按会话类型区分：电影港=胶片、磁力下载=磁铁、视频解析=场记板。
  */
 import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
 import MagnetListDialog from './MagnetListDialog.vue'
+import VideoBubble from './VideoBubble.vue'
 import { SubscribeMovie, PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble },
     props: {
         message: {
             type: Object,
@@ -109,6 +114,10 @@ export default {
         isImage() {
             return this.message.type === 'image' && !!this.message.content
         },
+        /** 视频气泡：type=video 且正文是直链（视频解析会话的视频 / 实况照片） */
+        isVideo() {
+            return this.message.type === 'video' && !!this.message.content
+        },
         isError() {
             return this.message.type === 'error'
         },
@@ -127,11 +136,13 @@ export default {
                 return {}
             }
         },
-        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像 */
+        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像；视频解析会话的载荷不算影视卡片 */
         isMovie() {
-            return Object.prototype.hasOwnProperty.call(this.payload, 'url')
-                && Object.prototype.hasOwnProperty.call(this.payload, 'title')
-                && Object.prototype.hasOwnProperty.call(this.payload, 'cover')
+            const payload = this.payload
+            return payload.kind !== 'video'
+                && Object.prototype.hasOwnProperty.call(payload, 'url')
+                && Object.prototype.hasOwnProperty.call(payload, 'title')
+                && Object.prototype.hasOwnProperty.call(payload, 'cover')
         },
         /** 订阅状态：本地操作优先，其次是服务端下发的标记 */
         subscribed() {
@@ -143,6 +154,10 @@ export default {
         /** 磁力下载会话的机器人回复显示磁铁头像 */
         isMagnet() {
             return this.payload.kind === 'magnet'
+        },
+        /** 视频解析会话的机器人回复显示场记板头像 */
+        isVideoSession() {
+            return this.payload.kind === 'video'
         },
         /** 大图标题：优先用载荷里的片名 */
         coverTitle() {
@@ -315,6 +330,12 @@ export default {
     font-size: 14px;
 }
 
+.avatar.bot.video {
+    background: linear-gradient(135deg, #06B6D4, #3B82F6);
+    color: #F8FAFC;
+    font-size: 15px;
+}
+
 .avatar.mine {
     background: rgba(99, 102, 241, .20);
     color: #C7D2FE;
@@ -334,6 +355,12 @@ export default {
 .bubble.is-cover {
     padding: 6px;
     max-width: min(46%, 320px);
+}
+
+/* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄 */
+.bubble.is-video {
+    padding: 6px;
+    max-width: min(62%, 360px);
 }
 
 .message-row.mine .bubble {
@@ -515,6 +542,10 @@ export default {
 
     .bubble.is-cover {
         max-width: min(62%, 300px);
+    }
+
+    .bubble.is-video {
+        max-width: min(86%, 360px);
     }
 
     .bubble-content {
