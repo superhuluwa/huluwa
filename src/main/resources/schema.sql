@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS chat_message (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_message_session ON chat_message (session_id, id DESC);
 
+-- WebSocket 发送幂等与恢复：request_id 由前端生成并持久化到本地 outbox；
+-- 弱网重连或页面刷新后重放同一 request_id，服务端只落一条用户消息。
+-- status=received 已入库 / processing 后台处理中 / done 已完成 / failed 已落错误回复。
+CREATE TABLE IF NOT EXISTS chat_request (
+    request_id      TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    user_message_id INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'received',
+    error           TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_request_status ON chat_request (status, user_message_id);
+
 -- 内置会话：电影港搜索（幂等，重启不覆盖用户数据）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));
@@ -177,3 +191,7 @@ CREATE INDEX IF NOT EXISTS idx_movie_task_status ON movie_download_task (status,
 
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (2, datetime('now', 'localtime'));
+
+-- v3：WebSocket 聊天请求幂等 / 恢复表
+INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
+VALUES (3, datetime('now', 'localtime'));

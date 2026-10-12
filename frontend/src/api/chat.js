@@ -2,7 +2,8 @@ import http from '@/libs/http'
 
 /**
  * 消息中心会话接口（对应后端 ChatController）。
- * 发送接口同步等待站点搜索完成（约 1-2 秒），返回本轮新增的全部消息，前端直接追加渲染。
+ * 发送接口只做毫秒级受理（返回落库的用户消息行，requestId 幂等），
+ * 搜索 / 提交 / 解析在后台异步执行，机器人回复经 WebSocket 推送（离线时靠轮询）。
  */
 export function GetSessions() {
     return http.get('/chat/sessions')
@@ -15,8 +16,9 @@ export function SessionMessages(sessionId, beforeId, limit = 50) {
     })
 }
 
-export function SendMessage(sessionId, content) {
-    return http.post('/chat/sessions/' + encodeURIComponent(sessionId) + '/messages', { content })
+/** WebSocket 断开时的 HTTP 兜底发送；requestId 与 WS 同源幂等（弱网重试不重复落库） */
+export function SendMessage(sessionId, content, requestId) {
+    return http.post('/chat/sessions/' + encodeURIComponent(sessionId) + '/messages', { content, requestId })
 }
 
 export function MarkSessionRead(sessionId) {

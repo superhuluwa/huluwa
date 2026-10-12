@@ -12,7 +12,8 @@ spring:
       maximum-pool-size: 8
       minimum-idle: 1
       pool-name: huluwa-pool
-      connection-init-sql: PRAGMA foreign_keys = ON
+      # WAL + busy_timeout：聊天异步 worker 落消息、订阅巡检读、WS 提交写三方并发时的防护
+      connection-init-sql: PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL
   sql:
     init:
       mode: always

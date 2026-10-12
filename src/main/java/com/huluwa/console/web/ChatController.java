@@ -16,8 +16,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 消息中心会话接口：会话列表 / 消息流 / 发送（电影港搜索、磁力下载）/ 已读 / 清空 / 跨会话检索。
- * 与既有 /api/messages（系统通知消息）并存：本接口服务聊天式会话 UI。
+ * 消息中心会话接口：会话列表 / 消息流 / 发送（异步受理，兜底通道）/ 已读 / 清空 / 跨会话检索。
+ * 实时链路（发送 chat.send、新消息推送）走 WebSocket（/ws/chat，见 ws 包）；本接口服务首屏、
+ * 翻页等低频操作与 WS 断开时的降级。与既有 /api/messages（系统通知消息）并存。
  */
 @RestController
 @RequestMapping("/api/chat")
@@ -43,14 +44,19 @@ public class ChatController {
         return ApiResult.ok(chatService.messages(sessionId, beforeId, limit));
     }
 
-    /** 发送消息：电影港会话同步搜索、磁力下载会话同步提交 qB，返回本轮新增的用户与机器人消息 */
+    /**
+     * 发送消息（WebSocket 断开时的 HTTP 兜底通道，与 WS chat.send 同一 submit 入口、天然幂等）：
+     * 毫秒级返回本次落库的用户消息；电影港搜索 / qB 提交 / 视频解析在后台异步执行，
+     * 机器人回复经 WebSocket 推送（离线时由前端轮询 GET messages 获取）。
+     */
     @PostMapping("/sessions/{sessionId}/messages")
     public ApiResult<List<ChatService.ChatMessage>> send(@PathVariable String sessionId,
                                                          @RequestBody SendRequest body) {
         if (body == null || body.content() == null) {
             throw new BusinessException(400, "请输入消息内容");
         }
-        return ApiResult.ok(chatService.send(sessionId, body.content()));
+        ChatService.SubmitResult result = chatService.submit(sessionId, body.requestId(), body.content());
+        return ApiResult.ok(List.of(result.userMessage()));
     }
 
     /** 标记会话已读（系统通知会话同步推进 message 表的已读状态） */
@@ -74,6 +80,7 @@ public class ChatController {
         return ApiResult.ok(chatService.search(keyword, limit));
     }
 
-    public record SendRequest(String content) {
+    /** content 正文；requestId 幂等键（前端生成的 UUID，弱网重试 / 断线重放时同一 ID 只落一条消息） */
+    public record SendRequest(String content, String requestId) {
     }
 }

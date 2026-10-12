@@ -19,8 +19,9 @@
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
-                :empty-tip="emptyTip"
-                @load-earlier="loadEarlier" @open-cover="onOpenCover" @delete="onDeleteNotify" />
+                :empty-tip="emptyTip" :typing="isTyping"
+                @load-earlier="loadEarlier" @open-cover="onOpenCover" @delete="onDeleteNotify"
+                @resend="onResend" />
 
             <ChatComposer :disabled="!currentKey" :sending="sending" :kind="currentKind" :hint="composerHint"
                 :mobile="isMobile" @send="onSend" />
@@ -45,7 +46,8 @@
  * 会话列表、气泡流、时间分隔、贴底跟随、顶部消息检索、清空会话。
  *
  * 本项目的差异：
- *  - 实时性由 store 轮询提供（8s），发送时同步等待服务端处理完成；
+ *  - 实时性由 WebSocket 提供（store.initRealtime）：发送乐观渲染（pending 转圈 → ack 收编），
+ *    机器人回复经推送到达；WS 断开自动降级为 8s 轮询，发送走 HTTP 兜底（requestId 幂等）；
  *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
  *  - 内置「磁力下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
@@ -108,7 +110,7 @@ export default {
     computed: {
         ...mapState(useChatStore, [
             'sessions', 'currentKey', 'currentMessages', 'currentSession',
-            'loadingMessages', 'loadingEarlier', 'sending'
+            'loadingMessages', 'loadingEarlier', 'sending', 'typing'
         ]),
         ...mapState(useChatStore, ['hasMore']),
         /** 列表区是否可见：手机端与详情页互斥（两级视图），桌面端常显 */
@@ -140,6 +142,15 @@ export default {
         },
         canSend() {
             return !!this.currentSession && this.currentSession.kind !== 'system'
+        },
+        /** 当前会话是否有后台处理中的请求（chat.processing 置、消息推送 / 终止帧清） */
+        isTyping() {
+            return !!this.typing[this.currentKey]
+        },
+        /** 当前会话最后一条机器人消息：配置引导（payload.status=config）由 watcher 监听它自动弹表单 */
+        lastBotMessage() {
+            const rows = this.currentMessages.filter((item) => item.role === 'bot')
+            return rows.length ? rows[rows.length - 1] : null
         },
         isSystem() {
             return this.currentSession?.kind === 'system'
@@ -197,6 +208,28 @@ export default {
         }
     },
     watch: {
+        /** 配置引导（自动弹配置表单）：机器人回复经 WebSocket 异步到达，在这里监听最后一条 bot 消息 */
+        lastBotMessage(next) {
+            if (!next || !next.payload) {
+                return
+            }
+            try {
+                const payload = JSON.parse(next.payload)
+                if (payload.status !== 'config') {
+                    return
+                }
+                if (payload.kind === 'magnet' && this.isMagnet && !this.qbPrompted) {
+                    this.qbPrompted = true
+                    this.qbDialog = true
+                }
+                if (payload.kind === 'video' && this.isVideoSession && !this.videoPrompted) {
+                    this.videoPrompted = true
+                    this.videoDialog = true
+                }
+            } catch (e) {
+                // 损坏的载荷按无引导处理
+            }
+        },
         '$route.query.session'(next) {
             if (next && next !== this.currentKey) {
                 this.switchSession(next)
@@ -248,11 +281,13 @@ export default {
             this.syncQuery(store.currentKey)
         }
         store.startPolling()
+        store.initRealtime()
     },
     activated() {
         const store = useChatStore()
         store.refreshSessions()
         store.startPolling()
+        store.initRealtime()
         // 从左侧菜单的会话子项进入时 URL 带 ?session=<id>：以它为准切换会话，
         // 否则（页签返回等无 query 的场景）保持当前会话，手机端停在会话列表。
         const target = this.$route.query.session
@@ -318,40 +353,13 @@ export default {
             await this.refreshSessions()
             await useChatStore().reloadSession(this.currentKey)
         },
+        /** 发送：乐观渲染 + WS/HTTP 双通道（见 store.send）；失败转 failed 气泡，用户点击重发 */
         async onSend(text) {
-            const store = useChatStore()
-            try {
-                await store.send(text)
-            } catch (e) {
-                // 失败文案由 axios 拦截器提示
-            }
-            // 磁力会话：后端在未配置时会回一条配置引导，此处据此自动打开配置表单
-            if (this.isMagnet && !this.qbPrompted && this.hasConfigPrompt('magnet')) {
-                this.qbPrompted = true
-                this.qbDialog = true
-            }
-            // 视频解析会话：同上，引导填写解析服务地址与账号
-            if (this.isVideoSession && !this.videoPrompted && this.hasConfigPrompt('video')) {
-                this.videoPrompted = true
-                this.videoDialog = true
-            }
+            await useChatStore().send(text)
         },
-        /** 最近一条回复是否在提示配置（kind=magnet 为 qB，kind=video 为视频解析服务） */
-        hasConfigPrompt(kind) {
-            const rows = this.currentMessages
-            if (!rows.length) {
-                return false
-            }
-            const last = rows[rows.length - 1]
-            if (!last || !last.payload) {
-                return false
-            }
-            try {
-                const payload = JSON.parse(last.payload)
-                return !!payload && payload.kind === kind && payload.status === 'config'
-            } catch (e) {
-                return false
-            }
+        /** failed 气泡点击重发：换新 requestId 重新发送 */
+        async onResend(bubble) {
+            await useChatStore().resend(bubble)
         },
         /** 打开 qBittorrent 连接配置表单（顶栏「更多 → qBittorrent 设置」与配置引导共用） */
         openQbDialog() {

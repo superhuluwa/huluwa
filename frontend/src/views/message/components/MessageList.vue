@@ -13,8 +13,15 @@
                 <template v-for="item in rows" :key="item.key">
                     <div v-if="item.separator" class="time-separator">{{ item.separator }}</div>
                     <MessageBubble :message="item.message" @open-cover="$emit('open-cover', $event)"
-                        @delete="$emit('delete', $event)" />
+                        @delete="$emit('delete', $event)" @resend="$emit('resend', $event)" />
                 </template>
+                <!-- 机器人处理中指示（chat.processing 置、消息推送 / 终止帧清） -->
+                <div v-if="typing" class="message-row typing-row">
+                    <div class="avatar bot">Q</div>
+                    <div class="bubble typing-bubble">
+                        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                    </div>
+                </div>
             </template>
         </div>
 
@@ -56,6 +63,11 @@ export default {
             type: Boolean,
             default: false
         },
+        /** 当前会话是否有后台处理中的请求（显示三点打字指示） */
+        typing: {
+            type: Boolean,
+            default: false
+        },
         /** 当前会话键：变化即视为「重新进入会话」，定位状态与滚动一律重置 */
         sessionKey: {
             type: String,
@@ -70,7 +82,7 @@ export default {
             default: '暂无消息'
         }
     },
-    emits: ['open-cover', 'load-earlier', 'delete'],
+    emits: ['open-cover', 'load-earlier', 'delete', 'resend'],
     data() {
         return {
             showJump: false,
@@ -274,6 +286,65 @@ export default {
     color: var(--text-3);
     font-size: 11px;
     margin: 10px 0 8px;
+}
+
+/* 机器人「正在处理」指示行：头像 + 三点跳动气泡（样式与 MessageBubble 的行结构对齐） */
+.typing-row {
+    display: flex;
+    gap: var(--chat-avatar-gap, 10px);
+    margin-bottom: 8px;
+    align-items: flex-start;
+}
+
+.typing-row .avatar {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #6366F1);
+    color: #04121B;
+}
+
+.typing-bubble {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border-bottom-left-radius: 4px;
+    background: var(--bubble-bot, #1E293B);
+}
+
+.typing-bubble .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-3);
+    animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.typing-bubble .dot:nth-child(2) {
+    animation-delay: .15s;
+}
+
+.typing-bubble .dot:nth-child(3) {
+    animation-delay: .3s;
+}
+
+@keyframes typing-bounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: .5;
+    }
+    30% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
 }
 
 .jump-bottom {

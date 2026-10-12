@@ -1,0 +1,143 @@
+#!/bin/sh
+### Package specific variables and functions
+if [ -z "${SYNOPKG_PKGNAME}" ] || [ -z "${SYNOPKG_DSM_VERSION_MAJOR}" ]; then
+  echo "Error: Environment variables are not set." 1>&2;
+  echo "Please run me using synopkg instead. Example: \"synopkg start [packagename]\"" 1>&2;
+exit 1; fi
+# Base service USER to run background process prefixed according to DSM
+USER="pan-xunlei-com"
+PRIV_PREFIX=sc-
+SYNOUSER_PREFIX=svc-
+if [ -n "${SYNOPKG_DSM_VERSION_MAJOR}" ] && [ "${SYNOPKG_DSM_VERSION_MAJOR}" -lt 6 ]; then EFF_USER="${SYNOUSER_PREFIX}${USER}"; else EFF_USER="${PRIV_PREFIX}${USER}"; fi
+# Service port
+SERVICE_PORT="5050"
+# start-stop-status script redirect stdout/stderr to LOG_FILE
+LOG_FILE="${SYNOPKG_PKGDEST}/var/${SYNOPKG_PKGNAME}.log"
+# Service command has to deliver its pid into PID_FILE
+PID_FILE="${SYNOPKG_PKGDEST}/var/${SYNOPKG_PKGNAME}.pid"
+
+# Invoke shell function if available
+call_func ()
+{
+    FUNC=$1
+    if type "$FUNC" 2>/dev/null | grep -q 'function' 2>/dev/null; then
+        if [ -n "${INST_LOG}" ]; then
+            echo "Invoke $FUNC" >> ${INST_LOG}
+        fi
+        eval ${FUNC}
+    fi
+}
+
+# shellcheck disable=SC2148
+export SVC_CWD="${SYNOPKG_PKGDEST}"
+export PAN_XUNLEI_CLI="${SYNOPKG_PKGDEST}/bin/xunlei-pan-cli.sh"
+export PID_FILE="${SYNOPKG_PKGDEST}/var/pan-xunlei-com.pid"
+export ENV_FILE="${SYNOPKG_PKGDEST}/var/pan-xunlei-com.env"
+export LOG_FILE="${SYNOPKG_PKGDEST}/var/${SYNOPKG_PKGNAME}.log"
+export LAUNCH_LOG_FILE="${SYNOPKG_PKGDEST}/var/${SYNOPKG_PKGNAME}-launch.log"
+export INST_LOG="${SYNOPKG_PKGDEST}/var/${SYNOPKG_PKGNAME}_install.log"
+## I need root to bind to port 53 see `service_prestart()` below
+
+echo "DSM Version: ${SYNOPKG_DSM_VERSION_MAJOR}.$SYNOPKG_DSM_VERSION_MINOR-$SYNOPKG_DSM_VERSION_BUILD" >> "${INST_LOG}" 2>&1
+# SRM 1.2 example: DSM Version: 5.2-7915
+# DSM 6.2 example: DSM Version: 6.2-23739
+UNAME=$(uname -a)
+echo "uname: $UNAME" >> "${INST_LOG}" 2>&1
+
+# SRM example: Linux {some-name} 4.4.60 #7779 SMP Mon Jan 28 04:30:39 CST 2019 armv7l GNU/Linux synology_ipq806x_rt2600ac
+# DSM example: Linux {some-name} 3.10.105 #23739 SMP Tue Jul 3 19:47:13 CST 2018 x86_64 GNU/Linux synology_bromolow_3615xs
+OS="dsm"
+if echo "$UNAME" | grep -q -i 'rt1900ac\|rt2600ac\|mr2200ac'; then
+    OS="srm"
+fi
+echo "OS detected: $OS" >> "${INST_LOG}" 2>&1
+rootPath="/var/packages/${SYNOPKG_PKGNAME}/shares/迅雷/"
+get_rootPath() {
+    if [ $SYNOPKG_DSM_VERSION_MAJOR -le 6 ]; then
+	    rootPath="`/usr/syno/sbin/synoshare --get "迅雷" |grep Path|awk -F '[' '{print $2}'|awk -F ']' '{print $1}'`/"
+	    if [[ -z "${rootPath}"  ]]; then
+		    echo "获取共享文件 \"/迅雷\" 失败"
+		    exit 1
+	    fi
+    else
+        rootPath="/var/packages/${SYNOPKG_PKGNAME}/shares/迅雷/"
+    fi
+}
+
+service_prestart () {
+    echo "service_prestart  dsm:${SYNOPKG_DSM_VERSION_MAJOR} ${SYNOPKG_PKG_STATUS}" >> "${INST_LOG}"
+    cd "$SVC_CWD" || exit 1
+
+    get_rootPath
+
+    if [ ${SYNOPKG_DSM_VERSION_MAJOR} -le 6 ]; then
+        chmod 0777  ${INST_LOG}
+	    chown root:root ${SYNOPKG_PKGDEST}/ui/index.cgi
+	    chmod 0755 "${INST_LOG}"
+        ulimit -n 4084
+    fi
+    mkdir ${rootPath}.drive
+    cd ${rootPath}.drive
+    
+    DriveListen="unix://${SYNOPKG_PKGDEST}/var/pan-xunlei-com.sock" \
+    PLATFORM="群晖" \
+    OS_VERSION="${SYNOPLATFORM} dsm ${SYNOPKG_DSM_VERSION_MAJOR}.$SYNOPKG_DSM_VERSION_MINOR-$SYNOPKG_DSM_VERSION_BUILD"\
+    ConfigPath="${rootPath}" \
+    DownloadPATH="$rootPath/下载/" \
+    HOME="${rootPath}.drive" \
+    "${PAN_XUNLEI_CLI}"  -launcher_listen="unix://${SYNOPKG_PKGDEST}/var/pan-xunlei-com-launcher.sock" --pid "${PID_FILE}" --logfile ${LOG_FILE}  >> ${LAUNCH_LOG_FILE} 2>&1 &
+    
+    if [[ $? != 0  ]]; then
+        echo "启动失败"
+        tail -n 10 "${LOG_FILE}"
+    fi
+}
+
+service_poststop () {
+    echo "After stop (service_poststop)" >> "${INST_LOG}"
+}
+
+service_postinst () {
+	echo "安装成功！请按下F5刷新网页后再打开迅雷！<br/>"
+	echo "请按下F5刷新网页！<br/>"
+	echo "请按下F5刷新网页！<br/>"
+	echo "请按下F5刷新网页！"
+    echo "Running service_postinst script" >> "${INST_LOG}"
+    echo "rootPath: ${rootPath}" >> ${INST_LOG}
+    if [ ${SYNOPKG_DSM_VERSION_MAJOR} -le 6 ]; then
+        chmod 0777 "${SYNOPKG_PKGDEST}/var/" >> "${INST_LOG}" 2>&1
+        chmod 0755 "${INST_LOG}"
+    fi
+}
+
+service_postuninst () {
+    echo "service_postuninst ${SYNOPKG_PKG_STATUS}" >> "${INST_LOG}"
+    echo "rootPath: ${rootPath}" >> ${INST_LOG}
+    #rm -rf /root/.drive.bak/
+    #mv /root/.drive /root/.drive.bak
+    get_rootPath
+    rm -r ${rootPath}/.drive/bin
+    rm -r ${rootPath}/.drive.bak #删除上次卸载可能残留的.drive
+    mv ${rootPath}/.drive ${rootPath}/.drive.bak
+}
+
+service_postupgrade () {
+    # upgrade script when the offline-cache is also updated
+    #cp -f "${SYNOPKG_PKGDEST}"/blocklist/generate-domains-blacklist.py "${SYNOPKG_PKGDEST}/var/" >> "${INST_LOG}" 2>&1
+    get_rootPath
+    #如果.drive文件夹下已经有用户数据了，就不移动.bak
+    #否则会出现 旧版本的用户数据 覆盖了新版本的
+    #echo "Granting '${EFF_USER}' unix ownership on ${DIRNAME}" >> ${INST_LOG}
+    if [ ! -e "${rootPath}/.drive" ]; then
+      echo "service_postupgrade find db file not exist, so use .drive.bak." >> ${INST_LOG}
+      echo "rootPath: ${rootPath}" >> ${INST_LOG}
+      mv ${rootPath}/.drive.bak ${rootPath}/.drive
+    else
+      echo "service_postupgrade find db file already exist, so do nothing." >> ${INST_LOG}
+    fi
+
+	echo "更新成功！请按下F5刷新网页后再打开迅雷！<br/>"
+	echo "请按下F5刷新网页！<br/>"
+	echo "请按下F5刷新网页！<br/>"
+	echo "请按下F5刷新网页！"
+}

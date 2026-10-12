@@ -2,6 +2,10 @@ package com.huluwa.console.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.BusinessException;
+import com.huluwa.console.ws.ChatPushService;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +16,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析）/ 已读 / 清空 / 检索。
@@ -19,12 +26,14 @@ import java.util.Set;
  * 数据来源两条线：
  *  - 「电影港」等聊天会话：chat_session + chat_message（用户发送与机器人回复都落库）；
  *  - 「系统通知」虚拟会话：直接读既有 message 表（Frp / Docker / 推送等系统事件），不复制数据。
- * 发送电影港消息即同步触发站点搜索（约 1-2 秒），把结果按参考脚本的形态逐条落成机器人气泡：
+ * 发送是「同步受理 + 异步处理」两段：submit() 毫秒级落用户消息并返回（chat_request 幂等），
+ * 站点搜索 / qB 提交 / 视频解析在 chat-worker 线程执行，产出的机器人气泡经 WebSocket 推送。
+ * 电影港结果按参考脚本的形态逐条落成机器人气泡：
  * 摘要一条 + 每条结果一个「封面图 + 配文」气泡（配文含标题/年代/产地/类型与详情页链接）。
  * 每条结果的结构化载荷里额外带 subscribed 标记与订阅所需字段，前端据此渲染「订阅 / 已订阅」按钮，
  * 点击后由 /api/chat/subscriptions 落库并把该剧详情页的全部磁力存为对比基线。
  *
- * 发送「视频解析」消息即同步调用内网解析服务（对齐 quantum 的 quantum-video-parse.cs，约 5-30 秒），
+ * 发送「视频解析」消息即在后台线程调用内网解析服务（对齐 quantum 的 quantum-video-parse.cs，约 5-30 秒），
  * 把抖音等分享口令解析出的作品按气泡形态逐条落库：
  *  - 有视频直链 → 一条 video 气泡（封面作预览图，配文=标题/作者，点按端内播放）；
  *  - 无视频直链（图文作品）→ 逐张 image 气泡，实况照片按 video 气泡推、图片作预览图；
@@ -56,24 +65,44 @@ public class ChatService {
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
 
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
+    /**
+     * 聊天处理线程池：电影港搜索 / qB 提交 / 视频解析都在这里异步执行，
+     * 2 线程保证一个慢解析不阻塞后续搜索（SQLite 单写者下更多线程也只是写排队）。
+     * 已知代价：同一会话连发多条消息时机器人回复可能乱序穿插（消息 id 仍单调递增）。
+     */
+    private final ExecutorService chatWorker = Executors.newFixedThreadPool(2,
+            Thread.ofPlatform().daemon().name("chat-worker-", 0).factory());
+
     private final JdbcTemplate jdbcTemplate;
     private final MovieSearchService movieSearchService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
     private final VideoParseService videoParseService;
+    private final ChatRequestService chatRequestService;
+    private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
-                       VideoParseService videoParseService) {
+                       VideoParseService videoParseService, ChatRequestService chatRequestService,
+                       ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
         this.videoParseService = videoParseService;
+        this.chatRequestService = chatRequestService;
+        this.chatPushService = chatPushService;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        chatWorker.shutdownNow();
     }
 
     /** 会话消息（前后端统一形状，camelCase 下发） */
@@ -250,11 +279,19 @@ public class ChatService {
     // ------------------------------------------------------------------ 发送（搜索）
 
     /**
-     * 发送消息。电影港会话同步执行站点搜索、磁力下载会话同步提交 qB 任务，
-     * 返回本轮新增的全部消息（用户气泡 + 机器人回复），前端拿到后直接追加渲染；
-     * 其它聊天会话只落一条用户气泡。
+     * 一次发送的受理结果：requestId 归一化后的幂等键；status 取自 chat_request 表
+     * （received = 本次新受理 / processing = 重放撞上在途请求 / done|failed = 重放历史请求）；
+     * userMessage 为落库后的真实用户消息行（含数字 id），前端据此收编 pending 气泡。
      */
-    public List<ChatMessage> send(String sessionId, String content) {
+    public record SubmitResult(String requestId, String status, ChatMessage userMessage) {
+    }
+
+    /**
+     * 发送的同步接收段（毫秒级返回）：幂等落用户消息 + 登记 chat_request + 广播用户行 + 异步入队。
+     * 电影港搜索 / qB 提交 / 视频解析等耗时处理在 {@link #processRequest}（chat-worker 线程）执行，
+     * 结果经 WebSocket 推送（或前端轮询）到达，HTTP/WS 两个入口共用本方法，天然幂等。
+     */
+    public synchronized SubmitResult submit(String sessionId, String requestId, String content) {
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             throw new BusinessException(400, "系统通知为只读会话，不支持发送消息");
@@ -263,23 +300,61 @@ public class ChatService {
         if (text.isEmpty()) {
             throw new BusinessException(400, "请输入搜索内容");
         }
+        String key = requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId.trim();
 
-        List<ChatMessage> produced = new ArrayList<>();
-        produced.add(append(sessionId, "user", "text", text, null, null));
-
-        String kind = sessionKind(sessionId);
-        if ("movie".equals(kind)) {
-            // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
-            produced.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
-        } else if ("magnet".equals(kind)) {
-            // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
-            produced.addAll(runMagnetTask(sessionId, text));
-        } else if ("video".equals(kind)) {
-            // 视频解析会话：把分享口令交给解析服务，回复视频 / 图集气泡
-            produced.addAll(runVideoParseTask(sessionId, text));
+        // 幂等：outbox 重放同一 requestId（弱网重连 / 页面刷新）只落一条用户消息
+        ChatRequestService.Existing existing = chatRequestService.find(key);
+        if (existing != null) {
+            return new SubmitResult(key, existing.status(), chatRequestService.userMessage(key));
         }
+
+        ChatMessage userMessage = append(sessionId, "user", "text", text, null, null);
+        chatRequestService.insert(key, sessionId, userMessage.id());
         touch(sessionId);
-        return produced;
+        // 广播用户行：多标签页实时同步（发送方还另有一帧定向 ack 收编 pending 气泡，重复行由前端按 id 去重）
+        chatPushService.messages(sessionId, List.of(userMessage));
+        chatWorker.submit(() -> processRequest(key, sessionId, text));
+        return new SubmitResult(key, "received", userMessage);
+    }
+
+    /**
+     * 发送的异步处理段：只在 chat-worker 线程执行（外部站点搜索 / qB / 视频解析最长 2 分钟）。
+     * 产出与终止（chat.messages + chat.done）都通过 WebSocket 广播；无论成败最后推一份会话列表快照。
+     */
+    void processRequest(String requestId, String sessionId, String text) {
+        try {
+            chatRequestService.markProcessing(requestId);
+            List<ChatMessage> replies = new ArrayList<>();
+            String kind = sessionKind(sessionId);
+            if ("movie".equals(kind)) {
+                // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
+                replies.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
+            } else if ("magnet".equals(kind)) {
+                // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
+                replies.addAll(runMagnetTask(sessionId, text));
+            } else if ("video".equals(kind)) {
+                // 视频解析会话：把分享口令交给解析服务，回复视频 / 图集气泡
+                replies.addAll(runVideoParseTask(sessionId, text));
+            }
+            touch(sessionId);
+            chatRequestService.markDone(requestId);
+            chatPushService.messages(sessionId, replies);
+            chatPushService.done(requestId, sessionId, "done", null);
+        } catch (Exception e) {
+            log.warn("聊天请求 {} 处理失败：{}", requestId, e.getMessage());
+            String reason = safeMessage(e);
+            try {
+                ChatMessage errorReply = append(sessionId, "bot", "error", "处理失败：" + reason, null, null);
+                chatRequestService.markFailed(requestId, reason);
+                chatPushService.messages(sessionId, List.of(errorReply));
+            } catch (Exception suppressed) {
+                // 落库失败时仍要发终止帧，避免前端 typing 指示挂死
+                log.warn("聊天请求 {} 失败回复落库异常：{}", requestId, suppressed.getMessage());
+            }
+            chatPushService.done(requestId, sessionId, "failed", reason);
+        } finally {
+            chatPushService.sessions(sessions());
+        }
     }
 
     /**
@@ -671,20 +746,24 @@ public class ChatService {
 
     // ------------------------------------------------------------------ 已读 / 清空 / 检索
 
-    /** 会话标记已读（系统通知同步推进既有 message 表，与「全部已读」同语义） */
+    /** 会话标记已读（系统通知同步推进既有 message 表，与「全部已读」同语义）；末尾推送列表快照同步其它标签页 */
     public void markRead(String sessionId) {
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             messageService.markAllRead();
+            chatPushService.sessions(sessions());
             return;
         }
         // 标记已读不改动会话 updated_at：会话排序只随消息产生变化，避免已读操作把会话顶到列表最前
-        jdbcTemplate.update(
+        int updated = jdbcTemplate.update(
                 "UPDATE chat_message SET read_flag = 1 WHERE session_id = ? AND role = 'bot' AND read_flag = 0",
                 sessionId);
+        if (updated > 0) {
+            chatPushService.sessions(sessions());
+        }
     }
 
-    /** 清空会话消息（仅聊天会话；系统通知由消息中心原有删除/已读入口管理） */
+    /** 清空会话消息（仅聊天会话；系统通知由消息中心原有删除/已读入口管理）；推送列表快照同步其它标签页 */
     public void clear(String sessionId) {
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
@@ -692,6 +771,7 @@ public class ChatService {
         }
         jdbcTemplate.update("DELETE FROM chat_message WHERE session_id = ?", sessionId);
         touch(sessionId);
+        chatPushService.sessions(sessions());
     }
 
     /**

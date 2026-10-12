@@ -61,6 +61,11 @@
                 </template>
             </div>
         </div>
+        <!-- 发送状态（mine 行 row-reverse，DOM 在 bubble 之后 = 视觉在气泡左侧）：
+             pending 转圈等 ack；failed 感叹号点击重发 -->
+        <span v-if="isPending" class="msg-status" title="发送中…"><i class="fa-solid fa-spinner fa-spin"></i></span>
+        <button v-else-if="isFailed" class="msg-status failed" type="button" title="发送失败，点击重发"
+            @click="$emit('resend', message)"><i class="fa-solid fa-circle-exclamation"></i></button>
     </div>
 
     <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」直接提交 qBittorrent -->
@@ -92,7 +97,7 @@ export default {
             required: true
         }
     },
-    emits: ['open-cover', 'delete', 'subscribed', 'magnet-downloaded'],
+    emits: ['open-cover', 'delete', 'subscribed', 'magnet-downloaded', 'resend'],
     data() {
         return {
             loadError: false,
@@ -123,6 +128,14 @@ export default {
         },
         isMine() {
             return this.message.role === 'user'
+        },
+        /** 本地乐观发送态：等待服务端 ack（WS chat.ack / HTTP 响应） */
+        isPending() {
+            return this.isMine && this.message.status === 'pending'
+        },
+        /** 发送失败：点击重发（resend 事件交给页面层换新 requestId 重发） */
+        isFailed() {
+            return this.isMine && this.message.status === 'failed'
         },
         /** 载荷解析结果（影视卡片 / 磁力指令元信息），损坏时退化为空对象 */
         payload() {
@@ -294,10 +307,33 @@ export default {
     gap: var(--chat-avatar-gap, 10px);
     margin-bottom: 8px;
     align-items: flex-start;
+    /* 行本身不许被子元素（超宽视频/封面）撑破，否则头像列与右侧留白会被挤掉 */
+    min-width: 0;
 }
 
 .message-row.mine {
     flex-direction: row-reverse;
+}
+
+/* 发送状态位（在气泡左侧）：pending 转圈 / failed 感叹号点击重发 */
+.msg-status {
+    flex: none;
+    margin-top: 11px;
+    font-size: 13px;
+    color: var(--text-3);
+}
+
+.msg-status.failed {
+    border: 0;
+    padding: 0;
+    background: none;
+    color: #F43F5E;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+.msg-status.failed:hover {
+    opacity: .8;
 }
 
 .avatar {
@@ -351,14 +387,20 @@ export default {
     background: var(--bubble-bot, #1E293B);
 }
 
-/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡 */
+/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡。
+   与视频气泡同理显式声明 border-box：项目没有全局 border-box，
+   否则 max-width 只算内容宽，6px × 2 内边距会额外占位（同类对齐风险）。 */
 .bubble.is-cover {
+    box-sizing: border-box;
     padding: 6px;
     max-width: min(46%, 320px);
 }
 
-/* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄 */
+/* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄。
+   box-sizing 必须显式声明：项目没有全局 border-box，缺了它 max-width 只算内容宽，
+   12px 内边距会额外占位，卡片右边缘就会越过聊天区右留白、与输入框对不齐。 */
 .bubble.is-video {
+    box-sizing: border-box;
     padding: 6px;
     max-width: min(62%, 360px);
 }
@@ -544,8 +586,10 @@ export default {
         max-width: min(62%, 300px);
     }
 
+    /* 视频气泡：手机端宽度上限要扣除头像与间距，保证「头像 + 间距 + 卡片」正好占满一行，
+       卡片右边缘与输入框右边缘落在同一条垂直线上（配合 border-box 把内边距算进上限）。 */
     .bubble.is-video {
-        max-width: min(86%, 360px);
+        max-width: min(calc(100% - 36px - var(--chat-avatar-gap, 10px)), 360px);
     }
 
     .bubble-content {

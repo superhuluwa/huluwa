@@ -1,0 +1,25 @@
+{
+    "Main.js": {
+        "SYNO.SDS.XLPan.Application": {
+            "type":"app",
+            "version": "3.8.0",
+            "desc": "迅雷",
+            "icon": "images/pan-xunlei-com-{0}.png",
+            "title": "迅雷",
+            "texts": "texts",
+            "allowMultiInstance": false,
+            "waterfallLoadTexts": true,
+            "appWindow": "SYNO.SDS.XLPan.Main",
+            "depend": []
+        },
+        "SYNO.SDS.XLPan.Main": {
+		"type": "lib",
+		"title": "迅雷",
+		"icon": "images/pan-xunlei-com-{0}.png",
+		"texts": "texts",
+		"depend": [
+		]
+	}
+    }
+}
+

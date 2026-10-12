@@ -1,6 +1,7 @@
 package com.huluwa.console.service;
 
 import com.huluwa.console.common.BusinessException;
+import com.huluwa.console.ws.ChatPushService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -57,15 +58,18 @@ public class MovieSubscriptionService {
     private final MovieSearchService movieSearchService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
+    private final ChatPushService chatPushService;
 
     public MovieSubscriptionService(JdbcTemplate jdbcTemplate,
                                     MovieSearchService movieSearchService,
                                     QBittorrentService qBittorrentService,
-                                    MessageService messageService) {
+                                    MessageService messageService,
+                                    ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
+        this.chatPushService = chatPushService;
     }
 
     /** 订阅条目视图（订阅列表 / 搜索结果卡片上的按钮状态） */
@@ -733,7 +737,8 @@ public class MovieSubscriptionService {
         return value.isEmpty() ? "未命名" : value;
     }
 
-    /** 系统通知之外，把「提交成功 / 下载成功」也写进「磁力下载」会话（与用户要求的会话位置一致） */
+    /** 系统通知之外，把「提交成功 / 下载成功」也写进「磁力下载」会话（与用户要求的会话位置一致）；
+     *  写入成功后经 WebSocket 广播，让打开着的聊天页实时看到巡检产出 */
     private void magnetNotice(String headline, String detail, String savePath, String status) {
         String content = headline
                 + (detail == null || detail.isBlank() ? "" : "\n" + detail)
@@ -747,6 +752,12 @@ public class MovieSubscriptionService {
                     VALUES ('magnet', 'bot', 'text', ?, NULL, ?, 0, ?)
                     """, content, payload, stamp);
             jdbcTemplate.update("UPDATE chat_session SET updated_at = ? WHERE id = 'magnet'", stamp);
+            Long id = jdbcTemplate.queryForObject("SELECT last_insert_rowid()", Long.class);
+            if (id != null) {
+                ChatService.ChatMessage row = new ChatService.ChatMessage(id, "magnet", "bot", "text",
+                        content, null, payload, false, stamp);
+                chatPushService.messages("magnet", List.of(row));
+            }
         } catch (Exception e) {
             log.warn("写入磁力下载会话失败：{}", safeMessage(e));
         }

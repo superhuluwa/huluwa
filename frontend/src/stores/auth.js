@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import http from '@/libs/http'
+import chatSocket from '@/libs/ws'
 
 const TOKEN_KEY = 'huluwa.token'
 const USER_KEY = 'huluwa.username'
@@ -46,6 +47,8 @@ export const useAuthStore = defineStore('auth', {
         clear() {
             this.token = ''
             localStorage.removeItem(TOKEN_KEY)
+            // 登出 / 改密后停掉聊天 WebSocket（停止心跳与重连；重新进入消息页时由 initRealtime 重连）
+            chatSocket.disconnect()
         }
     }
 })

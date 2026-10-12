@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
  * 启动自检：schema.sql 由 Spring 数据源初始化阶段执行，这里只做结构校验与日志输出。
  */
 @Component
+@Order(1)
 public class DatabaseInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseInitializer.class);
@@ -18,7 +20,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     /** 所有建表语句都必须幂等，缺失任何一张表都说明 schema.sql 未正确执行 */
     private static final String[] REQUIRED_TABLES = {
             "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
-            "chat_session", "chat_message"
+            "chat_session", "chat_message", "chat_request"
     };
 
     private final JdbcTemplate jdbcTemplate;

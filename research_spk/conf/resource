@@ -1,0 +1,14 @@
+{
+    "data-share": {
+        "shares": [
+            {
+                "name": "迅雷",
+                "permission": {
+                    "rw": [
+                        "pan-xunlei-com"
+                    ]
+                }
+            }
+        ]
+    }
+}
