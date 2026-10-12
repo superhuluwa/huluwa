@@ -38,8 +38,15 @@ huluwa:
     secret: ''
     expire-hours: 72
   frp:
-    # 预留：frpc 可执行文件路径，后续接入进程管理时使用
-    binary: ''
+    # frpc 容器名：状态查询、热加载与重启都作用于它（docker restart frpc）
+    container: frpc
+    # frpc 容器内的可执行文件与配置路径（在其内部执行 verify / reload）
+    binary: frpc
+    container-config-path: /etc/frp/frpc.ini
+    # huluwa-console 容器内可见的配置文件路径：由宿主机 /root/frp 目录绑定挂载而来
+    config-path: /app/frp/frpc.ini
+    # 宿主机上的真实路径，仅用于界面展示
+    host-path: /root/frp/frpc.ini
   docker:
     # 兼容历史配置；当前使用 docker-java SDK 直连守护进程，不再调用 docker CLI
     binary: ''

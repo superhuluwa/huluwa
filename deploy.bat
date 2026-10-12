@@ -90,11 +90,11 @@ if errorlevel 1 goto :fail
 
 REM ---------- 4. 构建镜像 ----------
 echo [4/5] 构建 Docker 镜像 %IMAGE% ...
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker build -t %IMAGE% . > /root/huluwa-build.log 2>&1; echo BUILD_EXIT=$?; tail -n 5 /root/huluwa-build.log"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker build -t %IMAGE% . > /root/huluwa-build.log 2>&1; ec=$?; echo BUILD_EXIT=$ec; tail -n 5 /root/huluwa-build.log; exit $ec"
 if errorlevel 1 goto :build_fail
 
 REM ---------- 4b. 生成远端 compose 配置 ----------
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "printf '%%s\n' 'HULUWA_BIND_ADDRESS=0.0.0.0' 'HULUWA_PORT=%HOST_PORT%' 'HULUWA_DATA_DIR=%DATA_DIR%' DOCKER_GID=$(stat -c '%%g' /var/run/docker.sock) > %REMOTE_DIR%/.env && chmod 600 %REMOTE_DIR%/.env && cat %REMOTE_DIR%/.env"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "printf '%%s\n' 'HULUWA_BIND_ADDRESS=0.0.0.0' 'HULUWA_PORT=%HOST_PORT%' 'HULUWA_DATA_DIR=%DATA_DIR%' 'HULUWA_FRP_DIR=/root/frp' DOCKER_GID=$(stat -c '%%g' /var/run/docker.sock) > %REMOTE_DIR%/.env && chmod 600 %REMOTE_DIR%/.env && cat %REMOTE_DIR%/.env"
 if errorlevel 1 goto :fail
 
 REM ---------- 5. 重建容器（单容器，挂载宿主机 docker.sock） ----------

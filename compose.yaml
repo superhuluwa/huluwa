@@ -23,3 +23,6 @@ services:
       # 管理宿主机上的容器 / 镜像 / 网络 / 卷。
       # :z 用于 CentOS 默认的 SELinux enforcing 重新标记。
       - /var/run/docker.sock:/var/run/docker.sock:z
+      # Frp 管理：直接读写宿主机 /root/frp/frpc.ini（挂载目录，改配置即时生效）。
+      # 路径可用 .env 的 HULUWA_FRP_DIR 覆盖。
+      - ${HULUWA_FRP_DIR:-/root/frp}:/app/frp

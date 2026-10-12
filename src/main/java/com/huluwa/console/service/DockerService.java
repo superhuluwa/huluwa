@@ -39,6 +39,11 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +53,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,6 +118,7 @@ public class DockerService {
     private final JdbcTemplate jdbcTemplate;
     private final AppProperties properties;
     private final ObjectMapper objectMapper;
+
 
     private volatile DockerClient client;
     private volatile DockerHttpClient httpClient;
@@ -1166,6 +1173,215 @@ public class DockerService {
     // ------------------------------------------------------------------
     // 工具方法
     // ------------------------------------------------------------------
+
+// ------------------------------------------------------------------
+    // Frp 管理支撑：直接读写 huluwa 容器内挂载的 frpc.ini（宿主机 /root/frp/frpc.ini）
+    // ------------------------------------------------------------------
+
+    /** frpc 容器名：热加载与重启作用于它（可通过 huluwa.frp.container 调整）。 */
+    public String frpContainer() {
+        return text(properties.getFrp().getContainer(), "frpc");
+    }
+
+    /** huluwa 容器内可见的 frpc.ini 路径（由宿主机 /root/frp 目录挂载而来）。 */
+    public String frpConfigPath() {
+        return text(properties.getFrp().getConfigPath(), "/app/frp/frpc.ini");
+    }
+
+    /** frpc 容器内的 frpc.ini 路径（在其内部执行 verify / reload）。 */
+    public String frpContainerConfigPath() {
+        return text(properties.getFrp().getContainerConfigPath(), "/etc/frp/frpc.ini");
+    }
+
+    /** 宿主机真实路径，仅用于界面展示。 */
+    public String frpHostPath() {
+        return text(properties.getFrp().getHostPath(), "/root/frp/frpc.ini");
+    }
+
+    /** frpc 可执行文件路径（在 frpc 容器内执行）。 */
+    public String frpcBin() {
+        return text(properties.getFrp().getBinary(), "frpc");
+    }
+
+    /** 读取配置文件文本：huluwa 容器内直接读挂载文件，不经过中转服务。 */
+    public String readFrpConfig() {
+        return readLocalText(frpConfigPath());
+    }
+
+    /**
+     * 校验后写入配置文件：写临时文件 → 在 frpc 容器内 verify → 备份 → 原子替换。
+     *
+     * <p>校验在 frpc 容器内执行，能真正判断新配置对当前 frpc 是否合法；
+     * 任何一步失败都会保留原文件不变，避免把坏配置写进正在运行的 frpc。</p>
+     */
+    public void writeFrpConfig(String content, String action) {
+        if (content == null || content.isBlank()) {
+            throw new BusinessException(400, "配置内容为空，已阻止写入");
+        }
+        verifySyntax(content, action);
+        Path target = Paths.get(frpConfigPath()).toAbsolutePath().normalize();
+        Path temp = Paths.get(target + ".new");
+        try {
+            Files.writeString(temp, content, StandardCharsets.UTF_8);
+            if (Files.exists(target)) {
+                Files.copy(target, Paths.get(target + ".bak"),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            }
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException ex) {
+            deleteQuietly(temp);
+            throw new BusinessException(500, (action == null ? "保存配置" : action)
+                    + "失败：" + firstLine(ex.getMessage()));
+        }
+    }
+
+    /**
+     * 在 frpc 容器内校验新版配置。
+     *
+     * <p>frpc 容器只挂载了单个文件而非目录，无法直接看到宿主机上新增的临时文件，
+     * 因此把内容以 base64 管道送入容器的 /tmp，再用 frpc 自身的 verify 判断合法性。</p>
+     */
+    private void verifySyntax(String content, String action) {
+        String payload = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
+        if (payload.length() > 512_000) {
+            throw new BusinessException(400, "配置文件过大，已阻止写入（超过 384 KiB）");
+        }
+        String tempPath = "/tmp/.huluwa-frpc-verify.ini";
+        String script = "printf '%s' " + shellQuote(payload) + " | base64 -d > " + tempPath
+                + "; " + frpcBin() + " verify -c " + tempPath + " 2>&1; rc=$?; rm -f " + tempPath + "; exit $rc";
+        Map<String, Object> result;
+        try {
+            result = execContainer(frpContainer(), List.of("sh", "-c", script));
+        } catch (BusinessException ex) {
+            throw new BusinessException(500, "无法在 frpc 容器内校验配置：" + ex.getMessage());
+        }
+        Integer exitCode = result.get("exitCode") instanceof Integer code ? code : null;
+        if (exitCode == null || exitCode != 0) {
+            throw new BusinessException(400, (action == null ? "保存配置" : action)
+                    + "失败，配置未写入：" + firstLine(String.valueOf(result.get("output"))));
+        }
+    }
+
+    /** 在 frpc 容器内执行 frpc reload（热加载，不断开现有连接）。 */
+    public Map<String, Object> reloadFrpc() {
+        Map<String, Object> result = execContainer(frpContainer(), List.of("sh", "-c",
+                frpcBin() + " reload -c " + shellQuote(frpContainerConfigPath()) + " 2>&1"));
+        Map<String, Object> data = new LinkedHashMap<>();
+        Integer exitCode = result.get("exitCode") instanceof Integer code ? code : null;
+        data.put("success", exitCode != null && exitCode == 0);
+        data.put("exitCode", exitCode);
+        data.put("output", text(result.get("output"), ""));
+        return data;
+    }
+
+    /** 容器运行态：running / status / image。 */
+    public Map<String, Object> containerState(String containerId) {
+        String id = requireReference(containerId, "容器");
+        Map<String, Object> data = new LinkedHashMap<>();
+        // Docker 的 name 过滤是正则匹配（frpc 会命中 frpc-caiji），这里取回后按名称精确比对。
+        List<Container> containers = invoke("查询容器状态",
+                () -> client().listContainersCmd().withShowAll(true).exec());
+        Container found = null;
+        for (Container container : containers) {
+            if (matchesContainerName(container, id) || id.equals(container.getId())) {
+                found = container;
+                break;
+            }
+        }
+        if (found == null) {
+            throw new BusinessException(404, "容器不存在：" + id);
+        }
+        data.put("id", found.getId());
+        data.put("name", firstContainerName(found));
+        data.put("image", found.getImage());
+        data.put("status", found.getState());
+        data.put("running", "running".equalsIgnoreCase(found.getState()));
+        return data;
+    }
+
+    /** 容器名精确比对：忽略 Docker 前缀斜杠与大小写。 */
+    private static boolean matchesContainerName(Container container, String name) {
+        String[] names = container.getNames();
+        if (names == null) {
+            return false;
+        }
+        for (String candidate : names) {
+            if (candidate == null) {
+                continue;
+            }
+            String normalized = candidate.startsWith("/") ? candidate.substring(1) : candidate;
+            if (normalized.equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String firstContainerName(Container container) {
+        String[] names = container.getNames();
+        if (names == null || names.length == 0 || names[0] == null) {
+            return "";
+        }
+        return names[0].startsWith("/") ? names[0].substring(1) : names[0];
+    }
+
+    /** 在容器内做 TCP 端口探测（nc -z），用于判断本地监听端口是否存活。 */
+    public boolean probePort(String containerId, String host, String port) {
+        String id = requireReference(containerId, "容器");
+        String targetHost = text(host, "127.0.0.1");
+        String targetPort = text(port, null);
+        if (targetPort == null) {
+            return false;
+        }
+        try {
+            Map<String, Object> result = execContainer(id, List.of("sh", "-c",
+                    "nc -z -w 1 " + shellQuote(targetHost) + " " + shellQuote(targetPort)));
+            Integer exitCode = result.get("exitCode") instanceof Integer code ? code : null;
+            return exitCode != null && exitCode == 0;
+        } catch (RuntimeException ex) {
+            log.debug("端口探测失败 {}:{} - {}", targetHost, targetPort, ex.getMessage());
+            return false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 内部：本地文件读写
+    // ------------------------------------------------------------------
+
+    private String readLocalText(String path) {
+        Path target = Paths.get(path);
+        if (!Files.isReadable(target)) {
+            throw new BusinessException(500, "配置文件不可读：" + path
+                    + "（请确认 compose 已把宿主机 /root/frp 挂载到容器 /app/frp）");
+        }
+        try {
+            return Files.readString(target, StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new BusinessException(500, "读取配置文件失败：" + firstLine(ex.getMessage()));
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // 清理失败不影响主流程
+        }
+    }
+
+    /** 容器内 wget 路径：frpc 镜像是 busybox，可直接调用 wget 查询 admin API。 */
+    public String frpcWget() {
+        return "wget";
+    }
+
+    /** 单引号安全包裹，供容器内 shell 命令使用。 */
+    private static String shellQuote(String value) {
+        return "'" + String.valueOf(value).replace("'", "'" + (char) 39 + "'") + "'";
+    }
 
     private Map<String, Object> toMap(Object value) {
         if (value == null) {

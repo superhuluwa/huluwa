@@ -70,8 +70,28 @@ public class AppProperties {
     }
 
     public static class Frp {
-        /** frpc 可执行文件路径，留空表示尚未配置 */
-        private String binary = "";
+        /** frpc 容器名：状态查询、热加载与重启都作用于它（docker restart frpc）。 */
+        private String container = "frpc";
+
+        /** 容器内 frpc 可执行文件路径，用于配置语法校验与热加载。 */
+        private String binary = "frpc";
+
+        /** 本容器（huluwa-console）内可见的配置文件路径：由宿主机 /root/frp 目录绑定挂载而来。 */
+        private String configPath = "/app/frp/frpc.ini";
+
+        /** frpc 容器内的等价路径，用于在 frpc 容器里执行 verify / reload。 */
+        private String containerConfigPath = "/etc/frp/frpc.ini";
+
+        /** 宿主机上的真实路径，仅用于界面展示。 */
+        private String hostPath = "/root/frp/frpc.ini";
+
+        public String getContainer() {
+            return container;
+        }
+
+        public void setContainer(String container) {
+            this.container = container;
+        }
 
         public String getBinary() {
             return binary;
@@ -79,6 +99,30 @@ public class AppProperties {
 
         public void setBinary(String binary) {
             this.binary = binary;
+        }
+
+        public String getConfigPath() {
+            return configPath;
+        }
+
+        public void setConfigPath(String configPath) {
+            this.configPath = configPath;
+        }
+
+        public String getContainerConfigPath() {
+            return containerConfigPath;
+        }
+
+        public void setContainerConfigPath(String containerConfigPath) {
+            this.containerConfigPath = containerConfigPath;
+        }
+
+        public String getHostPath() {
+            return hostPath;
+        }
+
+        public void setHostPath(String hostPath) {
+            this.hostPath = hostPath;
         }
     }
 

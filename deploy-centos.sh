@@ -28,6 +28,16 @@ log "数据目录：${DATA_DIR}"
 mkdir -p "${DATA_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
 
+# Frp 管理：宿主机 frpc.ini 目录（compose 挂载到容器 /app/frp）
+FRP_DIR_DEFAULT="/root/frp"
+FRP_DIR="$(grep -E '^HULUWA_FRP_DIR=' .env | tail -n1 | cut -d= -f2- || true)"
+FRP_DIR="${FRP_DIR:-$FRP_DIR_DEFAULT}"
+if [ -f "${FRP_DIR}/frpc.ini" ]; then
+  log "Frp 配置目录：${FRP_DIR}/frpc.ini"
+else
+  log "警告：未找到 ${FRP_DIR}/frpc.ini，Frp 管理页将无法读写配置"
+fi
+
 SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
 log "宿主机 /var/run/docker.sock 的 GID = ${SOCKET_GID}"
 if grep -q '^DOCKER_GID=' .env; then
