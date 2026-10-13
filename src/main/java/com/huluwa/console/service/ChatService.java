@@ -7,8 +7,10 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
 
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -17,8 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析、迅雷下载）/ 已读 / 清空 / 检索。
@@ -48,6 +48,8 @@ public class ChatService {
     public static final String SYSTEM_SESSION = "system";
     /** 电影港会话键（schema 内置） */
     public static final String MOVIE_SESSION = "movie";
+    /** 电影天堂会话键（schema 内置） */
+    public static final String DYTT_SESSION = "dytt";
     /** 磁力下载会话键（schema 内置） */
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
@@ -72,19 +74,21 @@ public class ChatService {
     private static final String XUNLEI_PATH_PREFIX = "路径";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
+    /** 电影天堂单条搜索最多展示的结果条数 */
+    private static final int DYTT_SHOW_MAX = DyttSearchService.DEFAULT_MAX;
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
     /**
-     * 聊天处理线程池：电影港搜索 / qB 提交 / 视频解析都在这里异步执行，
-     * 2 线程保证一个慢解析不阻塞后续搜索（SQLite 单写者下更多线程也只是写排队）。
+     * 聊天处理线程池：影视搜索 / 下载指令保留 2 线程，视频解析独立使用 2 线程，
+     * 网络等待彼此隔离；SQLite 写入仍保持短操作。
      * 已知代价：同一会话连发多条消息时机器人回复可能乱序穿插（消息 id 仍单调递增）。
      */
-    private final ExecutorService chatWorker = Executors.newFixedThreadPool(2,
-            Thread.ofPlatform().daemon().name("chat-worker-", 0).factory());
+    private final ChatTaskExecutor chatWorker = new ChatTaskExecutor();
 
     private final JdbcTemplate jdbcTemplate;
     private final MovieSearchService movieSearchService;
+    private final DyttSearchService dyttSearchService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
@@ -95,6 +99,7 @@ public class ChatService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
+                       DyttSearchService dyttSearchService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
                        VideoParseService videoParseService, XunleiService xunleiService,
@@ -102,6 +107,7 @@ public class ChatService {
                        ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
+        this.dyttSearchService = dyttSearchService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
@@ -113,7 +119,7 @@ public class ChatService {
 
     @PreDestroy
     public void shutdown() {
-        chatWorker.shutdownNow();
+        chatWorker.close();
     }
 
     /** 会话消息（前后端统一形状，camelCase 下发） */
@@ -324,7 +330,7 @@ public class ChatService {
         touch(sessionId);
         // 广播用户行：多标签页实时同步（发送方还另有一帧定向 ack 收编 pending 气泡，重复行由前端按 id 去重）
         chatPushService.messages(sessionId, List.of(userMessage));
-        chatWorker.submit(() -> processRequest(key, sessionId, text));
+        chatWorker.submit(sessionKind(sessionId), () -> processRequest(key, sessionId, text));
         return new SubmitResult(key, "received", userMessage);
     }
 
@@ -340,6 +346,9 @@ public class ChatService {
             if ("movie".equals(kind)) {
                 // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
                 replies.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
+            } else if ("dytt".equals(kind)) {
+                // 电影天堂（dyttzyw）搜索：只需要去掉可选的指令前缀，关键字保持原样
+                replies.addAll(runDyttSearch(sessionId, normalizeDyttKeyword(text)));
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runMagnetTask(sessionId, text));
@@ -398,6 +407,101 @@ public class ChatService {
             return rest.isEmpty() ? text : rest;
         }
         return text;
+    }
+
+    /**
+     * 电影天堂关键字归一化：兼容手打指令前缀「电影天堂搜索 凡人」/「电影天堂 凡人」/「dyttzy 凡人」→「凡人」，
+     * 纯片名（含数字片名）保持原样（与电影港的 normalizeKeyword 同规则，只是前缀不同）。
+     */
+    static String normalizeDyttKeyword(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return text;
+        }
+        int space = -1;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '\u3000' || ch == '\t' || ch == '\n' || ch == '\r') {
+                space = i;
+                break;
+            }
+        }
+        if (space <= 0) {
+            return text;
+        }
+        String head = text.substring(0, space);
+        if ("电影天堂搜索".equals(head) || "电影天堂".equals(head)
+                || "dytt".equalsIgnoreCase(head) || "dyttzy".equalsIgnoreCase(head)) {
+            String rest = text.substring(space + 1).trim();
+            return rest.isEmpty() ? text : rest;
+        }
+        return text;
+    }
+
+    /**
+     * 电影天堂搜索：回复形态与电影港一致（摘要一条 + 每条结果一条气泡），
+     * 卡片额外带豆瓣评分、更新备注与在线播放线路（点击即复制播放地址）。
+     */
+    private List<ChatMessage> runDyttSearch(String sessionId, String keyword) {
+        List<ChatMessage> replies = new ArrayList<>();
+        List<DyttSearchService.DyttItem> found;
+        try {
+            found = dyttSearchService.search(keyword);
+        } catch (Exception e) {
+            replies.add(append(sessionId, "bot", "error", "搜索失败：" + safeMessage(e), null, null));
+            return replies;
+        }
+
+        if (found.isEmpty()) {
+            replies.add(append(sessionId, "bot", "error",
+                    "未搜索到「" + keyword + "」相关资源，换个片名试试（电影天堂按片名匹配，不支持演员）。", null, null));
+            return replies;
+        }
+
+        int shown = Math.min(found.size(), DYTT_SHOW_MAX);
+        replies.add(append(sessionId, "bot", "text",
+                "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
+                        + "点卡片下方「播放地址」可查看在线线路（复制链接即可播放）。", null, null));
+        for (int i = 0; i < shown; i++) {
+            DyttSearchService.DyttItem item = found.get(i);
+            String caption = dyttCaption(item);
+            String payload = toJson(dyttSearchService.toPayload(item));
+            if (item.cover() == null || item.cover().isBlank()) {
+                replies.add(append(sessionId, "bot", "text", caption, null, payload));
+            } else {
+                replies.add(append(sessionId, "bot", "image", item.cover(), caption, payload));
+            }
+        }
+        return replies;
+    }
+
+    /** 电影天堂卡片配文：标题（年代 / 产地 / 类型 / 评分）+ 更新备注 + 详情页链接 */
+    private static String dyttCaption(DyttSearchService.DyttItem item) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('[').append(item.id()).append(']').append(item.title());
+        List<String> meta = new ArrayList<>();
+        if (notBlank(item.year())) {
+            meta.add(item.year());
+        }
+        if (notBlank(item.origin())) {
+            meta.add(item.origin());
+        }
+        if (notBlank(item.genre())) {
+            meta.add(item.genre());
+        }
+        if (notBlank(item.score())) {
+            meta.add("豆瓣 " + item.score());
+        }
+        if (!meta.isEmpty()) {
+            sb.append('（').append(String.join(" / ", meta)).append('）');
+        }
+        if (notBlank(item.remarks())) {
+            sb.append('\n').append("状态：").append(item.remarks());
+        }
+        if (notBlank(item.url())) {
+            sb.append('\n').append("详情：").append(item.url());
+        }
+        return sb.toString();
     }
 
     /** 电影港搜索：对齐参考脚本「摘要一条 + 每条结果一条气泡（封面+配文）」的回复形态 */
@@ -750,12 +854,25 @@ public class ChatService {
     private ChatMessage append(String sessionId, String role, String type, String content,
                                String contentText, String payload) {
         String now = LocalDateTime.now().format(TIME_FORMAT);
-        jdbcTemplate.update("""
+        GeneratedKeyHolder key = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
                 INSERT INTO chat_message (session_id, role, type, content, content_text, payload, read_flag, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, sessionId, role, type, content, contentText, payload, "user".equals(role) ? 1 : 0, now);
-        Long id = jdbcTemplate.queryForObject("SELECT last_insert_rowid()", Long.class);
-        return new ChatMessage(id == null ? 0L : id, sessionId, role, type, content, contentText, payload,
+                """, Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1, sessionId);
+            statement.setString(2, role);
+            statement.setString(3, type);
+            statement.setString(4, content);
+            statement.setString(5, contentText);
+            statement.setString(6, payload);
+            statement.setInt(7, "user".equals(role) ? 1 : 0);
+            statement.setString(8, now);
+            return statement;
+        }, key);
+        Number id = key.getKey();
+        if (id == null) throw new IllegalStateException("消息写入未返回主键");
+        return new ChatMessage(id.longValue(), sessionId, role, type, content, contentText, payload,
                 "user".equals(role), now);
     }
 

@@ -16,6 +16,13 @@
 </template>
 
 <script setup>
+import {
+    NConfigProvider,
+    NDialogProvider,
+    NLoadingBarProvider,
+    NMessageProvider,
+    NNotificationProvider
+} from 'naive-ui'
 import { zhCN, dateZhCN } from 'naive-ui'
 import { theme, themeOverrides } from '@/theme/naive'
 import { useFullscreenPage } from '@/composables/useFullscreenPage'

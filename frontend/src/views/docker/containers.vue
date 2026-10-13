@@ -153,8 +153,20 @@
 </template>
 
 <script>
-import { h } from 'vue'
-import ResourceCharts from './resource-charts.vue'
+import {
+    NButton,
+    NCheckbox,
+    NDataTable,
+    NInput,
+    NModal,
+    NRadioButton,
+    NRadioGroup,
+    NSpin,
+    NTabPane,
+    NTabs
+} from 'naive-ui'
+import { defineAsyncComponent, h } from 'vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { resourceSnapshot, formatBytes, memoryClass, appendSample } from './resources'
 import {
     listContainers,
@@ -169,9 +181,23 @@ import {
     executeCommand
 } from '@/api/docker'
 
+const ResourceCharts = defineAsyncComponent(() => import('./resource-charts.vue'))
+
 export default {
     name: 'DockerContainers',
-    components: { ResourceCharts },
+    components: {
+        ResourceCharts,
+        NButton,
+        NCheckbox,
+        NDataTable,
+        NInput,
+        NModal,
+        NRadioButton,
+        NRadioGroup,
+        NSpin,
+        NTabPane,
+        NTabs
+    },
     setup() {
         // 窄屏判定：弹窗宽度与默认视图据此切换（桌面端行为不变）
         return { isMobile: useIsMobile() }

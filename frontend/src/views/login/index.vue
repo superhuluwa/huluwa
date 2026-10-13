@@ -49,9 +49,11 @@
 </template>
 
 <script>
+import { NButton, NForm, NFormItem, NInput } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 
 export default {
+    components: { NButton, NForm, NFormItem, NInput },
     name: 'LoginPage',
     setup() {
         return { auth: useAuthStore() }

@@ -39,6 +39,7 @@
 </template>
 
 <script>
+import { NMenu } from 'naive-ui'
 import { h } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -59,7 +60,7 @@ const renderIcon = (iconClass) => {
 
 export default {
     name: 'MainLayout',
-    components: { HeaderBar, UserChip },
+    components: { HeaderBar, UserChip, NMenu },
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()

@@ -127,11 +127,24 @@
 </template>
 
 <script>
+import {
+    NAlert,
+    NButton,
+    NDataTable,
+    NDescriptions,
+    NDescriptionsItem,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal,
+    NSwitch
+} from 'naive-ui'
 import { h } from 'vue'
 import { getEnvironment, getSummary, listHosts, createHost, deleteHost } from '@/api/docker'
 import { useIsMobile } from '@/composables/useIsMobile'
 
 export default {
+    components: { NAlert, NButton, NDataTable, NDescriptions, NDescriptionsItem, NForm, NFormItem, NInput, NModal, NSwitch },
     name: 'DockerManagement',
     setup() {
         // 窄屏下详情/主机描述表收成单列，桌面端仍为三列

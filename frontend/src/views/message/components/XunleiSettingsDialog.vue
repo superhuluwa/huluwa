@@ -58,6 +58,14 @@
 </template>
 
 <script>
+import {
+    NAlert,
+    NButton,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal
+} from 'naive-ui'
 /**
  * 迅雷远程下载连接配置表单（「迅雷下载」会话首次使用与顶栏入口共用）：
  * 原生模式可用飞牛账号密码自动登录并续取 fnos-token，也保留手动 Cookie 入口。
@@ -66,6 +74,7 @@
 import { GetXunleiSettings, SaveXunleiSettings, TestXunleiConnection } from '@/api/xunlei'
 
 export default {
+    components: { NAlert, NButton, NForm, NFormItem, NInput, NModal },
     name: 'XunleiSettingsDialog',
     props: {
         show: {

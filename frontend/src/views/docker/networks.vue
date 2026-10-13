@@ -60,6 +60,15 @@
 </template>
 
 <script>
+import {
+    NButton,
+    NDataTable,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal,
+    NSelect
+} from 'naive-ui'
 import { h } from 'vue'
 import {
     listNetworks,
@@ -71,6 +80,7 @@ import {
 } from '@/api/docker'
 
 export default {
+    components: { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NSelect },
     name: 'DockerNetworks',
     data() {
         return {

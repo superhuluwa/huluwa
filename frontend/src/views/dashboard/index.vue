@@ -74,10 +74,12 @@
 </template>
 
 <script>
+import { NButton, NDescriptions, NDescriptionsItem } from 'naive-ui'
 import http from '@/libs/http'
 import { useIsMobile } from '@/composables/useIsMobile'
 
 export default {
+    components: { NButton, NDescriptions, NDescriptionsItem },
     name: 'DashboardPage',
     setup() {
         // 窄屏下描述列表收成单列，避免标签被压成竖排（桌面端仍为两列）

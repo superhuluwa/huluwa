@@ -1,36 +1,5 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import {
-    NAlert,
-    NButton,
-    NCheckbox,
-    NConfigProvider,
-    NDataTable,
-    NDescriptions,
-    NDescriptionsItem,
-    NDialogProvider,
-    NDropdown,
-    NForm,
-    NFormItem,
-    NInput,
-    NInputNumber,
-    NLoadingBarProvider,
-    NMenu,
-    NMessageProvider,
-    NModal,
-    NNotificationProvider,
-    NPopover,
-    NTooltip,
-    NRadioButton,
-    NRadioGroup,
-    NSelect,
-    NSpin,
-    NSwitch,
-    NTabPane,
-    NTabs,
-    NBreadcrumb,
-    NBreadcrumbItem
-} from 'naive-ui'
 import App from './App.vue'
 import router from './router'
 import { message, dialog, notification } from './libs/discrete'
@@ -43,42 +12,6 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-
-const naiveComponents = {
-    NAlert,
-    NButton,
-    NCheckbox,
-    NConfigProvider,
-    NDataTable,
-    NDescriptions,
-    NDescriptionsItem,
-    NDialogProvider,
-    NDropdown,
-    NForm,
-    NFormItem,
-    NInput,
-    NInputNumber,
-    NLoadingBarProvider,
-    NMenu,
-    NMessageProvider,
-    NModal,
-    NNotificationProvider,
-    NPopover,
-    NTooltip,
-    NRadioButton,
-    NRadioGroup,
-    NSelect,
-    NSpin,
-    NSwitch,
-    NTabPane,
-    NTabs,
-    NBreadcrumb,
-    NBreadcrumbItem
-}
-
-for (const [name, component] of Object.entries(naiveComponents)) {
-    app.component(name, component)
-}
 
 app.config.globalProperties.$message = message
 app.config.globalProperties.$dialog = dialog

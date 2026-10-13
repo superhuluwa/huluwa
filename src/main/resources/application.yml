@@ -1,6 +1,10 @@
 server:
   port: 8000
   address: 0.0.0.0
+  compression:
+    enabled: true
+    min-response-size: 2KB
+    mime-types: text/html,text/plain,text/css,text/javascript,application/javascript,application/json,image/svg+xml
 
 spring:
   application:
@@ -34,6 +38,10 @@ spring:
 
 huluwa:
   data-dir: ./data
+  movie:
+    # 页面详情短期复用；巡检绕过已完成缓存，同 URL 的进行中请求仍会合并。
+    detail-cache-seconds: 60
+    detail-cache-max-entries: 128
   token:
     # 留空则首次启动自动生成并持久化到数据库
     secret: ''

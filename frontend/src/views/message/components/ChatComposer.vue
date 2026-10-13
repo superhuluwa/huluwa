@@ -20,6 +20,7 @@
  * 输入条（对齐量子端 ChatComposer 的交互与视觉，去掉附件/指令面板）：
  * - Enter 发送 / Shift+Enter 换行（量子端 Enter 发送、最多 4 行；桌面端补 Shift+Enter）
  * - 电影港会话：整条输入即搜索关键字，发送后由服务端返回结果气泡
+ * - 电影天堂会话：同样整条输入即关键字，返回带在线播放线路的卡片
  * - 磁力下载会话：整条输入可含多个磁力链接，发送后由服务端提交 qB 并回复结果
  * - 视频解析会话：整条输入即分享口令，发送后由服务端解析并回复视频 / 图集气泡
  */
@@ -38,7 +39,7 @@ export default {
             type: String,
             default: ''
         },
-        /** 会话类型：movie 搜索 / magnet 提交磁力 / video 解析口令 / xunlei 提交迅雷 / system 只读 / chat 普通对话 */
+        /** 会话类型：movie 电影港 / dytt 电影天堂 / magnet 提交磁力 / video 解析口令 / xunlei 提交迅雷 / system 只读 / chat 普通对话 */
         kind: {
             type: String,
             default: 'chat'
@@ -70,6 +71,9 @@ export default {
             }
             if (this.kind === 'movie') {
                 return this.mobile ? '输入片名开始搜索' : '输入片名搜索电影港（Enter 发送 / Shift+Enter 换行）'
+            }
+            if (this.kind === 'dytt') {
+                return this.mobile ? '输入片名开始搜索' : '输入片名搜索电影天堂（Enter 发送 / Shift+Enter 换行）'
             }
             if (this.kind === 'magnet') {
                 return this.mobile ? '粘贴磁力链接提交下载' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交；可一次贴多条'

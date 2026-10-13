@@ -1,6 +1,12 @@
 # Docker 部署（CentOS 服务器）
 
-项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 会先构建前端，再把前端静态资源打进后端 JAR，最终由**一个容器**在 **8000** 端口同时提供页面和 API，不需要另起 Nginx 或数据库容器。
+项目使用 Java 21 / Spring Boot 和 Vue / Vite。Dockerfile 构建前端并编译后端后，把前端静态资源打进后端 JAR，最终由**一个容器**在 **8000** 端口同时提供页面和 API，不需要另起 Nginx 或数据库容器。
+
+构建时，前端构建与后端 Java 编译由 BuildKit 并行执行，最后打包阶段再合并前端资源。`deploy.bat` 的源码上传包与 Docker 构建上下文均排除研究资料、无关压缩包和本机生成的静态产物；前端资源在镜像内重新生成。
+
+页面与 JSON 响应超过 2 KB 时启用 gzip。UI 组件按页面导入，容器图表在打开详情时加载。电影港详情默认缓存 60 秒、最多 128 个 URL；同 URL 的进行中请求合并，订阅巡检绕过已完成缓存。可通过 `HULUWA_MOVIE_DETAIL_CACHE_SECONDS` 和 `HULUWA_MOVIE_DETAIL_CACHE_MAX_ENTRIES` 调整，缓存时间设为 0 时只合并并发请求。
+
+视频解析使用独立的 2 线程池，与原有 2 个搜索 / 下载聊天线程分开排队。
 
 **只跑一个容器**。该容器挂载宿主机的 `/var/run/docker.sock`，通过 docker-java SDK 直连 Docker 守护进程，在“Docker 管理”页面管理**宿主机上的容器 / 镜像 / 网络 / 卷**。
 

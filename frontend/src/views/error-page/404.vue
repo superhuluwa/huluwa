@@ -9,7 +9,9 @@
 </template>
 
 <script>
+import { NButton } from 'naive-ui'
 export default {
+    components: { NButton },
     name: 'Error404'
 }
 </script>

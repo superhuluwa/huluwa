@@ -115,6 +115,7 @@
 </template>
 
 <script>
+import { NButton, NDataTable, NSpin, NSwitch } from 'naive-ui'
 /**
  * 电影港订阅管理：订阅清单（片名 / 具体链接 / 磁力基线 / 巡检状态）+ 订阅触发的下载任务。
  * 订阅动作本身在「消息中心 → 电影港」的结果卡片上完成，本页负责查看与维护。
@@ -136,7 +137,13 @@ const STATUS_LABEL = {
 
 export default {
     name: 'MovieSubscriptions',
-    components: { MovieSubscriptionDialog },
+    components: {
+        MovieSubscriptionDialog,
+        NButton,
+        NDataTable,
+        NSpin,
+        NSwitch
+    },
     data() {
         return {
             loading: false,

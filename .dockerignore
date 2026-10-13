@@ -10,6 +10,9 @@ codex-launcher-check-*
 **/dist
 src/main/resources/static
 output
+research_spk
+research_xunlei
+ps7420.zip
 **/*.class
 **/*.jar
 

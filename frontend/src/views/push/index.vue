@@ -63,10 +63,21 @@
 </template>
 
 <script>
+import {
+    NButton,
+    NDataTable,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal,
+    NSelect,
+    NSwitch
+} from 'naive-ui'
 import { h } from 'vue'
 import http from '@/libs/http'
 
 export default {
+    components: { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NSelect, NSwitch },
     name: 'PushSettings',
     data() {
         return {

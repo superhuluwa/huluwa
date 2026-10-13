@@ -7,8 +7,9 @@
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
         <div v-if="!isMine" class="avatar bot"
-            :class="{ movie: isMovie, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
+            :class="{ movie: isMovie, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
             <i v-if="isMovie" class="fa-solid fa-film"></i>
+            <i v-else-if="isDytt" class="fa-solid fa-circle-play"></i>
             <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
             <i v-else-if="isVideoSession" class="fa-solid fa-clapperboard"></i>
             <i v-else-if="isXunleiSession" class="fa-solid fa-bolt"></i>
@@ -31,6 +32,7 @@
                     <img v-else class="cover" :src="message.content" alt="封面" @error="loadError = true"
                         @click="openCover" />
                     <RichText class="cover-caption" :text="message.contentText" :support-fold="false" />
+                    <!-- 电影港卡片：订阅 + 磁力 + 订阅设置 -->
                     <div v-if="isMovie" class="movie-actions">
                         <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
                             :disabled="subscribed || busy" @click="onSubscribe">
@@ -46,11 +48,24 @@
                         </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
+                    <!-- 电影天堂卡片：在线播放线路（无磁力，点击查看 / 复制播放地址） -->
+                    <div v-else-if="isDytt" class="movie-actions">
+                        <button class="magnet-btn" type="button" @click="openPlays">
+                            <i class="fa-solid fa-circle-play"></i>
+                            播放地址<template v-if="playCount">（{{ playCount }}）</template>
+                        </button>
+                        <a v-if="parsedPayload.url" class="magnet-btn" :href="parsedPayload.url" target="_blank"
+                            rel="noopener">
+                            <i class="fa-solid fa-up-right-from-square"></i>详情页
+                        </a>
+                        <span class="subscribe-tip">在线资源，点击按钮复制播放链接</span>
+                    </div>
                 </template>
                 <!-- 视频气泡（视频解析会话）：封面 + 内联播放，点按在气泡内播放 -->
                 <VideoBubble v-else-if="isVideo" :message="message" @open-cover="$emit('open-cover', $event)" />
                 <template v-else>
                     <RichText :text="message.content" />
+                    <!-- 电影港卡片：订阅 + 磁力 + 订阅设置 -->
                     <div v-if="isMovie" class="movie-actions">
                         <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
                             :disabled="subscribed || busy" @click="onSubscribe">
@@ -65,6 +80,18 @@
                             <i class="fa-solid fa-sliders"></i>订阅设置
                         </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
+                    </div>
+                    <!-- 电影天堂卡片：在线播放线路（无磁力，点击查看 / 复制播放地址） -->
+                    <div v-else-if="isDytt" class="movie-actions">
+                        <button class="magnet-btn" type="button" @click="openPlays">
+                            <i class="fa-solid fa-circle-play"></i>
+                            播放地址<template v-if="playCount">（{{ playCount }}）</template>
+                        </button>
+                        <a v-if="parsedPayload.url" class="magnet-btn" :href="parsedPayload.url" target="_blank"
+                            rel="noopener">
+                            <i class="fa-solid fa-up-right-from-square"></i>详情页
+                        </a>
+                        <span class="subscribe-tip">在线资源，点击按钮复制播放链接</span>
                     </div>
                 </template>
             </div>
@@ -78,6 +105,10 @@
 
     <MovieSubscriptionDialog v-model:show="subscriptionDialog" :movie="subscribePayload"
         :resubscribe="!subscribed" @saved="onSubscriptionSaved" />
+
+    <!-- 电影天堂播放地址弹窗：卡片载荷里的在线线路，点击复制 m3u8 直链 -->
+    <PlaySourceDialog v-model:show="playDialog" :title="parsedPayload.title || ''"
+        :sources="parsedPayload.playSources || []" />
 
     <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」使用本剧选择的下载工具 -->
     <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
@@ -97,12 +128,13 @@ import NotifyCard from './NotifyCard.vue'
 import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
+import PlaySourceDialog from './PlaySourceDialog.vue'
 import { PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog },
     props: {
         message: {
             type: Object,
@@ -122,7 +154,9 @@ export default {
             /** 「查看磁力」按钮的加载态（抓详情页较慢，避免重复点击） */
             magnetsLoading: false,
             /** 磁力列表弹窗状态 */
-            magnetDialog: { show: false, url: '', title: '' }
+            magnetDialog: { show: false, url: '', title: '' },
+            /** 电影天堂播放地址弹窗状态 */
+            playDialog: false
         }
     },
     computed: {
@@ -162,13 +196,29 @@ export default {
                 return {}
             }
         },
-        /** 机器人回复的电影条目（带影视卡片载荷）显示胶片头像；视频解析会话的载荷不算影视卡片 */
-        isMovie() {
+        /** 载荷是否是影视卡片（电影港 / 电影天堂共用 url + title + cover 三件套） */
+        isMovieCard() {
             const payload = this.payload
             return payload.kind !== 'video'
                 && Object.prototype.hasOwnProperty.call(payload, 'url')
                 && Object.prototype.hasOwnProperty.call(payload, 'title')
                 && Object.prototype.hasOwnProperty.call(payload, 'cover')
+        },
+        /** 电影港条目（可订阅、有磁力）：显示胶片头像与订阅 / 磁力按钮 */
+        isMovie() {
+            return this.isMovieCard && this.payload.source !== 'dytt'
+        },
+        /** 电影天堂条目（在线 m3u8，无磁力）：显示播放头像与播放地址按钮 */
+        isDytt() {
+            return this.isMovieCard && this.payload.source === 'dytt'
+        },
+        /** 电影天堂卡片的播放条目总数（用于按钮角标） */
+        playCount() {
+            const sources = this.payload.playSources
+            if (!Array.isArray(sources)) {
+                return 0
+            }
+            return sources.reduce((sum, s) => sum + ((s && s.items) ? s.items.length : 0), 0)
         },
         /** 订阅状态：本地操作优先，其次是服务端下发的标记 */
         subscribed() {
@@ -286,6 +336,10 @@ export default {
                 title: this.parsedPayload.title || ''
             }
         },
+        /** 打开电影天堂播放地址弹窗（数据已在卡片载荷里，无需请求） */
+        openPlays() {
+            this.playDialog = true
+        },
         /** 手动下载成功：通知父级（会话页可据此刷新下载态） */
         onMagnetDownloaded(result) {
             this.$emit('magnet-downloaded', result)
@@ -370,6 +424,12 @@ export default {
 .avatar.bot.movie {
     background: linear-gradient(135deg, #6366F1, #A855F7);
     color: #F8FAFC;
+    font-size: 15px;
+}
+
+.avatar.bot.dytt {
+    background: linear-gradient(135deg, #10B981, #06B6D4);
+    color: #04121B;
     font-size: 15px;
 }
 

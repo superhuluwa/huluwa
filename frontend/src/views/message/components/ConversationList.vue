@@ -40,6 +40,7 @@
 </template>
 
 <script>
+import { NInput } from 'naive-ui'
 /**
  * 会话列表（对齐 quantum ConversationList 的视觉）：
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
@@ -51,6 +52,7 @@
 import { sessionPreview, formatTimeLabel } from '@/utils/chatFormat'
 
 export default {
+    components: { NInput },
     name: 'ConversationList',
     props: {
         sessions: {
@@ -105,6 +107,9 @@ export default {
             if (item.kind === 'movie') {
                 return 'fa-solid fa-film'
             }
+            if (item.kind === 'dytt') {
+                return 'fa-solid fa-circle-play'
+            }
             if (item.kind === 'magnet') {
                 return 'fa-solid fa-magnet'
             }
@@ -119,6 +124,7 @@ export default {
         iconClass(item) {
             return {
                 movie: item.kind === 'movie',
+                dytt: item.kind === 'dytt',
                 magnet: item.kind === 'magnet',
                 video: item.kind === 'video',
                 xunlei: item.kind === 'xunlei',
@@ -216,6 +222,11 @@ export default {
 .conv-icon.movie {
     background: rgba(99, 102, 241, .16);
     color: #A5B4FC;
+}
+
+.conv-icon.dytt {
+    background: rgba(16, 185, 129, .16);
+    color: #6EE7B7;
 }
 
 .conv-icon.magnet {

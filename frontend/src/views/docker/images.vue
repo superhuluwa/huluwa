@@ -48,10 +48,19 @@
 </template>
 
 <script>
+import {
+    NButton,
+    NDataTable,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal
+} from 'naive-ui'
 import { h } from 'vue'
 import { listImages, pullImage, removeImage } from '@/api/docker'
 
 export default {
+    components: { NButton, NDataTable, NForm, NFormItem, NInput, NModal },
     name: 'DockerImages',
     data() {
         return {

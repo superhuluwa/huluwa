@@ -9,16 +9,19 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY frontend/ ./
 RUN npm run build
 
-# Package the backend with the freshly built frontend (no frontend Maven profile).
+# Compile Java while the independent frontend stage builds its assets.
 FROM maven:3.9.9-eclipse-temurin-21 AS backend-build
 WORKDIR /workspace
 COPY pom.xml ./
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -DskipTests dependency:go-offline
 COPY src/ ./src/
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn -B -ntp -Dmaven.test.skip=true compile
+# Only resource packaging waits for the frontend; target/classes stays in this stage.
 COPY --from=frontend-build /workspace/src/main/resources/static/ ./src/main/resources/static/
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
-    mvn -B -ntp -DskipTests package
+    mvn -B -ntp -Dmaven.test.skip=true package
 
 FROM eclipse-temurin:21-jre-noble AS runtime
 WORKDIR /app

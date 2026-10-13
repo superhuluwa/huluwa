@@ -54,6 +54,14 @@
 </template>
 
 <script>
+import {
+    NAlert,
+    NButton,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal
+} from 'naive-ui'
 /**
  * 视频解析服务配置表单（「视频解析」会话首次使用与顶栏入口共用）：
  * 服务地址 / 登录账号 / 密码，外加一个不落库的「试解析」用于验证链路。
@@ -62,6 +70,7 @@
 import { GetVideoSettings, SaveVideoSettings, TestVideoConnection, TestVideoParse } from '@/api/video'
 
 export default {
+    components: { NAlert, NButton, NForm, NFormItem, NInput, NModal },
     name: 'VideoSettingsDialog',
     props: {
         show: {

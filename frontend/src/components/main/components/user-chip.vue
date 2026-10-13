@@ -36,10 +36,19 @@
 </template>
 
 <script>
+import {
+    NButton,
+    NDropdown,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal
+} from 'naive-ui'
 import { h } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
 export default {
+    components: { NButton, NDropdown, NForm, NFormItem, NInput, NModal },
     name: 'UserChip',
     setup() {
         return { auth: useAuthStore() }

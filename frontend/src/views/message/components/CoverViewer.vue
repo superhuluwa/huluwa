@@ -31,12 +31,14 @@
 </template>
 
 <script>
+import { NModal } from 'naive-ui'
 /**
  * 封面全屏查看器（对齐量子端 MediaViewer 的图片分支）：
  * 滚轮/按钮缩放（1–6x）、双击在 1x 与 2.5x 间切换、单击背景关闭。
  * 封面是站点外链，直接渲染，不需要 JWT blob 转换。
  */
 export default {
+    components: { NModal },
     name: 'CoverViewer',
     props: {
         show: {

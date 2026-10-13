@@ -19,7 +19,9 @@
 </template>
 
 <script>
+import { NBreadcrumb, NBreadcrumbItem } from 'naive-ui'
 export default {
+    components: { NBreadcrumb, NBreadcrumbItem },
     name: 'HeaderBar',
     props: {
         collapsed: Boolean,

@@ -55,6 +55,7 @@
  *  - 实时性由 WebSocket 提供（store.initRealtime）：发送乐观渲染（pending 转圈 → ack 收编），
  *    机器人回复经推送到达；WS 断开自动降级为 8s 轮询，发送走 HTTP 兜底（requestId 幂等）；
  *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
+ *  - 内置「电影天堂」会话：同样整条输入即关键字，卡片带评分与在线播放线路（无磁力，不订阅下载）；
  *  - 内置「磁力下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
  *  - 内置「迅雷下载」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
@@ -146,6 +147,7 @@ export default {
             const count = this.currentMessages.length
             const kindText = {
                 movie: '影视搜索',
+                dytt: '在线影库',
                 magnet: '磁力下载',
                 video: '分享口令解析',
                 xunlei: '迅雷远程下载',
@@ -184,6 +186,9 @@ export default {
             if (this.currentKind === 'movie') {
                 return '还没有搜索记录'
             }
+            if (this.currentKind === 'dytt') {
+                return '还没有搜索记录'
+            }
             if (this.currentKind === 'magnet') {
                 return '还没有磁力下载记录'
             }
@@ -198,6 +203,9 @@ export default {
         emptyTip() {
             if (this.currentKind === 'movie') {
                 return '输入片名开始搜索，例如「凡人修仙传」'
+            }
+            if (this.currentKind === 'dytt') {
+                return '输入片名开始搜索，例如「流浪地球」；资源为在线播放，可直接复制播放地址'
             }
             if (this.currentKind === 'magnet') {
                 return this.isMobile
@@ -223,6 +231,9 @@ export default {
             }
             if (this.currentKind === 'movie') {
                 return '输入片名回车即搜索，回复含封面与详情链接'
+            }
+            if (this.currentKind === 'dytt') {
+                return '输入片名回车即搜索，回复含封面、评分与在线播放线路'
             }
             if (this.currentKind === 'magnet') {
                 // 手机端：placeholder 与状态条已说明用法，再堆一行提示会把输入区顶得很高

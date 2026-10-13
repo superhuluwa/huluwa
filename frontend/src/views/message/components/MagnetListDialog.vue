@@ -56,6 +56,7 @@
 </template>
 
 <script>
+import { NButton, NModal, NSpin } from 'naive-ui'
 /**
  * 磁力列表弹窗（搜索结果卡片的「查看磁力」按钮）：
  *  - 实时抓取电影港详情页的磁力，按清晰度给出色标；
@@ -67,6 +68,7 @@
 import { PreviewMagnets, DownloadMagnet } from '@/api/chat'
 
 export default {
+    components: { NButton, NModal, NSpin },
     name: 'MagnetListDialog',
     props: {
         show: {

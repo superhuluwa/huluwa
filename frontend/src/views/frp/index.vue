@@ -143,10 +143,25 @@
 </template>
 
 <script>
+import {
+    NAlert,
+    NButton,
+    NCheckbox,
+    NDataTable,
+    NForm,
+    NFormItem,
+    NInput,
+    NInputNumber,
+    NModal,
+    NSelect,
+    NSpace,
+    NSwitch
+} from 'naive-ui'
 import { h } from 'vue'
 import http from '@/libs/http'
 
 export default {
+    components: { NAlert, NButton, NCheckbox, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch },
     name: 'FrpManagement',
     data() {
         return {

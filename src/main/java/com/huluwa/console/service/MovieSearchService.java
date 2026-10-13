@@ -1,5 +1,7 @@
 package com.huluwa.console.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -91,6 +93,18 @@ public class MovieSearchService {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    private final MovieDetailCache detailCache;
+
+    public MovieSearchService() {
+        this(60, 128);
+    }
+
+    @Autowired
+    public MovieSearchService(@Value("${huluwa.movie.detail-cache-seconds:60}") long cacheSeconds,
+                              @Value("${huluwa.movie.detail-cache-max-entries:128}") int cacheEntries) {
+        detailCache = new MovieDetailCache(Duration.ofSeconds(Math.max(0, cacheSeconds)), cacheEntries);
+    }
+
     /**
      * 搜索关键字并返回解析后的条目。
      *
@@ -137,7 +151,11 @@ public class MovieSearchService {
                     .header("User-Agent", USER_AGENT)
                     .GET()
                     .build();
-            return http.send(request, HttpResponse.BodyHandlers.ofByteArray()).body();
+            HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() / 100 != 2) {
+                throw new MovieSearchException("详情页请求返回 HTTP " + response.statusCode(), null);
+            }
+            return response.body();
         } catch (Exception e) {
             throw new MovieSearchException("搜索请求失败：" + e.getMessage(), e);
         }
@@ -175,6 +193,9 @@ public class MovieSearchService {
      * @param magnets 按页面顺序去重后的磁力
      */
     public record DetailPage(String title, List<MagnetItem> magnets) {
+        public DetailPage {
+            magnets = List.copyOf(magnets);
+        }
     }
 
     /**
@@ -184,17 +205,23 @@ public class MovieSearchService {
      * @throws MovieSearchException 网络异常时抛出，调用方转成聊天回复 / 巡检错误记录
      */
     public DetailPage fetchDetail(String detailUrl) {
+        return fetchDetail(detailUrl, false);
+    }
+
+    private DetailPage fetchDetail(String detailUrl, boolean refresh) {
         String url = absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
         if (url.isBlank() || "null".equals(url)) {
             return new DetailPage("", List.of());
         }
-        String html = decode(fetch(url));
-        return new DetailPage(parseTitle(html), parseMagnets(html));
+        return detailCache.get(url, refresh, () -> {
+            String html = decode(fetch(url));
+            return new DetailPage(parseTitle(html), parseMagnets(html));
+        });
     }
 
-    /** 抓取详情页里的全部磁力（不需要标题时的便捷入口） */
+    /** 巡检读取最新磁力：绕过已完成缓存，但与正在抓取同 URL 的请求合并。 */
     public List<MagnetItem> fetchMagnets(String detailUrl) {
-        return fetchDetail(detailUrl).magnets();
+        return fetchDetail(detailUrl, true).magnets();
     }
 
     /**

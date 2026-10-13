@@ -43,10 +43,19 @@
 </template>
 
 <script>
+import {
+    NButton,
+    NDataTable,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal
+} from 'naive-ui'
 import { h } from 'vue'
 import { listVolumes, createVolume, removeVolume } from '@/api/docker'
 
 export default {
+    components: { NButton, NDataTable, NForm, NFormItem, NInput, NModal },
     name: 'DockerVolumes',
     data() {
         return {

@@ -44,6 +44,15 @@
 </template>
 
 <script>
+import {
+    NAlert,
+    NButton,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal,
+    NSwitch
+} from 'naive-ui'
 /**
  * qBittorrent 连接配置表单（「磁力下载」会话首次使用与页脚入口共用）：
  * 服务地址、账号密码、默认保存路径；「测试连接」用表单里的最新值直接探测，
@@ -52,6 +61,7 @@
 import { GetQbSettings, SaveQbSettings, TestQbConnection } from '@/api/qbittorrent'
 
 export default {
+    components: { NAlert, NButton, NForm, NFormItem, NInput, NModal, NSwitch },
     name: 'QbSettingsDialog',
     props: {
         show: {

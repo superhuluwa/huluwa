@@ -75,6 +75,7 @@
 </template>
 
 <script>
+import { NDropdown, NInput, NPopover } from 'naive-ui'
 /**
  * 会话顶栏（对齐量子端 ChatHeader 的布局）：标题、副标题（消息数/会话类型）、
  * 跨会话消息搜索、刷新、清空会话。系统通知虚拟会话不支持清空（清除入口在消息中心）。
@@ -85,6 +86,7 @@ import { SearchMessages } from '@/api/chat'
 import { stripMarkup } from '@/utils/chatFormat'
 
 export default {
+    components: { NDropdown, NInput, NPopover },
     name: 'ChatHeader',
     props: {
         sessionKey: {

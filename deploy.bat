@@ -69,7 +69,7 @@ echo.
 REM ---------- 2. 打包本机源码 (仅上传代码, 不含 .git/构建产物/数据) ----------
 echo [2/5] 打包源码...
 del /q "%TARBALL%" 2>nul
-tar -czf "%TARBALL%" --exclude=./.git --exclude=./node_modules --exclude=*/node_modules --exclude=target --exclude=./data --exclude=./output "--exclude=./%%SystemDrive%%" -C "%PROJECT_DIR%" .
+tar -czf "%TARBALL%" --exclude=./.git --exclude=./node_modules --exclude=*/node_modules --exclude=target --exclude=./data --exclude=./output --exclude=./research_spk --exclude=./research_xunlei --exclude=./ps7420.zip --exclude=./src/main/resources/static "--exclude=./%%SystemDrive%%" -C "%PROJECT_DIR%" .
 if errorlevel 1 goto :tar_fail
 for %%A in ("%TARBALL%") do set TARBYTES=%%~zA
 echo       源码包: %TARBYTES% 字节

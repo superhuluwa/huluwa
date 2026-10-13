@@ -22,3 +22,6 @@ frontend/dist/
 Thumbs.db
 # Codex 启动器自检临时目录
 codex-launcher-check-*/
+
+# 本地性能测量、隔离测试数据库与验证构建
+output/performance-audit/

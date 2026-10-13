@@ -34,6 +34,15 @@
 
 <script>
 import {
+    NButton,
+    NForm,
+    NFormItem,
+    NInput,
+    NModal,
+    NSelect,
+    NSpin
+} from 'naive-ui'
+import {
     GetMovieDownloadSettings, SaveMovieDownloadSettings, GetMovieSubscriptionStatus,
     UpdateMovieSubscriptionSettings, SubscribeMovie
 } from '@/api/chat'
@@ -42,7 +51,17 @@ import XunleiSettingsDialog from './XunleiSettingsDialog.vue'
 
 export default {
     name: 'MovieSubscriptionDialog',
-    components: { QbSettingsDialog, XunleiSettingsDialog },
+    components: {
+        QbSettingsDialog,
+        XunleiSettingsDialog,
+        NButton,
+        NForm,
+        NFormItem,
+        NInput,
+        NModal,
+        NSelect,
+        NSpin
+    },
     props: {
         show: { type: Boolean, default: false },
         movie: { type: Object, default: null },
