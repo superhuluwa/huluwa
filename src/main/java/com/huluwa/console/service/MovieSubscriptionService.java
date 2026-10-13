@@ -26,7 +26,7 @@ import java.util.Set;
  *       立刻抓一次详情页把每集磁力全部落库作为<b>基线</b>（基线不触发下载，只是对比基准）；</li>
  *   <li><b>巡检</b>：{@link #scheduledScan()} 每 10 分钟唤醒（配置项 movie.subscribe.interval-minutes，默认 60），
  *       对到期的订阅逐个抓详情页，与已存磁力做差集：
- *       只把<b>新增</b>且<b>清晰度最高</b>的每集条目提交 qBittorrent 下载，并按剧名建子目录；</li>
+ *       只把<b>新增</b>且<b>清晰度最高</b>的每集条目提交所选下载工具，并按剧名建子目录；</li>
  *   <li><b>通知</b>：有新剧集 → 写系统通知（消息中心「系统通知」会话）；
  *       提交成功 / 下载成功 → 写「磁力下载」会话；</li>
  *   <li><b>文件名补全</b>：下载完成的种子若文件名不含剧名，用 qB 的 renameFile 补上前缀，
@@ -43,10 +43,11 @@ public class MovieSubscriptionService {
 
     /** 默认巡检间隔（分钟）：没有单独配置时，每个订阅每小时一轮 */
     public static final int DEFAULT_INTERVAL_MINUTES = 60;
-    /** 保存根目录兜底（qB 侧根目录 + 剧名子目录）；可被配置项 / qB 默认路径覆盖 */
-    public static final String DEFAULT_SAVE_ROOT = "/downloads";
-    /** 配置键：订阅下载的根目录（留空则沿用 qB 配置里的默认保存路径） */
+    /** 电影港统一保存根目录，两种工具共用 */
+    public static final String DEFAULT_SAVE_ROOT = "/vol1/1000/downloads";
+    /** 旧版配置键，仅保留兼容；电影港使用统一根目录 */
     public static final String CFG_DOWNLOAD_ROOT = "movie.download.root";
+    public static final String CFG_DOWNLOADER = "movie.download.downloader";
     /** 周期巡检的唤醒间隔（分钟）：到期判定按订阅自身的 next_check_at，唤醒频率与巡检间隔解耦 */
     private static final int WAKE_MINUTES = 10;
     /** 单轮最多处理的订阅数（防止一次抓太多把站点抓崩） */
@@ -57,17 +58,20 @@ public class MovieSubscriptionService {
     private final JdbcTemplate jdbcTemplate;
     private final MovieSearchService movieSearchService;
     private final QBittorrentService qBittorrentService;
+    private final XunleiService xunleiService;
     private final MessageService messageService;
     private final ChatPushService chatPushService;
 
     public MovieSubscriptionService(JdbcTemplate jdbcTemplate,
                                     MovieSearchService movieSearchService,
                                     QBittorrentService qBittorrentService,
+                                    XunleiService xunleiService,
                                     MessageService messageService,
                                     ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
+        this.xunleiService = xunleiService;
         this.messageService = messageService;
         this.chatPushService = chatPushService;
     }
@@ -75,7 +79,7 @@ public class MovieSubscriptionService {
     /** 订阅条目视图（订阅列表 / 搜索结果卡片上的按钮状态） */
     public record Subscription(long id, String resId, String title, String year, String origin, String genre,
                                String cover, String detailUrl, boolean enabled, int magnetCount,
-                               String baselineAt, String lastCheckAt, String nextCheckAt, String lastError) {
+                               String baselineAt, String lastCheckAt, String nextCheckAt, String lastError, String downloader) {
     }
 
     /**
@@ -102,6 +106,14 @@ public class MovieSubscriptionService {
      */
     public SubscribeResult subscribe(String title, String detailUrl, String resId,
                                      String year, String origin, String genre, String cover) {
+        return subscribe(title, detailUrl, resId, year, origin, genre, cover, null);
+    }
+
+    public SubscribeResult subscribe(String title, String detailUrl, String resId,
+                                     String year, String origin, String genre, String cover, String downloader) {
+        if (downloader != null) {
+            validateDownloader(downloader);
+        }
         String url = movieSearchService.absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
         if (url.isBlank() || "null".equals(url)) {
             throw new BusinessException(400, "缺少电影港详情页链接，无法订阅");
@@ -110,6 +122,8 @@ public class MovieSubscriptionService {
         String id = resId != null && !resId.isBlank() ? resId.trim() : MovieSearchService.idFrom(url);
 
         Map<String, Object> existing = findRowByUrl(url);
+        String tool = downloader != null ? downloader
+                : existing == null ? downloadSettings().downloader() : subscriptionDownloader(existing);
         if (existing != null && number(existing.get("enabled")) == 1) {
             Subscription current = toSubscription(existing);
             // 已订阅：只补元信息（片名别再被搜索结果里的别名覆盖），不重抓基线
@@ -120,10 +134,10 @@ public class MovieSubscriptionService {
                            origin = COALESCE(NULLIF(?, ''), origin),
                            genre = COALESCE(NULLIF(?, ''), genre),
                            cover = COALESCE(NULLIF(?, ''), cover),
-                           updated_at = ?
+                           downloader = ?, updated_at = ?
                      WHERE id = ?
                     """, name, text(year), text(origin), text(genre), text(cover),
-                    now(), current.id());
+                    tool, now(), current.id());
             return new SubscribeResult(toSubscription(findRowById(current.id())), false, false, current.magnetCount());
         }
 
@@ -157,18 +171,18 @@ public class MovieSubscriptionService {
             jdbcTemplate.update("""
                     UPDATE movie_subscription
                        SET title = ?, res_id = ?, year = ?, origin = ?, genre = ?, cover = ?,
-                           enabled = 1, last_error = ?, updated_at = ?,
+                           enabled = 1, downloader = ?, last_error = ?, updated_at = ?,
                            next_check_at = COALESCE(NULLIF(?, ''), ?)
                      WHERE id = ?
-                    """, name, id, text(year), text(origin), text(genre), text(cover), fetchError, stamp,
+                    """, name, id, text(year), text(origin), text(genre), text(cover), tool, fetchError, stamp,
                     nextCheck(stamp), stamp, subscriptionId);
         } else {
             jdbcTemplate.update("""
                     INSERT INTO movie_subscription
-                        (res_id, title, year, origin, genre, cover, detail_url, enabled,
+                        (res_id, title, year, origin, genre, cover, detail_url, downloader, enabled,
                          baseline_at, last_check_at, next_check_at, last_error, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-                    """, id, name, text(year), text(origin), text(genre), text(cover), url,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                    """, id, name, text(year), text(origin), text(genre), text(cover), url, tool,
                     magnets.isEmpty() ? null : stamp, magnets.isEmpty() ? null : stamp,
                     nextCheck(stamp), fetchError, stamp, stamp);
             subscriptionId = subscriptionIdOf(url);
@@ -447,33 +461,27 @@ public class MovieSubscriptionService {
                  WHERE subscription_id = ? AND status = 'failed'
                  ORDER BY id DESC LIMIT ?
                 """, subscription.id(), MAX_DOWNLOADS_PER_ROUND);
-        if (rows.isEmpty() || !qBittorrentService.settings().configured()) {
+        String tool = subscription.downloader();
+        if (rows.isEmpty() || !downloaderConfigured(tool)) {
             return 0;
         }
         int done = 0;
         for (Map<String, Object> row : rows) {
-            long taskId = number(row.get("id"));
-            String magnet = string(row.get("magnet"));
-            String savePath = string(row.get("save_path"));
             try {
-                QBittorrentService.AddResult result = qBittorrentService.add(List.of(magnet),
-                        savePath == null || savePath.isBlank() ? savePathOf(subscription.title()) : savePath);
-                if (result.ok()) {
-                    String headline = (result.duplicate() ? "已在下载列表" : "✅ 已提交下载") + "（重试补交）";
-                    jdbcTemplate.update(
-                            "UPDATE movie_download_task SET status = 'added', message = ?, updated_at = ? WHERE id = ?",
-                            headline, now(), taskId);
-                    magnetNotice(headline, describeRow(row), string(row.get("save_path")), "ready");
+                Map<String, Object> result = submitOne(subscription.id(), subscription.title(),
+                        string(row.get("episode")), string(row.get("quality")), string(row.get("magnet")),
+                        string(row.get("torrent_hash")), savePathOf(subscription.title()));
+                if (Boolean.TRUE.equals(result.get("ok"))) {
                     done++;
                 }
             } catch (Exception e) {
-                log.debug("重试提交失败（任务 {}）：{}", taskId, safeMessage(e));
+                log.debug("重试提交失败（任务 {}）：{}", row.get("id"), safeMessage(e));
             }
         }
         return done;
     }
 
-    /** 单条磁力提交 qB：保存目录 = 根目录 / 剧名；同时落 movie_download_task 并通知「磁力下载」会话 */
+    /** 单条磁力提交：保存目录 = 根目录 / 剧名；同时落 movie_download_task 并通知「磁力下载」会话 */
     private boolean submit(Subscription subscription, MovieSearchService.MagnetItem item) {
         String magnet = item.magnet();
         if (alreadySubmitted(magnet)) {
@@ -485,7 +493,7 @@ public class MovieSubscriptionService {
     }
 
     /**
-     * 提交一条磁力到 qBittorrent（订阅巡检与手动下载共用）。
+     * 提交一条磁力到订阅选择的下载工具（订阅巡检与手动下载共用）。
      *
      * <p>保存目录固定为「根目录 / 剧名子目录」，任务表里记录剧名与集号：
      * 之后下载跟踪补文件名、以及巡检去重（同一集不重复下）都依赖这两个字段。</p>
@@ -498,28 +506,32 @@ public class MovieSubscriptionService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("savePath", savePath);
         out.put("seriesTitle", seriesTitle);
+        String tool = subscriptionId == null ? downloadSettings().downloader()
+                : subscriptionDownloader(findRowById(subscriptionId));
+        out.put("downloader", tool);
         String stamp = now();
         int inserted = jdbcTemplate.update("""
                 INSERT INTO movie_download_task
                     (subscription_id, series_title, episode, quality, magnet, torrent_hash,
-                     save_path, status, message, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?)
+                     save_path, downloader, status, message, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, ?)
                 ON CONFLICT(magnet) DO NOTHING
-                """, subscriptionId, seriesTitle, episode, quality, magnet, hash, savePath, stamp, stamp);
+                """, subscriptionId, seriesTitle, episode, quality, magnet, hash, savePath, tool, stamp, stamp);
         long taskId = taskIdOf(magnet);
         out.put("taskId", taskId);
         out.put("inserted", inserted > 0);
 
         String status;
         String headline;
-        if (!qBittorrentService.settings().configured()) {
+        String externalTaskId = null;
+        if (!downloaderConfigured(tool)) {
             status = "failed";
-            headline = "⚠️ 未配置 qBittorrent，未提交下载";
+            headline = "⚠️ 未配置" + toolLabel(tool) + "，未提交下载";
         } else {
-            QBittorrentService.AddResult result = null;
+            Submission result = null;
             String failure = null;
             try {
-                result = qBittorrentService.add(List.of(magnet), savePath);
+                result = addDownload(tool, magnet, savePath);
             } catch (Exception e) {
                 failure = safeMessage(e);
             }
@@ -528,20 +540,22 @@ public class MovieSubscriptionService {
                 headline = "⚠️ 提交失败：" + failure;
             } else if (result != null && result.ok()) {
                 status = "added";
+                externalTaskId = result.externalTaskId();
                 headline = (result.duplicate() ? "已在下载列表" : "✅ 已提交下载")
                         + (quality == null || quality.isBlank() ? "" : "：清晰度 " + quality);
             } else {
                 status = "failed";
-                headline = "⚠️ 提交失败：" + (result == null ? "qBittorrent 未返回结果" : result.message());
+                headline = "⚠️ 提交失败：" + (result == null ? toolLabel(tool) + " 未返回结果" : result.message());
             }
         }
         jdbcTemplate.update("""
-                UPDATE movie_download_task SET status = ?, message = ?, updated_at = ?
+                UPDATE movie_download_task SET status = ?, message = ?, save_path = ?, downloader = ?,
+                       external_task_id = ?, updated_at = ?
                  WHERE id = ?
-                """, status, headline, now(), taskId);
+                """, status, headline, savePath, tool, externalTaskId, now(), taskId);
 
         String detail = describeParts(episode, quality, seriesTitle);
-        magnetNotice(headline, detail, savePath, "failed".equals(status) ? "config" : "ready");
+        magnetNotice(tool, headline, detail, savePath, "failed".equals(status) ? "config" : "ready");
         out.put("status", status);
         out.put("ok", !"failed".equals(status));
         out.put("headline", headline);
@@ -576,15 +590,52 @@ public class MovieSubscriptionService {
                  ORDER BY id
                  LIMIT 50
                 """);
-        if (rows.isEmpty() || !qBittorrentService.settings().configured()) {
+        if (rows.isEmpty()) {
             return;
         }
         for (Map<String, Object> row : rows) {
             try {
-                trackDownload(row);
+                String tool = string(row.get("downloader"));
+                if (!downloaderConfigured(tool)) {
+                    continue;
+                }
+                if ("xunlei".equals(tool)) {
+                    trackXunleiDownload(row);
+                } else {
+                    trackDownload(row);
+                }
             } catch (Exception e) {
                 log.debug("下载跟踪失败（任务 {}）：{}", row.get("id"), safeMessage(e));
             }
+        }
+    }
+
+    private void trackXunleiDownload(Map<String, Object> row) {
+        String externalId = string(row.get("external_task_id"));
+        if (externalId == null || externalId.isBlank()) {
+            return;
+        }
+        XunleiService.TaskStatus task = xunleiService.task(externalId);
+        if (task == null) {
+            return;
+        }
+        String status = switch (task.phase()) {
+            case "PHASE_TYPE_COMPLETE" -> "completed";
+            case "PHASE_TYPE_ERROR" -> "failed";
+            case "PHASE_TYPE_RUNNING" -> "downloading";
+            default -> "added";
+        };
+        if (status.equals(string(row.get("status")))) {
+            return;
+        }
+        jdbcTemplate.update("""
+                UPDATE movie_download_task SET status = ?, message = ?, completed_at = ?, updated_at = ? WHERE id = ?
+                """, status, task.message(), "completed".equals(status) ? now() : null, now(), number(row.get("id")));
+        if ("completed".equals(status) || "failed".equals(status)) {
+            String headline = ("completed".equals(status) ? "✅ 下载完成：" : "⚠️ 下载失败：")
+                    + string(row.get("series_title"));
+            magnetNotice("xunlei", headline, describeRow(row) + "\n" + task.message(),
+                    string(row.get("save_path")), "failed".equals(status) ? "config" : "ready");
         }
     }
 
@@ -690,14 +741,58 @@ public class MovieSubscriptionService {
     /**
      * 保存目录：根目录 + 剧名子目录，保证同一部剧归到一个文件夹、不会串到别的剧。
      *
-     * <p>根目录取值顺序：sys_config 的 movie.download.root → qB 配置的默认保存路径 → {@link #DEFAULT_SAVE_ROOT}。</p>
+     * <p>两种工具固定使用 {@link #DEFAULT_SAVE_ROOT}，不会被各工具自己的默认目录覆盖。</p>
      */
     String savePathOf(String seriesTitle) {
-        String root = text(configValue(CFG_DOWNLOAD_ROOT));
-        if (root == null) {
-            root = text(qBittorrentService.settings().savePath());
+        return savePathUnder(DEFAULT_SAVE_ROOT, seriesTitle);
+    }
+
+    public record DownloadSettings(String downloader, String saveRoot, int intervalMinutes) { }
+
+    public DownloadSettings downloadSettings() {
+        String tool = "xunlei".equals(configValue(CFG_DOWNLOADER)) ? "xunlei" : "qb";
+        return new DownloadSettings(tool, DEFAULT_SAVE_ROOT, intervalMinutes());
+    }
+
+    public DownloadSettings saveDownloadSettings(String downloader) {
+        validateDownloader(downloader);
+        new ConfigService(jdbcTemplate).put(CFG_DOWNLOADER, downloader);
+        return downloadSettings();
+    }
+
+    private static void validateDownloader(String downloader) {
+        if (!"qb".equals(downloader) && !"xunlei".equals(downloader)) {
+            throw new BusinessException(400, "下载工具只能选择迅雷或 qBittorrent");
         }
-        return savePathUnder(root, seriesTitle);
+    }
+
+    private String subscriptionDownloader(Map<String, Object> row) {
+        String tool = row == null ? null : text(string(row.get("downloader")));
+        return "qb".equals(tool) || "xunlei".equals(tool) ? tool : downloadSettings().downloader();
+    }
+
+    public Subscription updateSubscriptionSettings(long id, String downloader) {
+        validateDownloader(downloader);
+        requireExists(id);
+        jdbcTemplate.update("UPDATE movie_subscription SET downloader = ?, updated_at = ? WHERE id = ?",
+                downloader, now(), id);
+        return toSubscription(findRowById(id));
+    }
+
+    private boolean downloaderConfigured(String tool) {
+        return "xunlei".equals(tool) ? xunleiService.settings().configured()
+                : qBittorrentService.settings().configured();
+    }
+
+    private record Submission(boolean ok, boolean duplicate, String message, String externalTaskId) { }
+
+    private Submission addDownload(String tool, String magnet, String savePath) {
+        if ("xunlei".equals(tool)) {
+            XunleiService.TaskResult result = xunleiService.add(List.of(magnet), savePath).getFirst();
+            return new Submission(result.ok(), false, result.message(), result.taskId());
+        }
+        QBittorrentService.AddResult result = qBittorrentService.add(List.of(magnet), savePath);
+        return new Submission(result.ok(), result.duplicate(), result.message(), null);
     }
 
     /** 纯函数版路径拼接（root 为空时用 {@link #DEFAULT_SAVE_ROOT}），便于单测与复用 */
@@ -734,29 +829,38 @@ public class MovieSubscriptionService {
             }
         }
         String value = sb.toString().trim();
-        return value.isEmpty() ? "未命名" : value;
+        return value.isEmpty() ? "未命名" : (".".equals(value) || "..".equals(value) ? "_" : value);
     }
 
     /** 系统通知之外，把「提交成功 / 下载成功」也写进「磁力下载」会话（与用户要求的会话位置一致）；
      *  写入成功后经 WebSocket 广播，让打开着的聊天页实时看到巡检产出 */
     private void magnetNotice(String headline, String detail, String savePath, String status) {
-        String content = headline
+        magnetNotice("qb", headline, detail, savePath, status);
+    }
+
+    private static String toolLabel(String tool) {
+        return "xunlei".equals(tool) ? "迅雷" : "qBittorrent";
+    }
+
+    private void magnetNotice(String tool, String headline, String detail, String savePath, String status) {
+        String sessionId = "xunlei".equals(tool) ? "xunlei" : "magnet";
+        String content = headline + "（" + toolLabel(tool) + "）"
                 + (detail == null || detail.isBlank() ? "" : "\n" + detail)
                 + (savePath == null || savePath.isBlank() ? "" : "\n保存位置：" + savePath);
-        String payload = "{\"kind\":\"magnet\",\"status\":\"" + status + "\",\"settings\":"
-                + toJson(qBittorrentService.describe()) + "}";
+        String payload = "{\"kind\":\"" + sessionId + "\",\"status\":\"" + status + "\",\"settings\":"
+                + toJson("xunlei".equals(tool) ? xunleiService.describe() : qBittorrentService.describe()) + "}";
         String stamp = now();
         try {
             jdbcTemplate.update("""
                     INSERT INTO chat_message (session_id, role, type, content, content_text, payload, read_flag, created_at)
-                    VALUES ('magnet', 'bot', 'text', ?, NULL, ?, 0, ?)
-                    """, content, payload, stamp);
-            jdbcTemplate.update("UPDATE chat_session SET updated_at = ? WHERE id = 'magnet'", stamp);
+                    VALUES (?, 'bot', 'text', ?, NULL, ?, 0, ?)
+                    """, sessionId, content, payload, stamp);
+            jdbcTemplate.update("UPDATE chat_session SET updated_at = ? WHERE id = ?", stamp, sessionId);
             Long id = jdbcTemplate.queryForObject("SELECT last_insert_rowid()", Long.class);
             if (id != null) {
-                ChatService.ChatMessage row = new ChatService.ChatMessage(id, "magnet", "bot", "text",
+                ChatService.ChatMessage row = new ChatService.ChatMessage(id, sessionId, "bot", "text",
                         content, null, payload, false, stamp);
-                chatPushService.messages("magnet", List.of(row));
+                chatPushService.messages(sessionId, List.of(row));
             }
         } catch (Exception e) {
             log.warn("写入磁力下载会话失败：{}", safeMessage(e));
@@ -878,6 +982,9 @@ public class MovieSubscriptionService {
             title = movieSearchService.idFrom(url) == null ? "未命名剧集" : ("电影港 " + movieSearchService.idFrom(url));
         }
         Subscription subscription = findRowByUrl(url) == null ? null : toSubscription(findRowByUrl(url));
+        if (subscription != null) {
+            title = subscription.title();
+        }
 
         Set<String> downloaded = downloadedKeys();
         // 「查看磁力」按集数倒序（最新一集在最前）：详情页原顺序保留给订阅巡检，不在这里改动
@@ -902,6 +1009,7 @@ public class MovieSubscriptionService {
         data.put("subscribed", subscription != null && subscription.enabled());
         data.put("subscriptionId", subscription == null ? null : subscription.id());
         data.put("savePath", savePathOf(title));
+        data.put("downloader", subscriptionDownloader(findRowByUrl(url)));
         data.put("count", items.size());
         data.put("magnets", items);
         return data;
@@ -1010,9 +1118,9 @@ public class MovieSubscriptionService {
         Map<String, Object> subscriptionRow = url.isBlank() ? null : findRowByUrl(url);
         Long subscriptionId = subscriptionRow == null ? null : number(subscriptionRow.get("id"));
 
-        String title = text(seriesTitle);
-        if (title == null && subscriptionRow != null) {
-            title = text(string(subscriptionRow.get("title")));
+        String title = subscriptionRow == null ? text(seriesTitle) : text(string(subscriptionRow.get("title")));
+        if (title == null) {
+            title = text(seriesTitle);
         }
         if (title == null) {
             String id = movieSearchService.idFrom(url);
@@ -1076,6 +1184,7 @@ public class MovieSubscriptionService {
             item.put("episode", row.get("episode"));
             item.put("quality", row.get("quality"));
             item.put("status", row.get("status"));
+            item.put("downloader", row.get("downloader"));
             item.put("message", row.get("message"));
             item.put("savePath", row.get("save_path"));
             item.put("createdAt", row.get("created_at"));
@@ -1154,7 +1263,8 @@ public class MovieSubscriptionService {
                 string(row.get("year")), string(row.get("origin")), string(row.get("genre")),
                 string(row.get("cover")), string(row.get("detail_url")), number(row.get("enabled")) == 1,
                 count == null ? 0 : count.intValue(), string(row.get("baseline_at")),
-                string(row.get("last_check_at")), string(row.get("next_check_at")), string(row.get("last_error")));
+                string(row.get("last_check_at")), string(row.get("next_check_at")), string(row.get("last_error")),
+                subscriptionDownloader(row));
     }
 
     /** 描述一条磁力（用于通知 / 下载列表）：集号 + 清晰度 + 标题 */

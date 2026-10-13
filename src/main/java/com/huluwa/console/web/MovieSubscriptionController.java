@@ -22,7 +22,7 @@ import java.util.Set;
  *
  * <p>订阅后：片名与电影港具体链接入库、详情页每集磁力抓取入库作为基线，
  * 之后由 {@link MovieSubscriptionService} 每小时巡检差异（默认 60 分钟），
- * 新剧集取最高清晰度提交 qBittorrent，并把更新 / 下载结果写入系统通知与「磁力下载」会话。</p>
+ * 新剧集取最高清晰度提交默认下载工具，并把更新 / 下载结果写入系统通知与「磁力下载」会话。</p>
  */
 @RestController
 @RequestMapping("/api/chat/subscriptions")
@@ -33,6 +33,18 @@ public class MovieSubscriptionController {
     public MovieSubscriptionController(MovieSubscriptionService subscriptionService) {
         this.subscriptionService = subscriptionService;
     }
+
+    @GetMapping("/settings")
+    public ApiResult<MovieSubscriptionService.DownloadSettings> settings() {
+        return ApiResult.ok(subscriptionService.downloadSettings());
+    }
+
+    @PostMapping("/settings")
+    public ApiResult<MovieSubscriptionService.DownloadSettings> saveSettings(@RequestBody SettingsRequest body) {
+        return ApiResult.ok(subscriptionService.saveDownloadSettings(body == null ? null : body.downloader()));
+    }
+
+    public record SettingsRequest(String downloader) { }
 
     /** 订阅清单（默认只回启用中的；includeDisabled=true 时含已取消） */
     @GetMapping
@@ -64,7 +76,7 @@ public class MovieSubscriptionController {
             throw new BusinessException(400, "缺少电影港详情页链接，无法订阅");
         }
         MovieSubscriptionService.SubscribeResult result = subscriptionService.subscribe(
-                body.title(), body.url(), body.id(), body.year(), body.origin(), body.genre(), body.cover());
+                body.title(), body.url(), body.id(), body.year(), body.origin(), body.genre(), body.cover(), body.downloader());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("created", result.created());
         data.put("reenabled", result.reenabled());
@@ -83,6 +95,12 @@ public class MovieSubscriptionController {
         }
         data.put("message", message);
         return ApiResult.ok(data);
+    }
+
+    @PostMapping("/{id}/settings")
+    public ApiResult<MovieSubscriptionService.Subscription> updateSettings(
+            @PathVariable long id, @RequestBody SettingsRequest body) {
+        return ApiResult.ok(subscriptionService.updateSubscriptionSettings(id, body == null ? null : body.downloader()));
     }
 
     /** 取消订阅（保留磁力基线与下载记录，之后可以重新订阅） */
@@ -168,6 +186,6 @@ public class MovieSubscriptionController {
 
     /** 订阅请求体：与聊天消息里的影视卡片载荷同形（id/title/year/origin/genre/cover/url） */
     public record SubscribeRequest(String id, String title, String year, String origin, String genre,
-                                   String cover, String url) {
+                                   String cover, String url, String downloader) {
     }
 }

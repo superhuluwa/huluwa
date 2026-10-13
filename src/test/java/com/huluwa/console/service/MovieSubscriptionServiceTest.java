@@ -156,16 +156,17 @@ class MovieSubscriptionServiceTest {
     @Test
     void savePathGroupsEverySeriesIntoOwnFolder() {
         // 默认根目录 + 剧名子目录：同一部剧永远落在自己的文件夹里，不会串到别的剧
-        assertEquals("/downloads/斗破苍穹 第5季", MovieSubscriptionService.savePathUnder(null, "斗破苍穹 第5季"));
-        assertEquals("/downloads/斗破苍穹 第5季", MovieSubscriptionService.savePathUnder("/downloads/", "斗破苍穹 第5季"));
+        assertEquals("/vol1/1000/downloads/斗破苍穹 第5季", MovieSubscriptionService.savePathUnder(null, "斗破苍穹 第5季"));
+        assertEquals("/vol1/1000/downloads/斗破苍穹 第5季", MovieSubscriptionService.savePathUnder("/vol1/1000/downloads/", "斗破苍穹 第5季"));
         // 目录名里的非法字符会被替换，不会串到别的目录层级
-        assertEquals("/downloads/剧名 A_B", MovieSubscriptionService.savePathUnder(null, "剧名 A/B"));
-        assertEquals("/downloads/剧名_第1季", MovieSubscriptionService.savePathUnder(null, "剧名:第1季"));
+        assertEquals("/vol1/1000/downloads/剧名 A_B", MovieSubscriptionService.savePathUnder(null, "剧名 A/B"));
+        assertEquals("/vol1/1000/downloads/剧名_第1季", MovieSubscriptionService.savePathUnder(null, "剧名:第1季"));
         // 已配置根目录（如 qB 的默认保存路径）时用它作为根
         assertEquals("/volume1/video/剧名", MovieSubscriptionService.savePathUnder("/volume1/video", "剧名"));
         // 空片名兜底成「未命名」，不会退化成根目录导致所有剧混在一起
-        assertEquals("/downloads/未命名", MovieSubscriptionService.savePathUnder(null, "  "));
+        assertEquals("/vol1/1000/downloads/未命名", MovieSubscriptionService.savePathUnder(null, "  "));
         assertEquals("未命名", MovieSubscriptionService.sanitizeFolder(null));
+        assertEquals("/vol1/1000/downloads/_", MovieSubscriptionService.savePathUnder(null, ".."));
     }
 
     @Test
@@ -202,10 +203,10 @@ class MovieSubscriptionServiceTest {
     /** 手动下载同样落到「根目录 / 剧名」，且与订阅巡检使用同一套目录规则 */
     @Test
     void manualDownloadUsesSameFolderRuleAsSubscription() {
-        String folder = MovieSubscriptionService.savePathUnder("/downloads", "斗破苍穹 第5季");
-        assertEquals("/downloads/斗破苍穹 第5季", folder);
+        String folder = MovieSubscriptionService.savePathUnder("/vol1/1000/downloads", "斗破苍穹 第5季");
+        assertEquals("/vol1/1000/downloads/斗破苍穹 第5季", folder);
         // 剧名里的斜杠不会造成多级目录穿透
-        assertEquals("/downloads/剧名 A_B", MovieSubscriptionService.savePathUnder("/downloads", "剧名 A/B"));
+        assertEquals("/vol1/1000/downloads/剧名 A_B", MovieSubscriptionService.savePathUnder("/vol1/1000/downloads", "剧名 A/B"));
         assertEquals(folder, MovieSubscriptionService.savePathUnder(MovieSubscriptionService.DEFAULT_SAVE_ROOT, "斗破苍穹 第5季"));
     }
 

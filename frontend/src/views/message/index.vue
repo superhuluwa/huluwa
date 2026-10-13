@@ -15,7 +15,7 @@
                 :magnet="isMagnet" :video="isVideoSession" :xunlei="isXunleiSession"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
                 @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog"
-                @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog" />
+                @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog" @movie-settings="movieDialog = true" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
@@ -26,6 +26,8 @@
             <ChatComposer :disabled="!currentKey" :sending="sending" :kind="currentKind" :hint="composerHint"
                 :mobile="isMobile" @send="onSend" />
         </section>
+
+        <MovieSubscriptionDialog v-model:show="movieDialog" />
 
         <CoverViewer v-model:show="viewer.show" :url="viewer.url" :title="viewer.title" />
 
@@ -76,6 +78,7 @@ import CoverViewer from './components/CoverViewer.vue'
 import QbSettingsDialog from './components/QbSettingsDialog.vue'
 import VideoSettingsDialog from './components/VideoSettingsDialog.vue'
 import XunleiSettingsDialog from './components/XunleiSettingsDialog.vue'
+import MovieSubscriptionDialog from './components/MovieSubscriptionDialog.vue'
 
 /** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
 const PREFERRED_SESSION = 'movie'
@@ -90,7 +93,8 @@ export default {
         CoverViewer,
         QbSettingsDialog,
         VideoSettingsDialog,
-        XunleiSettingsDialog
+        XunleiSettingsDialog,
+        MovieSubscriptionDialog
     },
     setup() {
         // 手机端会话页由路由守卫标记为全屏沉浸（壳层收起）；桌面端恒为 false
@@ -106,6 +110,7 @@ export default {
             isMobile: false,
             /** 首次提交磁力且尚未配置时自动弹出的配置表单 */
             qbDialog: false,
+            movieDialog: false,
             /** 已自动弹过一次就不再打扰（用户可在页脚状态条手动打开） */
             qbPrompted: false,
             /** 首次提交视频口令且尚未配置时自动弹出的配置表单 */

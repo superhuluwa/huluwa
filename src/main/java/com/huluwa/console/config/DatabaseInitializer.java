@@ -39,6 +39,19 @@ public class DatabaseInitializer implements ApplicationRunner {
                 throw new IllegalStateException("数据库缺少必需的表: " + table + "，请检查 schema.sql");
             }
         }
+        migrateMovieDownloadTasks();
+        boolean hasSubscriptionTool = jdbcTemplate.queryForList("PRAGMA table_info(movie_subscription)").stream()
+                .anyMatch(column -> "downloader".equals(column.get("name")));
+        if (!hasSubscriptionTool) {
+            jdbcTemplate.execute("ALTER TABLE movie_subscription ADD COLUMN downloader TEXT");
+        }
+        // 旧订阅把当前生效的工具保存为本剧绑定，后续修改全局默认值不会改变它。
+        jdbcTemplate.update("""
+                UPDATE movie_subscription SET downloader = COALESCE(
+                    (SELECT cfg_value FROM sys_config
+                      WHERE cfg_key = 'movie.download.downloader' AND cfg_value IN ('qb', 'xunlei')), 'qb')
+                 WHERE downloader IS NULL OR downloader = ''
+                """);
         Integer users = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM sys_user", Integer.class);
         boolean initialized = users != null && users > 0;
         log.info("数据库结构校验通过，系统{}", initialized ? "已初始化" : "尚未初始化（首次访问需设置密码）");
@@ -46,4 +59,18 @@ public class DatabaseInitializer implements ApplicationRunner {
             log.info("首次启动：请在浏览器打开控制台并设置管理员密码");
         }
     }
+    /** 旧数据库没有下载工具字段，原有任务按 qBittorrent 继续跟踪。 */
+    private void migrateMovieDownloadTasks() {
+        java.util.Set<String> columns = new java.util.HashSet<>();
+        for (java.util.Map<String, Object> column : jdbcTemplate.queryForList("PRAGMA table_info(movie_download_task)")) {
+            columns.add(String.valueOf(column.get("name")));
+        }
+        if (!columns.contains("downloader")) {
+            jdbcTemplate.execute("ALTER TABLE movie_download_task ADD COLUMN downloader TEXT NOT NULL DEFAULT 'qb'");
+        }
+        if (!columns.contains("external_task_id")) {
+            jdbcTemplate.execute("ALTER TABLE movie_download_task ADD COLUMN external_task_id TEXT");
+        }
+    }
+
 }

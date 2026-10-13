@@ -84,3 +84,20 @@ export function PreviewMagnets(url, title) {
 export function DownloadMagnet(payload) {
     return http.post('/chat/subscriptions/magnets/download', payload, { timeout: 60000 })
 }
+
+/** 电影港默认下载工具与固定保存根目录。 */
+export function GetMovieDownloadSettings() {
+    return http.get('/chat/subscriptions/settings')
+}
+
+export function SaveMovieDownloadSettings(downloader) {
+    return http.post('/chat/subscriptions/settings', { downloader })
+}
+
+export function GetMovieSubscriptionStatus(url) {
+    return http.get('/chat/subscriptions/status', { url })
+}
+
+export function UpdateMovieSubscriptionSettings(id, downloader) {
+    return http.post('/chat/subscriptions/' + encodeURIComponent(id) + '/settings', { downloader })
+}

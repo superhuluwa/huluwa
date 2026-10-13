@@ -15,7 +15,7 @@
             </span>
             <span class="mm-tip">
                 <i class="fa-solid fa-circle-info"></i>
-                下载后自动按剧名建子目录，并补齐文件名里的剧名
+                使用{{ data.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}下载，按剧名创建文件夹
             </span>
         </div>
 
@@ -43,7 +43,7 @@
         <template #footer>
             <div class="mm-footer">
                 <span class="mm-foot-tip">
-                    下载结果会推送到「磁力下载」会话；同名剧归入同一文件夹
+                    下载结果会推送到对应下载工具会话；同名剧归入同一文件夹
                 </span>
                 <n-button size="small" @click="visible = false">关闭</n-button>
                 <n-button size="small" :loading="loading" @click="load">
@@ -59,8 +59,8 @@
 /**
  * 磁力列表弹窗（搜索结果卡片的「查看磁力」按钮）：
  *  - 实时抓取电影港详情页的磁力，按清晰度给出色标；
- *  - 每行「下载」按钮直接提交 qBittorrent，保存目录为「下载根目录 / 剧名」，
- *    结果同时写入「磁力下载」会话；
+ *  - 每行「下载」按钮提交本剧选择的下载工具，保存目录为「下载根目录 / 剧名」，
+ *    结果同时写入对应工具的下载会话；
  *  - 已在下载任务表里的条目渲染成「已下载」，避免重复提交；
  *  - 后端按集数倒序返回，默认展示最新一集（列表打开 / 刷新都回到顶部）。
  */

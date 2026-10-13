@@ -41,6 +41,9 @@
                             <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
                             查看磁力
                         </button>
+                        <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
+                            <i class="fa-solid fa-sliders"></i>订阅设置
+                        </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                 </template>
@@ -58,6 +61,9 @@
                             <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
                             查看磁力
                         </button>
+                        <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
+                            <i class="fa-solid fa-sliders"></i>订阅设置
+                        </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                 </template>
@@ -70,7 +76,10 @@
             @click="$emit('resend', message)"><i class="fa-solid fa-circle-exclamation"></i></button>
     </div>
 
-    <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」直接提交 qBittorrent -->
+    <MovieSubscriptionDialog v-model:show="subscriptionDialog" :movie="subscribePayload"
+        :resubscribe="!subscribed" @saved="onSubscriptionSaved" />
+
+    <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」使用本剧选择的下载工具 -->
     <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
         @downloaded="onMagnetDownloaded" />
 </template>
@@ -87,12 +96,13 @@ import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
 import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
-import { SubscribeMovie, PreviewMagnets } from '@/api/chat'
+import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
+import { PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog },
     props: {
         message: {
             type: Object,
@@ -108,6 +118,7 @@ export default {
             /** 本地订阅状态覆盖：服务端载荷里的 subscribed 只在渲染时读取，点按后立即切换 */
             subscribedLocal: null,
             busy: false,
+            subscriptionDialog: false,
             /** 「查看磁力」按钮的加载态（抓详情页较慢，避免重复点击） */
             magnetsLoading: false,
             /** 磁力列表弹窗状态 */
@@ -280,27 +291,17 @@ export default {
             this.$emit('magnet-downloaded', result)
         },
         /** 订阅该剧：落库片名 + 电影港具体链接，并把详情页每集磁力存为对比基线 */
-        async onSubscribe() {
-            if (this.subscribed || this.busy) {
-                return
-            }
-            const url = this.parsedPayload.url
-            if (!url) {
+        onSubscribe() {
+            if (this.subscribed || this.busy) return
+            if (!this.parsedPayload.url) {
                 window.$message?.error('这条卡片缺少电影港链接，无法订阅')
                 return
             }
-            this.busy = true
-            try {
-                const result = await SubscribeMovie(this.subscribePayload)
-                this.subscribedLocal = true
-                const message = result && result.message ? result.message : '订阅成功'
-                window.$message?.success(message)
-                this.$emit('subscribed', { url, subscription: result && result.subscription })
-            } catch (e) {
-                // 失败文案由 axios 拦截器提示
-            } finally {
-                this.busy = false
-            }
+            this.subscriptionDialog = true
+        },
+        onSubscriptionSaved(result) {
+            this.subscribedLocal = !!result.subscription?.enabled
+            this.$emit('subscribed', { url: this.parsedPayload.url, subscription: result.subscription })
         }
     }
 }

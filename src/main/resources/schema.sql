@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS movie_subscription (
     genre         TEXT,
     cover         TEXT,
     detail_url    TEXT NOT NULL,                 -- 电影港具体链接（剧集详情页）
+    downloader    TEXT NOT NULL DEFAULT 'qb',    -- 本剧绑定下载工具 qb|xunlei；旧订阅在启动时补齐
     enabled       INTEGER NOT NULL DEFAULT 1,    -- 0 取消订阅（数据保留，可重新订阅）
     baseline_at   TEXT,                          -- 订阅基线采集完成时间
     last_check_at TEXT,                          -- 最近一次巡检时间
@@ -184,7 +185,9 @@ CREATE TABLE IF NOT EXISTS movie_download_task (
     quality         TEXT,
     magnet          TEXT NOT NULL,
     torrent_hash    TEXT,                        -- info hash，用于跟踪 qB 任务
-    save_path       TEXT,                        -- 提交给 qB 的保存目录
+    save_path       TEXT,                        -- 保存目录：统一根目录 / 剧名
+    downloader      TEXT NOT NULL DEFAULT 'qb', -- qb|xunlei，历史任务继续用原工具跟踪
+    external_task_id TEXT,                       -- 迅雷返回的任务 ID
     status          TEXT NOT NULL DEFAULT 'pending', -- pending|added|downloading|completed|failed|removed
     message         TEXT,
     created_at      TEXT NOT NULL,

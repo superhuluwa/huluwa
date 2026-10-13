@@ -5,10 +5,11 @@
                 <h2>电影港订阅</h2>
                 <p class="tip">
                     订阅后自动记录该剧的每集磁力作为对比基线，默认每小时巡检一次；
-                    有新剧集时取最高清晰度提交 qBittorrent 下载，更新与下载结果都会推送到消息中心。
+                    有新剧集时取最高清晰度，使用本剧选择的迅雷或 qBittorrent 下载，更新与下载结果都会推送到消息中心。
                 </p>
             </div>
             <div class="head-actions">
+                <n-button size="small" @click="openSettings()">默认下载设置</n-button>
                 <n-switch v-model:value="includeDisabled" size="small">
                     <template #checked>含已取消</template>
                     <template #unchecked>仅订阅中</template>
@@ -37,6 +38,7 @@
                         <div class="meta">{{ metaOf(item) }}</div>
                         <a class="link" :href="item.detailUrl" target="_blank" rel="noreferrer">{{ item.detailUrl }}</a>
                         <div class="stat">
+                            <span><i class="fa-solid fa-download"></i> {{ item.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
                             <span><i class="fa-solid fa-magnet"></i> 已记录 {{ item.magnetCount }} 条磁力</span>
                             <span v-if="item.lastCheckAt"><i class="fa-regular fa-clock"></i> 上次巡检 {{ item.lastCheckAt }}</span>
                             <span v-if="item.nextCheckAt && item.enabled"><i class="fa-regular fa-calendar"></i> 下次 {{ item.nextCheckAt }}</span>
@@ -47,6 +49,10 @@
                     </div>
                 </div>
                 <div class="card-actions">
+                    <n-button size="tiny" @click="openSettings(item)">
+                        <template #icon><i class="fa-solid fa-sliders"></i></template>
+                        订阅设置
+                    </n-button>
                     <n-button v-if="item.enabled" size="tiny" :loading="checking === item.id" @click="check(item)">
                         <template #icon><i class="fa-solid fa-bolt"></i></template>
                         立即检查
@@ -83,12 +89,15 @@
                         <n-button v-else size="tiny" type="primary" :loading="downloading === m.id"
                             @click="downloadMagnet(m)">
                             <template #icon><i class="fa-solid fa-download"></i></template>
-                            下载
+                            {{ item.downloader === 'xunlei' ? '迅雷下载' : 'qBittorrent 下载' }}
                         </n-button>
                     </div>
                 </div>
             </div>
         </n-spin>
+
+        <MovieSubscriptionDialog v-model:show="settingsDialog" :movie="settingsMovie"
+            :resubscribe="settingsResubscribe" @saved="reload" />
 
         <div class="downloads">
             <div class="downloads-head">
@@ -111,9 +120,10 @@
  * 订阅动作本身在「消息中心 → 电影港」的结果卡片上完成，本页负责查看与维护。
  */
 import {
-    GetSubscriptions, CheckSubscription, UnsubscribeMovie, SubscribeMovie,
+    GetSubscriptions, CheckSubscription, UnsubscribeMovie,
     DeleteSubscription, SubscriptionMagnets, SubscriptionDownloads, DownloadMagnet
 } from '@/api/chat'
+import MovieSubscriptionDialog from '@/views/message/components/MovieSubscriptionDialog.vue'
 
 const STATUS_LABEL = {
     pending: '待提交',
@@ -126,9 +136,13 @@ const STATUS_LABEL = {
 
 export default {
     name: 'MovieSubscriptions',
+    components: { MovieSubscriptionDialog },
     data() {
         return {
             loading: false,
+            settingsDialog: false,
+            settingsMovie: null,
+            settingsResubscribe: false,
             loadingDownloads: false,
             includeDisabled: false,
             rows: [],
@@ -141,6 +155,7 @@ export default {
                 { title: '剧名', key: 'seriesTitle', ellipsis: { tooltip: true } },
                 { title: '集号', key: 'episode', width: 70 },
                 { title: '清晰度', key: 'quality', width: 90 },
+                { title: '工具', key: 'downloader', width: 100, render: row => row.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' },
                 {
                     title: '状态', key: 'status', width: 90,
                     render: (row) => STATUS_LABEL[row.status] || row.status
@@ -226,18 +241,16 @@ export default {
             window.$message?.success('已取消订阅，历史磁力与下载记录仍保留')
             await this.reload()
         },
-        async resubscribe(item) {
-            await SubscribeMovie({
-                id: item.resId,
-                title: item.title,
-                year: item.year,
-                origin: item.origin,
-                genre: item.genre,
-                cover: item.cover,
-                url: item.detailUrl
-            })
-            window.$message?.success('已重新订阅')
-            await this.reload()
+        openSettings(item = null, resubscribe = false) {
+            this.settingsMovie = item ? {
+                id: item.resId, title: item.title, year: item.year, origin: item.origin,
+                genre: item.genre, cover: item.cover, url: item.detailUrl
+            } : null
+            this.settingsResubscribe = resubscribe
+            this.settingsDialog = true
+        },
+        resubscribe(item) {
+            this.openSettings(item, true)
         },
         remove(item) {
             window.$dialog?.warning({

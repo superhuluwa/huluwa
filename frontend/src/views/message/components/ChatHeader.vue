@@ -33,6 +33,10 @@
             </n-popover>
             <!-- 桌面端：操作按钮常显 -->
             <template v-if="!compact">
+                <button v-if="sessionKey === 'movie'" class="icon-btn" type="button" title="电影港默认下载设置"
+                    @click="$emit('movie-settings')">
+                    <i class="fa-solid fa-sliders"></i>
+                </button>
                 <button v-if="magnet" class="icon-btn" type="button" title="qBittorrent 设置（仅磁力下载会话）"
                     @click="$emit('qb-settings')">
                     <i class="fa-solid fa-magnet"></i>
@@ -132,7 +136,7 @@ export default {
             default: false
         }
     },
-    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings', 'video-settings', 'xunlei-settings'],
+    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings', 'video-settings', 'xunlei-settings', 'movie-settings'],
     data() {
         return {
             searching: false,
@@ -150,6 +154,9 @@ export default {
         /** 手机端「更多」：会话操作 + 进入控制台其它模块（全屏页没有主框架侧栏） */
         moreOptions() {
             const options = []
+            if (this.sessionKey === 'movie') {
+                options.push({ label: '电影港默认下载设置', key: 'movie-settings', icon: () => h('i', { class: 'fa-solid fa-sliders' }) })
+            }
             if (this.markable) {
                 options.push({ label: '全部标记已读', key: 'mark-all', icon: () => h('i', { class: 'fa-solid fa-check-double' }) })
             }
@@ -236,6 +243,10 @@ export default {
             }
             if (key === 'video-settings') {
                 this.$emit('video-settings')
+                return
+            }
+            if (key === 'movie-settings') {
+                this.$emit('movie-settings')
                 return
             }
             if (key === 'xunlei-settings') {

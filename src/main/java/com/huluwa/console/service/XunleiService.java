@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -261,6 +262,11 @@ public class XunleiService {
      * @throws BusinessException 未配置 / 无法建立迅雷会话
      */
     public List<TaskResult> add(List<String> magnets) {
+        return add(magnets, null);
+    }
+
+    /** 单次保存目录：电影港显式指定统一的剧名目录，原生版同样按此目录创建任务。 */
+    public List<TaskResult> add(List<String> magnets, String savePath) {
         Settings settings = settings();
         if (!settings.configured()) {
             throw new BusinessException(400, "尚未配置迅雷直连地址");
@@ -279,13 +285,15 @@ public class XunleiService {
 
         List<TaskResult> results = new ArrayList<>();
         for (String magnet : magnets) {
-            results.add(submitMagnet(session, magnet, settings.savePath()));
+            results.add(submitMagnet(session, magnet,
+                    savePath == null || savePath.isBlank() ? settings.savePath() : savePath.trim(),
+                    savePath != null && !savePath.isBlank()));
         }
         return results;
     }
 
-    /** 单条磁力：迅雷资源解析 → 建任务；原生版使用迅雷默认目录 */
-    private TaskResult submitMagnet(XlSession session, String magnet, String savePath) {
+    /** 单条磁力：迅雷资源解析 → 解析显式或默认目录 → 建任务。 */
+    private TaskResult submitMagnet(XlSession session, String magnet, String savePath, boolean explicitPath) {
         // 1) 服务端解析磁力文件清单（取文件名 / 大小 / 数量供建任务）
         Response list;
         try {
@@ -331,7 +339,7 @@ public class XunleiService {
         String folderPath = savePath;
         if (session.nativeFnos()) {
             try {
-                DownloadFolder folder = findNativeDefaultFolder(session);
+                DownloadFolder folder = explicitPath ? ensureNativeFolder(session, savePath) : findNativeDefaultFolder(session);
                 folderId = folder.id();
                 folderPath = folder.path();
             } catch (Exception e) {
@@ -435,6 +443,140 @@ public class XunleiService {
             throw new BusinessException(400, "迅雷返回的下载目录列表无法解析");
         }
         throw new BusinessException(400, "迅雷没有返回可用的默认下载目录，请先在迅雷 App 中设置下载目录");
+    }
+
+    /** 在迅雷可见的磁盘目录下逐级查找 / 创建目录，始终使用接口返回的文件夹 ID。 */
+    private DownloadFolder ensureNativeFolder(XlSession session, String savePath)
+            throws IOException, InterruptedException {
+        String requested = normalizeFolderPath(savePath);
+        DownloadFolder base = null;
+        Response pathsResponse = send(session, "/device/download_paths", null, INFO_TIMEOUT);
+        JsonNode paths = checkedJson(pathsResponse, "查询迅雷下载目录");
+        if (paths.isObject()) {
+            paths = paths.path("paths");
+        }
+        if (paths.isArray()) {
+            for (JsonNode path : paths) {
+                base = closerFolder(base, new DownloadFolder(path.path("Id").asText(""),
+                        normalizeFolderPath(path.path("RealPath").asText(""))), requested);
+            }
+        }
+        for (JsonNode folder : nativeFolders(session, "")) {
+            base = closerFolder(base, folderOf(folder), requested);
+        }
+        if (base == null) {
+            throw new BusinessException(400, "迅雷目录列表中未找到保存目录 " + requested
+                    + "，请在飞牛迅雷中确认该目录已授权并挂载");
+        }
+        if (base.path().equals(requested)) {
+            return base;
+        }
+        String relative = requested.substring(base.path().equals("/") ? 1 : base.path().length() + 1);
+        for (String name : relative.split("/")) {
+            String childPath = (base.path().equals("/") ? "" : base.path()) + "/" + name;
+            DownloadFolder child = findChildFolder(session, base.id(), childPath);
+            if (child == null) {
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("parent_id", base.id());
+                body.put("space", session.deviceId());
+                body.put("kind", "drive#folder");
+                body.put("name", name);
+                Response created = send(session, "/drive/v1/files", objectMapper.writeValueAsString(body), INFO_TIMEOUT);
+                if (created.status() == 200 && !responseHasError(created.body())) {
+                    child = folderOf(checkedJson(created, "创建迅雷目录").path("file"));
+                }
+                // 并发创建同一个剧名文件夹时，重新查询已创建的目录。
+                if (child == null || child.id().isBlank() || !child.path().equals(childPath)) {
+                    child = findChildFolder(session, base.id(), childPath);
+                }
+                if (child == null) {
+                    throw new BusinessException(400, "迅雷未能创建保存目录 " + childPath);
+                }
+            }
+            base = child;
+        }
+        return base;
+    }
+
+    private DownloadFolder findChildFolder(XlSession session, String parentId, String realPath)
+            throws IOException, InterruptedException {
+        for (JsonNode node : nativeFolders(session, parentId)) {
+            DownloadFolder folder = folderOf(node);
+            if (!folder.id().isBlank() && folder.path().equals(realPath)) {
+                return folder;
+            }
+        }
+        return null;
+    }
+
+    private List<JsonNode> nativeFolders(XlSession session, String parentId)
+            throws IOException, InterruptedException {
+        List<JsonNode> folders = new ArrayList<>();
+        String page = "";
+        Set<String> seenPages = new java.util.HashSet<>();
+        do {
+            String path = "/drive/v1/files?space=" + encode(session.deviceId())
+                    + "&parent_id=" + encode(parentId) + "&limit=200&page_token=" + encode(page)
+                    + "&filters=" + encode("{\"kind\":{\"eq\":\"drive#folder\"},\"trashed\":{\"eq\":false}}")
+                    // 迅雷按重复参数解析数组；JSON 数组会被当成一个未知类别，导致磁盘目录缺失。
+                    + "&with=withCategoryDiskMountPath&with=withCategoryDownloadPath"
+                    + "&with=withCategoryHistoryDownloadPath";
+            JsonNode data = checkedJson(send(session, path, null, INFO_TIMEOUT), "查询迅雷文件夹");
+            for (JsonNode file : data.path("files")) {
+                folders.add(file);
+            }
+            page = data.path("next_page_token").asText("");
+        } while (!page.isBlank() && seenPages.add(page));
+        return folders;
+    }
+
+    private static DownloadFolder folderOf(JsonNode file) {
+        return new DownloadFolder(file.path("id").asText(""),
+                normalizeFolderPath(file.path("params").path("RealPath").asText("")));
+    }
+
+    private static DownloadFolder closerFolder(DownloadFolder current, DownloadFolder candidate, String target) {
+        String path = candidate.path();
+        boolean contains = !path.isBlank() && (path.equals(target) || path.equals("/") || target.startsWith(path + "/"));
+        return !candidate.id().isBlank() && contains && (current == null || path.length() > current.path().length())
+                ? candidate : current;
+    }
+
+    private static String normalizeFolderPath(String path) {
+        String value = path == null ? "" : path.trim();
+        while (value.length() > 1 && value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value;
+    }
+
+    private JsonNode checkedJson(Response response, String action) throws IOException {
+        if (response.status() != 200 || responseHasError(response.body())) {
+            throw new BusinessException(400, action + "失败：HTTP " + response.status() + " " + abbreviate(response.body()));
+        }
+        return objectMapper.readTree(response.body());
+    }
+
+    public record TaskStatus(String phase, String message) { }
+
+    /** 按迅雷任务 ID 查询进度，切换电影港默认工具后仍跟踪已提交的迅雷任务。 */
+    public TaskStatus task(String taskId) {
+        try {
+            XlSession session = openSession(settings());
+            String filters = objectMapper.writeValueAsString(Map.of("id", Map.of("in", taskId)));
+            JsonNode data = checkedJson(send(session, "/drive/v1/tasks?space=" + encode(session.deviceId())
+                    + "&filters=" + encode(filters), null, INFO_TIMEOUT), "查询迅雷任务");
+            for (JsonNode task : data.path("tasks")) {
+                if (taskId.equals(task.path("id").asText())) {
+                    return new TaskStatus(task.path("phase").asText(""), task.path("message").asText(""));
+                }
+            }
+            return null;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException(400, "查询迅雷任务失败：" + safeMessage(e));
+        }
     }
 
     private static boolean isDefaultFolder(JsonNode path) {
