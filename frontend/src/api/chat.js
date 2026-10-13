@@ -90,7 +90,7 @@ export function SubscriptionDownloads(id = 0) {
     return http.get('/chat/subscriptions/downloads', { id })
 }
 
-/** 详情页磁力清单（搜索结果卡片「查看磁力」）：实时抓取，不写基线库 */
+/** 详情页磁力清单（搜索结果卡片「资源列表」）：实时抓取，不写基线库 */
 export function PreviewMagnets(url, title) {
     return http.get('/chat/subscriptions/magnets/preview', { url, title })
 }

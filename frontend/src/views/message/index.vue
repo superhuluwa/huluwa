@@ -205,7 +205,7 @@ export default {
                 return '输入片名开始搜索，例如「凡人修仙传」'
             }
             if (this.currentKind === 'dytt') {
-                return '输入片名开始搜索，例如「流浪地球」；资源为在线播放，可直接复制播放地址'
+                return '输入片名开始搜索，例如「流浪地球」；资源为在线播放，可在「资源列表」中复制直链'
             }
             if (this.currentKind === 'magnet') {
                 return this.isMobile

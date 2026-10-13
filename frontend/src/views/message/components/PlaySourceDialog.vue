@@ -4,7 +4,7 @@
         <template #header>
             <div class="ps-head">
                 <i class="fa-solid fa-circle-play"></i>
-                <span class="ps-title">{{ title || '播放地址' }}</span>
+                <span class="ps-title">{{ title || '资源列表' }}</span>
                 <span v-if="total" class="ps-count">可复制 {{ total }} 条</span>
             </div>
         </template>
@@ -29,7 +29,7 @@
                 </button>
             </div>
 
-            <div v-if="!currentItems.length" class="ps-empty">该资源没有解析到播放地址</div>
+            <div v-if="!currentItems.length" class="ps-empty">该资源没有解析到可用地址</div>
             <div v-else class="ps-list">
                 <div v-for="(item, index) in currentItems" :key="rowKey(item) + '@' + index" class="ps-row">
                     <span class="ps-ep">{{ item.title }}</span>
@@ -63,7 +63,7 @@ import { DownloadHls, GetHlsDetail } from '@/api/hls'
 import { DEFAULT_HLS_API, defaultTitle, episodeNumber, isExtra, isM3u8Url, seasonNumber, sortPlayItems, sortPlaySources } from '@/utils/hlsPlay'
 
 /**
- * 播放地址弹窗（电影天堂搜索结果卡片的「播放地址」按钮）：
+ * 资源列表弹窗（电影天堂搜索结果卡片的「资源列表」按钮）：
  *  - 打开时从采集接口拉取完整剧集（卡片只带前 60 条），失败时回退到卡片载荷；
  *  - 线路默认把 dyttm3u8 排在最前，剧集按集号倒序（新集在前）；
  *  - 每行「复制」把 m3u8 直链写入剪贴板，配合本地播放器使用；
@@ -204,7 +204,7 @@ export default {
             }
             try {
                 await navigator.clipboard.writeText(url)
-                this.$message?.success('播放地址已复制')
+                this.$message?.success('资源地址已复制')
             } catch (e) {
                 // 剪贴板不可用（非 HTTPS / 无权限）时退化为手动选择
                 const input = document.createElement('textarea')
@@ -213,7 +213,7 @@ export default {
                 input.select()
                 document.execCommand('copy')
                 document.body.removeChild(input)
-                this.$message?.success('播放地址已复制')
+                this.$message?.success('资源地址已复制')
             }
         }
     }

@@ -951,16 +951,16 @@ public class MovieSubscriptionService {
                 string(row.get("magnet")), string(row.get("quality")), string(row.get("episode")));
     }
 
-    // ------------------------------------------------------------------ 详情页磁力（结果卡片「查看磁力」）
+    // ------------------------------------------------------------------ 详情页磁力（结果卡片「资源列表」）
 
     /**
-     * 抓取某部剧详情页的磁力清单（不落基线库），供搜索结果卡片的「查看磁力」使用。
+     * 抓取某部剧详情页的磁力清单（不落基线库），供搜索结果卡片的「资源列表」使用。
      *
      * <p>返回结果里带 {@code downloaded} 标记：该 info hash 是否已经在下载任务表里
      * （非 failed 状态），前端据此把按钮渲染成「已下载」避免重复提交。</p>
      *
      * <p>列表按集数倒序返回（最新一集在最前），同集保持详情页原始顺序；
-     * 无法识别集号的条目排在最后，仅影响「查看磁力」弹窗，不改变订阅巡检使用的详情页顺序。</p>
+     * 无法识别集号的条目排在最后，仅影响「资源列表」弹窗，不改变订阅巡检使用的详情页顺序。</p>
      *
      * @param detailUrl  电影港详情页地址
      * @param seriesTitle 片名（搜索结果里的名字，作为剧名与目录名基准）
@@ -968,7 +968,7 @@ public class MovieSubscriptionService {
     public Map<String, Object> detailMagnets(String detailUrl, String seriesTitle) {
         String url = movieSearchService.absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
         if (url.isBlank() || "null".equals(url)) {
-            throw new BusinessException(400, "缺少电影港详情页链接，无法查看磁力");
+            throw new BusinessException(400, "缺少电影港详情页链接，无法获取资源列表");
         }
         MovieSearchService.DetailPage detail;
         try {
@@ -989,7 +989,7 @@ public class MovieSubscriptionService {
         }
 
         Set<String> downloaded = downloadedKeys();
-        // 「查看磁力」按集数倒序（最新一集在最前）：详情页原顺序保留给订阅巡检，不在这里改动
+        // 「资源列表」按集数倒序（最新一集在最前）：详情页原顺序保留给订阅巡检，不在这里改动
         List<MovieSearchService.MagnetItem> magnets = new ArrayList<>(detail.magnets());
         magnets.sort(MovieSubscriptionService::compareEpisodeDesc);
         List<Map<String, Object>> items = new ArrayList<>();
@@ -1018,7 +1018,7 @@ public class MovieSubscriptionService {
     }
 
     /**
-     * 「查看磁力」弹窗的排序：按集数倒序，最新一集在最前；识别不出集号的条目排最后。
+     * 「资源列表」弹窗的排序：按集数倒序，最新一集在最前；识别不出集号的条目排最后。
      *
      * <p>同一集的多条磁力保持详情页内的相对顺序（稳定排序）。集号按数字比较，
      * 因此「第 10 集」排在「第 9 集」前面，而不是按字符串比较。</p>
@@ -1053,7 +1053,7 @@ public class MovieSubscriptionService {
     /**
      * 找到某条磁力在详情页里的原始标题（用于推断集号 / 清晰度）。
      *
-     * <p>前端「查看磁力」已经带有标题，正常路径不会走到这里；仅当调用方只给了磁力原文时，
+     * <p>前端「资源列表」已经带有标题，正常路径不会走到这里；仅当调用方只给了磁力原文时，
      * 才回查一次详情页（失败返回 null，由调用方用 OTHER 兜底）。</p>
      */
     private String magnetTitleOf(String url, String hash, String magnet) {
@@ -1094,7 +1094,7 @@ public class MovieSubscriptionService {
     }
 
     /**
-     * 手动下载单条磁力（结果卡片「查看磁力」列表里的下载按钮）。
+     * 手动下载单条磁力（结果卡片「资源列表」列表里的下载按钮）。
      *
      * <p>与订阅巡检共用同一套提交逻辑，因此同样保证：</p>
      * <ul>

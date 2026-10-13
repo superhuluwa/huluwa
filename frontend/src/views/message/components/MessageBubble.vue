@@ -42,18 +42,18 @@
                         </button>
                         <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
                             <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
-                            查看磁力
+                            资源列表
                         </button>
                         <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
                             <i class="fa-solid fa-sliders"></i>订阅设置
                         </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
-                    <!-- 电影天堂卡片：在线播放线路（无磁力，点击查看 / 复制播放地址） -->
+                    <!-- 电影天堂卡片：在线播放线路（点击查看完整资源列表 / 复制直链） -->
                     <div v-else-if="isDytt" class="movie-actions">
                         <button class="magnet-btn" type="button" @click="openPlays">
                             <i class="fa-solid fa-circle-play"></i>
-                            播放地址<template v-if="playCount">（{{ playCount }}）</template>
+                            资源列表<template v-if="playCount">（{{ playCount }}）</template>
                         </button>
                         <a v-if="parsedPayload.url" class="magnet-btn" :href="parsedPayload.url" target="_blank"
                             rel="noopener">
@@ -81,18 +81,18 @@
                         </button>
                         <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
                             <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
-                            查看磁力
+                            资源列表
                         </button>
                         <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
                             <i class="fa-solid fa-sliders"></i>订阅设置
                         </button>
                         <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
-                    <!-- 电影天堂卡片：在线播放线路（无磁力，点击查看 / 复制播放地址） -->
+                    <!-- 电影天堂卡片：在线播放线路（点击查看完整资源列表 / 复制直链） -->
                     <div v-else-if="isDytt" class="movie-actions">
                         <button class="magnet-btn" type="button" @click="openPlays">
                             <i class="fa-solid fa-circle-play"></i>
-                            播放地址<template v-if="playCount">（{{ playCount }}）</template>
+                            资源列表<template v-if="playCount">（{{ playCount }}）</template>
                         </button>
                         <a v-if="parsedPayload.url" class="magnet-btn" :href="parsedPayload.url" target="_blank"
                             rel="noopener">
@@ -118,7 +118,7 @@
     <MovieSubscriptionDialog v-model:show="subscriptionDialog" :movie="subscribePayload"
         :resubscribe="!subscribed" @saved="onSubscriptionSaved" />
 
-    <!-- 电影天堂播放地址弹窗：卡片载荷里的在线线路，点击复制 m3u8 直链 -->
+    <!-- 电影天堂资源列表弹窗：卡片载荷里的在线线路，点击复制 m3u8 直链 -->
     <PlaySourceDialog v-model:show="playDialog" :title="parsedPayload.title || ''"
         :sources="parsedPayload.playSources || []" :movie="parsedPayload" />
 
@@ -165,11 +165,11 @@ export default {
             subscribedLocal: null,
             busy: false,
             subscriptionDialog: false,
-            /** 「查看磁力」按钮的加载态（抓详情页较慢，避免重复点击） */
+            /** 「资源列表」按钮的加载态（抓详情页较慢，避免重复点击） */
             magnetsLoading: false,
             /** 磁力列表弹窗状态 */
             magnetDialog: { show: false, url: '', title: '' },
-            /** 电影天堂播放地址弹窗状态 */
+            /** 电影天堂资源列表弹窗状态 */
             playDialog: false
         }
     },
@@ -238,7 +238,7 @@ export default {
         isMovie() {
             return this.isMovieCard && this.payload.source !== 'dytt'
         },
-        /** 电影天堂条目（在线 m3u8，无磁力）：显示播放头像与播放地址按钮 */
+        /** 电影天堂条目（在线 m3u8，无磁力）：显示播放头像与资源列表按钮 */
         isDytt() {
             return this.isMovieCard && this.payload.source === 'dytt'
         },
@@ -351,13 +351,13 @@ export default {
             this.$emit('open-cover', { url: this.message.content, title: this.coverTitle })
         },
         /**
-         * 打开「查看磁力」弹窗：弹窗内部自己去抓详情页（带 loading 与缓存状态），
+         * 打开「资源列表」弹窗：弹窗内部自己去抓详情页（带 loading 与缓存状态），
          * 这里只做一次轻量预检，保证卡片上有可用链接。
          */
         async openMagnets() {
             const url = this.parsedPayload.url
             if (!url) {
-                window.$message?.error('这条卡片缺少电影港链接，无法查看磁力')
+                window.$message?.error('这条卡片缺少电影港链接，无法打开资源列表')
                 return
             }
             this.magnetDialog = {
@@ -366,7 +366,7 @@ export default {
                 title: this.parsedPayload.title || ''
             }
         },
-        /** 打开电影天堂播放地址弹窗（数据已在卡片载荷里，无需请求） */
+        /** 打开电影天堂资源列表弹窗（数据已在卡片载荷里，无需请求） */
         openPlays() {
             this.playDialog = true
         },
@@ -648,7 +648,7 @@ export default {
     font-size: 13px;
 }
 
-/* 「查看磁力」按钮：与订阅按钮同排，仅影视卡片出现 */
+/* 「资源列表」按钮：与订阅按钮同排，仅影视卡片出现 */
 .magnet-btn {
     display: inline-flex;
     align-items: center;

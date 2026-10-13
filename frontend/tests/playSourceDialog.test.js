@@ -41,7 +41,7 @@ beforeEach(() => {
     api.GetHlsDetail.mockResolvedValue({ playSources: SERIES })
 })
 
-describe('电影天堂播放地址线路整理', () => {
+describe('电影天堂资源列表线路整理', () => {
     it('dyttm3u8 线路排在第一条，打开弹窗默认选中它', () => {
         const vm = dialog({ sources: SERIES, movie: MOVIE })
         expect(vm.sortedSources.map(source => source.name)).toEqual(['dyttm3u8', 'dytt'])
@@ -102,6 +102,8 @@ describe('电影天堂播放地址线路整理', () => {
 
         expect(template).toContain('v-for="(s, i) in sortedSources"')
         expect(template).toContain('v-for="(item, index) in currentItems"')
+        expect(template).toContain("title || '资源列表'")
+        expect(template).not.toContain('播放地址')
         expect(template).not.toContain('HlsResourceDialog')
         expect(source).not.toContain('HlsResourceDialog')
         expect(source).not.toContain('downloadDialog')

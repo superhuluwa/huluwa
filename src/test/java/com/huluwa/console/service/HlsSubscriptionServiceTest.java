@@ -196,6 +196,50 @@ class HlsSubscriptionServiceTest {
         assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE hidden_at IS NULL", Integer.class));
     }
 
+    /**
+     * 复现「清空下载记录后重新下载提示已有记录」：
+     * 行被 hidden_at 隐藏后，手动提交必须能让它重新排队并回到列表，
+     * 而不是只回一句误导性的状态文案。
+     */
+    @Test
+    void clearingHistoryDoesNotBlockManualDownloadOfTheSameEpisode() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(1, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_download_task SET status = 'completed' WHERE episode = 1");
+        downloads.clearHistory();
+        assertEquals(0, downloads.list().size());
+
+        // 用户再次点击下载同一集：重新排队并回到列表，不再提示「已有下载记录」
+        Map<String, Object> result = downloads.enqueue(new HlsRequests.Download(
+                null, "42", "剧名", "2026", 1, 1, "第1集",
+                "https://cdn.example/1.m3u8?token=new", "m3u8", null, null, null));
+        assertEquals("pending", result.get("status"));
+        assertEquals(1, downloads.list().size());
+        assertEquals(1, db.queryForObject(
+                "SELECT COUNT(*) FROM hls_download_task WHERE hidden_at IS NULL", Integer.class));
+        assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
+    }
+
+    /**
+     * 已下载完成且归档文件仍在时：重新点击下载不应重复拉取，
+     * 但列表里要能看到这一条（状态已重置为等待下载）。
+     */
+    @Test
+    void manualDownloadOfCompletedEpisodeKeepsRecordVisible() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(1, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_download_task SET status = 'completed', save_path = '/media/剧名 S01E01.mp4' WHERE episode = 1");
+        assertEquals(0, subscriptions.check(id).get("added"));
+
+        Map<String, Object> result = downloads.enqueue(new HlsRequests.Download(
+                null, "42", "剧名", "2026", 1, 1, "第1集",
+                "https://cdn.example/1.m3u8?token=new", "m3u8", null, null, null));
+        assertEquals("pending", result.get("status"));
+        assertEquals(1, downloads.list().size());
+        // 同一集不会因为重复提交而多出第二条记录
+        assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
+    }
+
     @Test
     void duplicateNumberingRejectsTheManifestBeforeAnyTasksAreCreated() {
         var repeated = new DyttSearchService.DyttItem("42", "剧名", "2026", "", "", "", "", "", "",

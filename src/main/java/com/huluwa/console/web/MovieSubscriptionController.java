@@ -139,7 +139,7 @@ public class MovieSubscriptionController {
     }
 
     /**
-     * 详情页磁力清单（搜索结果卡片的「查看磁力」）：实时抓取该剧详情页，不写入基线库。
+     * 详情页磁力清单（搜索结果卡片的「资源列表」）：实时抓取该剧详情页，不写入基线库。
      *
      * <p>返回体里每条磁力附带 {@code downloaded} 标记，前端据此禁用「已下载」按钮。</p>
      */
@@ -155,7 +155,7 @@ public class MovieSubscriptionController {
     /**
      * 手动下载一条磁力：保存目录仍是「下载根目录 / 剧名」，结果推送到「磁力下载」会话。
      *
-     * <p>两种调用方式：{@code magnet} 直接给磁力原文（查看磁力列表），
+     * <p>两种调用方式：{@code magnet} 直接给磁力原文（资源列表），
      * 或 {@code magnetId} 指定订阅库里的磁力记录（订阅页磁力列表）。</p>
      */
     @PostMapping("/magnets/download")

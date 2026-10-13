@@ -200,7 +200,7 @@ public class HlsDownloadService implements ApplicationRunner {
         }
         long id = discover(subscription, key, api, resId, title, year, season, episode,
                 HlsSupport.text(body.episodeTitle()), sourceName, url, headers, false);
-        reactivate(id);
+        reactivate(id, url, sourceName, headers, HlsSupport.text(body.episodeTitle()));
         kick();
         return publicTask(id);
     }
@@ -234,14 +234,18 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     /**
-     * 手动提交某一集时把此前「跳过」或「失败」的记录重新排队：用户这次是明确要下载，
-     * 同时解除 hidden_at，让被「清空下载记录」隐藏过的历史行重新出现在列表里。
+     * 手动提交某一集时让此前的记录重新排队：用户这次是明确要下载。
+     * 已完成的一集也重新入队——download() 会先核对已归档文件，文件仍在就直接确认完成，
+     * 只有文件被删除时才真正重新下载；同时重置尝试次数，给失败过的历史行新的重试机会。
+     * 解除 hidden_at，让被「清空下载记录」隐藏过的行重新出现在列表里。
      */
-    private synchronized void reactivate(long id) {
+    private synchronized void reactivate(long id, String url, String sourceName, String headers, String episodeTitle) {
         db.update("""
-                UPDATE hls_download_task SET status = 'pending', message = NULL, hidden_at = NULL, updated_at = ?
-                 WHERE id = ? AND status IN ('skipped', 'failed')
-                """, HlsSupport.now(), id);
+                UPDATE hls_download_task SET status = 'pending', attempts = 0, next_attempt_at = NULL,
+                       message = NULL, hidden_at = NULL, url = ?, source_name = ?, headers = ?,
+                       episode_title = ?, updated_at = ?
+                 WHERE id = ? AND status IN ('skipped', 'failed', 'completed')
+                """, m3u8(url), sourceName, headers, episodeTitle, HlsSupport.now(), id);
     }
 
     public synchronized Map<String, Object> retry(long id) {
@@ -257,9 +261,27 @@ public class HlsDownloadService implements ApplicationRunner {
         kick(); return publicTask(id);
     }
 
+    /**
+     * 返回给前端的任务视图。被「清空下载记录」隐藏的行不会再出现在列表里，
+     * 但仍要给出准确状态，避免统一回退成误导性的「已有下载记录」。
+     */
     private Map<String, Object> publicTask(long id) {
-        return list().stream().filter(item -> HlsSupport.number(item.get("id")) == id).findFirst()
-                .orElseGet(() -> Map.of("id", id, "message", "该剧集已有下载记录"));
+        String status = HlsSupport.text(task(id).get("status"));
+        Map<String, Object> view = list().stream().filter(item -> HlsSupport.number(item.get("id")) == id)
+                .findFirst().orElseGet(LinkedHashMap::new);
+        if (view.isEmpty()) {
+            view.put("id", id);
+            view.put("status", status);
+        }
+        if (HlsSupport.text(view.get("message")).isBlank()) {
+            view.put("message", switch (status) {
+                case "downloading", "verifying" -> "该剧集正在下载中，无需重复提交";
+                case "completed" -> "该剧集已下载完成，归档文件仍在";
+                case "pending" -> "该剧集已在下载队列中";
+                default -> "该剧集已有下载记录";
+            });
+        }
+        return view;
     }
 
     private Map<String, Object> task(long id) {

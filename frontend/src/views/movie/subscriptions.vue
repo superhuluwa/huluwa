@@ -52,7 +52,7 @@
                     </n-button>
                     <n-button v-if="!isHls(item)" size="tiny" @click="toggleMagnets(item)">
                         <template #icon><i class="fa-solid fa-list"></i></template>
-                        {{ magnetsOpen === item.subscriptionKey ? '收起磁力' : '查看磁力' }}
+                        {{ magnetsOpen === item.subscriptionKey ? '收起列表' : '资源列表' }}
                     </n-button>
                     <n-button v-if="item.enabled" size="tiny" @click="unsubscribe(item)">
                         <template #icon><i class="fa-regular fa-bell-slash"></i></template>

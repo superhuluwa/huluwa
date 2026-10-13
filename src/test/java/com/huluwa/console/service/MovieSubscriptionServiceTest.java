@@ -50,7 +50,7 @@ class MovieSubscriptionServiceTest {
     }
 
     /**
-     * 「查看磁力」要求按集数倒序：接口层排序后最新一集在最前，且不能改坏订阅巡检依赖的原始解析顺序。
+     * 「资源列表」要求按集数倒序：接口层排序后最新一集在最前，且不能改坏订阅巡检依赖的原始解析顺序。
      */
     @Test
     void compareEpisodeDescSortsLatestEpisodeFirst() throws Exception {
