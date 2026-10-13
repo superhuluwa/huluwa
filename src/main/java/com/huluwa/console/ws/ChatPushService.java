@@ -1,6 +1,7 @@
 package com.huluwa.console.ws;
 
 import com.huluwa.console.service.ChatService;
+import com.huluwa.console.service.MovieSearchWatchService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -72,6 +73,14 @@ public class ChatPushService {
         if (error != null) {
             frame.put("error", error);
         }
+        registry.broadcast(frame);
+    }
+
+    /** 监听状态变化广播，同步同关键字的历史气泡和其它标签页。 */
+    public void movieSearchWatch(MovieSearchWatchService.SearchWatch watch) {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "chat.movie-search-watch");
+        frame.put("watch", watch);
         registry.broadcast(frame);
     }
 

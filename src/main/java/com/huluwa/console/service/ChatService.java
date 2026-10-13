@@ -260,6 +260,17 @@ public class ChatService {
         return list;
     }
 
+    /** 写入系统通知并返回其准确消息 ID；调用方在事务提交后负责实时推送。 */
+    public ChatMessage appendSystemNotification(String title, String content, String level, String source) {
+        MessageService.PublishedMessage notification = messageService.publishAndGet(title, content, level, source);
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("level", notification.level());
+        meta.put("source", notification.source());
+        meta.put("title", notification.title());
+        return new ChatMessage(notification.id(), SYSTEM_SESSION, "bot", "notify", notification.content(),
+                notification.title(), toJson(meta), false, notification.createdAt());
+    }
+
     /** 系统通知以 message 表映射为 notify 类型气泡（保留级别与来源） */
     private List<ChatMessage> systemMessages(Long beforeId, int size) {
         StringBuilder sql = new StringBuilder(
@@ -516,14 +527,31 @@ public class ChatService {
         }
 
         if (found.isEmpty()) {
+            Map<String, Object> watchPayload = new LinkedHashMap<>();
+            watchPayload.put("kind", "movie-search-watch");
+            watchPayload.put("keyword", keyword);
+            watchPayload.put("noResults", true);
             replies.add(append(sessionId, "bot", "error",
-                    "未搜索到「" + keyword + "」相关资源，换个片名试试（支持中英文片名）。", null, null));
+                    "未搜索到「" + keyword + "」相关资源。可点击下方「监听」，后台会定期重新搜索，找到后发送系统通知。",
+                    null, toJson(watchPayload)));
             return replies;
         }
+        return movieSearchResults(sessionId, keyword, found, false);
+    }
 
+    /** 监听命中后的卡片复用普通搜索格式；调用方提交事务后再推送。 */
+    public List<ChatMessage> appendWatchedMovieResults(String keyword, List<MovieSearchService.MovieItem> found) {
+        List<ChatMessage> replies = movieSearchResults(MOVIE_SESSION, keyword, found, true);
+        touch(MOVIE_SESSION);
+        return replies;
+    }
+
+    private List<ChatMessage> movieSearchResults(String sessionId, String keyword,
+                                                List<MovieSearchService.MovieItem> found, boolean watched) {
+        List<ChatMessage> replies = new ArrayList<>();
         int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
         replies.add(append(sessionId, "bot", "text",
-                "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
+                (watched ? "监听关键字「" : "关键字「") + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
                         + "点卡片下方「订阅」即可监听该剧更新（默认每小时巡检一次）。", null, null));
         Set<String> subscribed = movieSubscriptionService.subscribedUrls();
         for (int i = 0; i < shown; i++) {

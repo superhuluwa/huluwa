@@ -3,8 +3,10 @@ package com.huluwa.console.service;
 import com.huluwa.console.common.BusinessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
 
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -88,13 +90,36 @@ public class MessageService {
         }
     }
 
-    /** 供其他模块写入消息（预留：Frp / Docker / 推送事件） */
+    /** 供其他模块写入系统通知。 */
     public void publish(String title, String content, String level, String source) {
-        jdbcTemplate.update("""
-                INSERT INTO message (title, content, level, source, read_flag, created_at)
-                VALUES (?, ?, ?, ?, 0, ?)
-                """, title, content, level == null ? "info" : level, source,
-                LocalDateTime.now().format(TIME_FORMAT));
+        publishAndGet(title, content, level, source);
+    }
+
+    public record PublishedMessage(long id, String title, String content, String level, String source, String createdAt) {
+    }
+
+    /** 在 INSERT 的同一连接上取得 ID，供实时推送准确定位通知。 */
+    public PublishedMessage publishAndGet(String title, String content, String level, String source) {
+        String actualLevel = level == null ? "info" : level;
+        String createdAt = LocalDateTime.now().format(TIME_FORMAT);
+        GeneratedKeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO message (title, content, level, source, read_flag, created_at)
+                    VALUES (?, ?, ?, ?, 0, ?)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            statement.setString(1, title);
+            statement.setString(2, content);
+            statement.setString(3, actualLevel);
+            statement.setString(4, source);
+            statement.setString(5, createdAt);
+            return statement;
+        }, keyHolder);
+        Number id = keyHolder.getKey();
+        if (id == null) {
+            throw new BusinessException(500, "保存系统通知失败");
+        }
+        return new PublishedMessage(id.longValue(), title, content, actualLevel, source, createdAt);
     }
 
     private long count(String sql) {

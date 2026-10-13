@@ -7,8 +7,8 @@
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
         <div v-if="!isMine" class="avatar bot"
-            :class="{ movie: isMovie, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
-            <i v-if="isMovie" class="fa-solid fa-film"></i>
+            :class="{ movie: isMovie || isMovieSearchWatch, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
+            <i v-if="isMovie || isMovieSearchWatch" class="fa-solid fa-film"></i>
             <i v-else-if="isDytt" class="fa-solid fa-circle-play"></i>
             <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
             <i v-else-if="isVideoSession" class="fa-solid fa-clapperboard"></i>
@@ -66,6 +66,7 @@
                 <VideoBubble v-else-if="isVideo" :message="message" @open-cover="$emit('open-cover', $event)" />
                 <template v-else>
                     <RichText :text="message.content" />
+                    <MovieSearchWatchAction v-if="isMovieSearchWatch" :keyword="movieWatchKeyword" />
                     <!-- 电影港卡片：订阅 + 磁力 + 订阅设置 -->
                     <div v-if="isMovie" class="movie-actions">
                         <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
@@ -130,12 +131,13 @@ import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
 import PlaySourceDialog from './PlaySourceDialog.vue'
+import MovieSearchWatchAction from './MovieSearchWatchAction.vue'
 import { PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
     props: {
         message: {
             type: Object,
@@ -200,6 +202,18 @@ export default {
             } catch (e) {
                 return {}
             }
+        },
+        /** 只在电影港搜索无结果时展示监听；兼容旧版没有结构化载荷的无结果回复。 */
+        movieWatchKeyword() {
+            if (this.message.sessionId !== 'movie' || this.message.role !== 'bot') return ''
+            if (this.payload.kind === 'movie-search-watch' && this.payload.noResults === true) {
+                return String(this.payload.keyword || '').trim()
+            }
+            const match = String(this.message.content || '').match(/^未搜索到「([\s\S]+)」相关资源/)
+            return match ? match[1].trim() : ''
+        },
+        isMovieSearchWatch() {
+            return !!this.movieWatchKeyword
         },
         /** 载荷是否是影视卡片（电影港 / 电影天堂共用 url + title + cover 三件套） */
         isMovieCard() {
@@ -381,6 +395,8 @@ export default {
     /* 左右头像列总占宽 = 2 × 头像(38px) + 2 × 间距(10px)；
        气泡可用宽度 = 100% − 这个值，保证长消息不会伸进对侧头像列。 */
     --chat-rail-both: 96px;
+    --chat-cover-width-ratio: 0.46;
+    --chat-cover-width-limit: 320px;
 }
 
 .message-row.mine {
@@ -486,16 +502,13 @@ export default {
 .bubble.is-cover {
     padding: 6px;
     max-width: calc(100% - var(--chat-rail-both, 96px));
-    max-width: min(46%, calc(100% - var(--chat-rail-both, 96px)), 320px);
+    max-width: min(calc(100% * var(--chat-cover-width-ratio)), calc(100% - var(--chat-rail-both, 96px)), var(--chat-cover-width-limit));
 }
 
-/* 带配文的卡片（影视卡片等）：卡片宽度不再跟着图片走——配文与操作条要撑满到右侧头像栏前，
-   图片单独缩到原来的约 2/3（见 .is-cover-wide .cover），所以卡片更宽、里面的图更小。 */
+/* 带配文的卡片：正文与操作条铺满两侧头像栏之间的可用宽度。 */
 .bubble.is-cover.is-cover-wide {
-    /* 卡片宽度只受「右侧头像栏」约束，不再套用普通气泡的 68% / 74% 上限 */
     width: calc(100% - var(--chat-rail-both, 96px));
-    width: min(calc(100% - var(--chat-rail-both, 96px)), 720px);
-    max-width: 100%;
+    max-width: calc(100% - var(--chat-rail-both, 96px));
 }
 
 /* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄（border-box 见 .bubble） */
@@ -586,16 +599,27 @@ export default {
     font-size: 12.5px;
 }
 
-/* 铺宽卡片：封面（含加载失败占位）高宽同步缩到原来的约 2/3。
-   旧卡片宽 = min(46% / 62%, 扣除头像栏, 320px / 300px)，减去左右 6px 内边距；
-   缩到 2/3 后窄屏约等于卡片宽的 55%，宽屏约 192px 封顶，单独封顶避免卡片变宽后图片跟着变大。 */
+/* 卡片正文宽度 + 两侧头像栏 + 左右 6px 内边距 = 消息行宽度；
+   按原封面卡片的比例与上限还原图片宽度，再将宽高同步缩到 2/3。 */
 .bubble.is-cover-wide .cover,
 .bubble.is-cover-wide .cover-fallback {
-    width: 55%;
-    width: min(55%, 192px);
+    width: calc(((100% + var(--chat-rail-both) + 12px) * var(--chat-cover-width-ratio) - 12px) * 2 / 3);
+    max-width: calc((var(--chat-cover-width-limit) - 12px) * 2 / 3);
+    max-width: min(calc(100% * 2 / 3), calc((var(--chat-cover-width-limit) - 12px) * 2 / 3));
+}
+
+.bubble.is-cover-wide .cover {
+    height: auto;
+    max-height: 280px;
+}
+
+.bubble.is-cover-wide .cover-fallback {
+    height: 100px;
 }
 
 .cover-caption {
+    box-sizing: border-box;
+    width: 100%;
     padding: 8px 6px 4px;
     font-size: 13px;
 }
@@ -691,6 +715,8 @@ export default {
     .message-row {
         /* 手机端头像 36px + 间距 10px，左右两列合计 92px */
         --chat-rail-both: 92px;
+        --chat-cover-width-ratio: 0.62;
+        --chat-cover-width-limit: 300px;
     }
 
     .bubble {
@@ -700,12 +726,6 @@ export default {
         max-width: min(74%, calc(100% - var(--chat-rail-both, 92px)), 720px);
         padding: 10px 13px;
         border-radius: 17px;
-    }
-
-    /* 纯图卡：手机端回到 300px 上限；带配文的铺宽卡片由 .is-cover-wide 接管，不受这条影响 */
-    .bubble.is-cover {
-        max-width: calc(100% - var(--chat-rail-both, 92px));
-        max-width: min(62%, calc(100% - var(--chat-rail-both, 92px)), 300px);
     }
 
     /* 视频气泡：与普通气泡同一套上限，卡片不能一路顶到对侧头像列 */

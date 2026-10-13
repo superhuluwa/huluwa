@@ -8,7 +8,8 @@ import {
 } from '@/api/chat'
 import chatSocket from '@/libs/ws'
 import outbox from '@/libs/chatOutbox'
-import { message as toast } from '@/libs/discrete'
+import { message as toast, notification } from '@/libs/discrete'
+import { useMovieSearchWatchStore } from '@/stores/movieSearchWatch'
 
 /**
  * 消息中心会话状态层：
@@ -130,6 +131,7 @@ export const useChatStore = defineStore('chat', {
             if (!key) {
                 return
             }
+            if (key === 'movie') useMovieSearchWatchStore().refresh().catch(() => {})
             this.loadingMessages = true
             try {
                 const page = await SessionMessages(key, null, PAGE_SIZE)
@@ -348,6 +350,7 @@ export const useChatStore = defineStore('chat', {
                     })
                     this.refreshSessions()
                     this.reloadSession(this.currentKey)
+                    useMovieSearchWatchStore().refresh().catch(() => {})
                 })
                 chatSocket.on('close', () => {
                     // 降级：poll() 守卫自动放开，轮询接管
@@ -358,6 +361,7 @@ export const useChatStore = defineStore('chat', {
                 chatSocket.on('chat.messages', (frame) => this.handleMessages(frame))
                 chatSocket.on('chat.done', (frame) => this.handleDone(frame))
                 chatSocket.on('chat.sessions', (frame) => this.handleSessions(frame))
+                chatSocket.on('chat.movie-search-watch', (frame) => useMovieSearchWatchStore().apply(frame.watch))
             }
             chatSocket.reset()
             chatSocket.connect()
@@ -381,7 +385,24 @@ export const useChatStore = defineStore('chat', {
         handleMessages(frame) {
             const key = frame.sessionId
             const rows = Array.isArray(frame.messages) ? frame.messages : []
+            const knownIds = new Set((this.messagesBySession[key] || []).map(row => row.id))
             this.ingestMessages(key, rows)
+            if (key !== 'system') return
+            rows.filter(row => row.type === 'notify' && !knownIds.has(row.id)).forEach(row => {
+                let meta
+                try {
+                    meta = JSON.parse(row.payload || '{}')
+                } catch (e) {
+                    return
+                }
+                if (meta?.source === '电影港监听') {
+                    notification.success({
+                        title: meta.title || '电影港监听已找到资源',
+                        content: '资源卡片已发送到电影港会话，详情可在系统通知中查看。',
+                        duration: 8000
+                    })
+                }
+            })
         },
 
         handleDone(frame) {
@@ -458,6 +479,9 @@ export const useChatStore = defineStore('chat', {
             }
             try {
                 await this.refreshSessions()
+                if (useMovieSearchWatchStore().loaded) {
+                    await useMovieSearchWatchStore().refresh().catch(() => {})
+                }
                 const key = this.currentKey
                 if (!key || this.loadingMessages) {
                     return
@@ -469,12 +493,7 @@ export const useChatStore = defineStore('chat', {
                 const page = await SessionMessages(key, null, PAGE_SIZE)
                 const incoming = (Array.isArray(page) ? page : []).filter((item) => item.id > latest)
                 if (incoming.length) {
-                    this.messagesBySession = {
-                        ...this.messagesBySession,
-                        [key]: mergeById(rows, incoming)
-                    }
-                    this.adoptPending(key, incoming)
-                    await this.markRead(key)
+                    this.handleMessages({ sessionId: key, messages: incoming })
                 }
             } catch (e) {
                 // 轮询失败静默（拦截器已提示网络异常时避免刷屏）

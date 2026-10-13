@@ -143,6 +143,24 @@ VALUES ('video', '视频解析', 'video', datetime('now', 'localtime'), datetime
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('xunlei', '迅雷下载', 'xunlei', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
+-- 电影港搜索监听：暂无资源时按关键字巡检，命中后通知一次并结束；重启后继续。
+CREATE TABLE IF NOT EXISTS movie_search_watch (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword          TEXT NOT NULL,
+    keyword_key      TEXT NOT NULL UNIQUE,       -- 统一大小写的关键字，防止重复监听
+    status           TEXT NOT NULL DEFAULT 'watching', -- watching|found|cancelled
+    interval_minutes INTEGER NOT NULL DEFAULT 30,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    last_check_at    TEXT,
+    next_check_at    TEXT,
+    found_at         TEXT,
+    result_count     INTEGER NOT NULL DEFAULT 0,
+    check_error      TEXT,
+    version          INTEGER NOT NULL DEFAULT 1  -- 拦截取消或重启监听前的旧查询结果
+);
+CREATE INDEX IF NOT EXISTS idx_movie_search_watch_due ON movie_search_watch (status, next_check_at, id);
+
 -- ============================================================
 -- 电影港订阅（对齐 quantum 的 dygangs_search.cs / dygangs.cs）：
 --   movie_subscription        订阅清单：片名 + 电影港具体链接 + 巡检状态（默认每小时一轮）

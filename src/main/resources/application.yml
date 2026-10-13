@@ -39,6 +39,8 @@ spring:
 huluwa:
   data-dir: ./data
   movie:
+    # 搜索暂无资源时的监听间隔，由后端执行；命中后发送系统通知并结束。
+    search-watch-interval-minutes: 30
     # 页面详情短期复用；巡检绕过已完成缓存，同 URL 的进行中请求仍会合并。
     detail-cache-seconds: 60
     detail-cache-max-entries: 128

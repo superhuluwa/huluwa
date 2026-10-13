@@ -33,6 +33,21 @@ export function SearchMessages(keyword, limit = 20) {
     return http.get('/chat/search', { keyword, limit })
 }
 
+// ------------------------------------------------------------------ 电影港搜索监听
+
+/** 关键字监听状态（含已找到与已取消），用于恢复回复中的按钮。 */
+export function GetMovieSearchWatches() {
+    return http.get('/chat/movie-search-watches', undefined, { silent: true })
+}
+
+export function StartMovieSearchWatch(keyword) {
+    return http.post('/chat/movie-search-watches', { keyword }, { silent: true })
+}
+
+export function CancelMovieSearchWatch(id) {
+    return http.delete('/chat/movie-search-watches/' + id, { silent: true })
+}
+
 // ------------------------------------------------------------------ 电影港订阅
 
 /** 已订阅的详情页地址集合（搜索结果卡片据此渲染「已订阅」） */

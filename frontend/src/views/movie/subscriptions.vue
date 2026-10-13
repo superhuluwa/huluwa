@@ -1,26 +1,5 @@
 <template>
     <div class="subs-page">
-        <div class="page-head">
-            <div class="head-text">
-                <h2>电影港订阅</h2>
-                <p class="tip">
-                    订阅后自动记录该剧的每集磁力作为对比基线，默认每小时巡检一次；
-                    有新剧集时取最高清晰度，使用本剧选择的迅雷或 qBittorrent 下载，更新与下载结果都会推送到消息中心。
-                </p>
-            </div>
-            <div class="head-actions">
-                <n-button size="small" @click="openSettings()">默认下载设置</n-button>
-                <n-switch v-model:value="includeDisabled" size="small">
-                    <template #checked>含已取消</template>
-                    <template #unchecked>仅订阅中</template>
-                </n-switch>
-                <n-button size="small" :loading="loading" @click="reload">
-                    <template #icon><i class="fa-solid fa-rotate"></i></template>
-                    刷新
-                </n-button>
-            </div>
-        </div>
-
         <n-spin :show="loading">
             <div v-if="!rows.length" class="empty">
                 还没有订阅。到「消息中心 → 电影港」搜索片名，点结果卡片上的「订阅」即可。
@@ -115,7 +94,7 @@
 </template>
 
 <script>
-import { NButton, NDataTable, NSpin, NSwitch } from 'naive-ui'
+import { NButton, NDataTable, NSpin } from 'naive-ui'
 /**
  * 电影港订阅管理：订阅清单（片名 / 具体链接 / 磁力基线 / 巡检状态）+ 订阅触发的下载任务。
  * 订阅动作本身在「消息中心 → 电影港」的结果卡片上完成，本页负责查看与维护。
@@ -141,8 +120,7 @@ export default {
         MovieSubscriptionDialog,
         NButton,
         NDataTable,
-        NSpin,
-        NSwitch
+        NSpin
     },
     data() {
         return {
@@ -151,7 +129,6 @@ export default {
             settingsMovie: null,
             settingsResubscribe: false,
             loadingDownloads: false,
-            includeDisabled: false,
             rows: [],
             downloads: [],
             magnetsOpen: 0,
@@ -172,11 +149,6 @@ export default {
             ]
         }
     },
-    watch: {
-        includeDisabled() {
-            this.reload()
-        }
-    },
     async mounted() {
         await Promise.all([this.reload(), this.loadDownloads()])
     },
@@ -184,7 +156,7 @@ export default {
         async reload() {
             this.loading = true
             try {
-                const list = await GetSubscriptions(this.includeDisabled)
+                const list = await GetSubscriptions()
                 this.rows = Array.isArray(list) ? list : []
             } finally {
                 this.loading = false
@@ -281,34 +253,6 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 18px;
-}
-
-.page-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-.head-text h2 {
-    margin: 0 0 6px;
-    font-size: 18px;
-    color: var(--text);
-}
-
-.tip {
-    margin: 0;
-    max-width: 720px;
-    font-size: 12.5px;
-    line-height: 1.7;
-    color: var(--text-2);
-}
-
-.head-actions {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .empty {
