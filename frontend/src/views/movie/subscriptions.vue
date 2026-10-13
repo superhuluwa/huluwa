@@ -1,29 +1,38 @@
 <template>
     <div class="subs-page">
-        <n-tabs v-model:value="kind" type="line">
-            <n-tab-pane name="hls" tab="电影天堂离线追更" />
-            <n-tab-pane name="magnet" tab="电影港磁力订阅" />
-        </n-tabs>
-        <HlsSubscriptionsPanel v-if="kind === 'hls'" />
-        <n-spin v-else :show="loading">
-            <div v-if="!rows.length" class="empty">
-                还没有订阅。到「消息中心 → 电影港」搜索片名，点结果卡片上的「订阅」即可。
+        <div class="subs-head">
+            <span>共 {{ rows.length }} 个订阅 · 按加入时间排列</span>
+            <n-button size="small" :loading="loading" @click="reload">刷新</n-button>
+        </div>
+        <n-spin :show="loading">
+            <div v-if="loadError" class="error">{{ loadError }}</div>
+            <div v-if="!rows.length && !loadError" class="empty">
+                还没有订阅。到「消息中心 → 电影港 / 电影天堂」搜索片名，在结果卡片上添加订阅。
             </div>
-            <div v-for="item in rows" :key="item.id" class="sub-card" :class="{ off: !item.enabled }">
+            <div v-for="item in rows" :key="item.subscriptionKey" class="sub-card" :class="{ off: !item.enabled }">
                 <div class="card-main">
                     <img v-if="item.cover" class="cover" :src="item.cover" alt="封面" />
-                    <div v-else class="cover fallback"><i class="fa-solid fa-film"></i></div>
+                    <div v-else class="cover fallback"><i :class="isHls(item) ? 'fa-solid fa-circle-play' : 'fa-solid fa-film'"></i></div>
                     <div class="info">
                         <div class="title-row">
                             <span class="title">{{ item.title }}</span>
+                            <span class="badge source" :class="{ dytt: isHls(item) }">{{ isHls(item) ? '电影天堂' : '电影港' }}</span>
                             <span v-if="item.enabled" class="badge on">订阅中</span>
-                            <span v-else class="badge off">已取消</span>
+                            <span v-else class="badge off">{{ isHls(item) ? '已暂停' : '已取消' }}</span>
                         </div>
                         <div class="meta">{{ metaOf(item) }}</div>
-                        <a class="link" :href="item.detailUrl" target="_blank" rel="noreferrer">{{ item.detailUrl }}</a>
+                        <a v-if="item.detailUrl" class="link" :href="item.detailUrl" target="_blank" rel="noreferrer">{{ item.detailUrl }}</a>
                         <div class="stat">
-                            <span><i class="fa-solid fa-download"></i> {{ item.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
-                            <span><i class="fa-solid fa-magnet"></i> 已记录 {{ item.magnetCount }} 条磁力</span>
+                            <template v-if="isHls(item)">
+                                <span><i class="fa-solid fa-download"></i> 离线剧集下载</span>
+                                <span><i class="fa-solid fa-list"></i> 已记录 {{ item.episodeCount }} 集</span>
+                                <span>每 {{ item.intervalMinutes }} 分钟检查 · 从第 {{ item.fromEpisode }} 集开始</span>
+                            </template>
+                            <template v-else>
+                                <span><i class="fa-solid fa-download"></i> {{ item.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
+                                <span><i class="fa-solid fa-magnet"></i> 已记录 {{ item.magnetCount }} 条磁力</span>
+                            </template>
+                            <span v-if="item.createdAt"><i class="fa-regular fa-calendar-plus"></i> 加入于 {{ item.createdAt }}</span>
                             <span v-if="item.lastCheckAt"><i class="fa-regular fa-clock"></i> 上次巡检 {{ item.lastCheckAt }}</span>
                             <span v-if="item.nextCheckAt && item.enabled"><i class="fa-regular fa-calendar"></i> 下次 {{ item.nextCheckAt }}</span>
                         </div>
@@ -37,28 +46,28 @@
                         <template #icon><i class="fa-solid fa-sliders"></i></template>
                         订阅设置
                     </n-button>
-                    <n-button v-if="item.enabled" size="tiny" :loading="checking === item.id" @click="check(item)">
+                    <n-button v-if="item.enabled" size="tiny" :loading="checking === item.subscriptionKey" @click="check(item)">
                         <template #icon><i class="fa-solid fa-bolt"></i></template>
                         立即检查
                     </n-button>
-                    <n-button size="tiny" @click="toggleMagnets(item)">
+                    <n-button v-if="!isHls(item)" size="tiny" @click="toggleMagnets(item)">
                         <template #icon><i class="fa-solid fa-list"></i></template>
-                        {{ magnetsOpen === item.id ? '收起磁力' : '查看磁力' }}
+                        {{ magnetsOpen === item.subscriptionKey ? '收起磁力' : '查看磁力' }}
                     </n-button>
                     <n-button v-if="item.enabled" size="tiny" @click="unsubscribe(item)">
                         <template #icon><i class="fa-regular fa-bell-slash"></i></template>
-                        取消订阅
+                        {{ isHls(item) ? '暂停追更' : '取消订阅' }}
                     </n-button>
                     <n-button v-else size="tiny" type="primary" ghost @click="resubscribe(item)">
                         <template #icon><i class="fa-regular fa-bell"></i></template>
-                        重新订阅
+                        {{ isHls(item) ? '恢复追更' : '重新订阅' }}
                     </n-button>
-                    <n-button size="tiny" type="error" ghost @click="remove(item)">
+                    <n-button v-if="!isHls(item)" size="tiny" type="error" ghost @click="remove(item)">
                         <template #icon><i class="fa-solid fa-trash-can"></i></template>
                         删除
                     </n-button>
                 </div>
-                <div v-if="magnetsOpen === item.id" class="magnet-panel">
+                <div v-if="!isHls(item) && magnetsOpen === item.subscriptionKey" class="magnet-panel">
                     <div v-if="!magnets.length" class="magnet-empty">暂无磁力记录</div>
                     <div v-for="m in magnets" :key="m.id" class="magnet-row" :class="{ downloaded: m.downloaded }">
                         <span class="magnet-quality">{{ m.quality }}</span>
@@ -82,84 +91,104 @@
 
         <MovieSubscriptionDialog v-model:show="settingsDialog" :movie="settingsMovie"
             :resubscribe="settingsResubscribe" @saved="reload" />
+        <HlsResourceDialog v-model:show="hlsDialog" :movie="hlsMovie" @saved="reload" />
     </div>
 </template>
 
 <script>
-import { NButton, NSpin, NTabPane, NTabs } from 'naive-ui'
+import { NButton, NSpin } from 'naive-ui'
 /**
- * 我的订阅：订阅清单（片名 / 具体链接 / 磁力基线 / 巡检状态）。下载记录已独立为同级的「我的下载」页。
- * 订阅动作本身在「消息中心 → 电影港」的结果卡片上完成，本页负责查看与维护。
+ * 我的订阅：电影港与电影天堂共用一个列表，按首次加入时间升序排列。
+ * 来源只在每项信息中标明，操作按该项对应的订阅服务执行。
  */
 import {
     GetSubscriptions, CheckSubscription, UnsubscribeMovie,
     DeleteSubscription, SubscriptionMagnets, DownloadMagnet
 } from '@/api/chat'
 import MovieSubscriptionDialog from '@/views/message/components/MovieSubscriptionDialog.vue'
-import HlsSubscriptionsPanel from './components/HlsSubscriptionsPanel.vue'
+import HlsResourceDialog from '@/views/message/components/HlsResourceDialog.vue'
+import { CheckHlsSubscription, EnableHlsSubscription, GetHlsSubscriptions } from '@/api/hls'
+import { mergeSubscriptions } from '@/utils/subscriptionList'
 
 export default {
     name: 'MovieSubscriptions',
     components: {
-        HlsSubscriptionsPanel,
-        NTabs,
-        NTabPane,
+        HlsResourceDialog,
         MovieSubscriptionDialog,
         NButton,
         NSpin
     },
     data() {
         return {
-            kind: 'hls',
             loading: false,
+            firstActivate: true,
+            loadError: '',
             settingsDialog: false,
             settingsMovie: null,
             settingsResubscribe: false,
+            hlsDialog: false,
+            hlsMovie: null,
             rows: [],
-            magnetsOpen: 0,
+            magnetsOpen: '',
             magnets: [],
-            checking: 0,
+            checking: '',
             downloading: 0
         }
     },
     async mounted() {
         await this.reload()
     },
+    async activated() {
+        if (this.firstActivate) {
+            this.firstActivate = false
+            return
+        }
+        await this.reload()
+    },
     methods: {
+        isHls(item) { return item.source === 'dytt' },
         async reload() {
             this.loading = true
             try {
-                const list = await GetSubscriptions()
-                this.rows = Array.isArray(list) ? list : []
+                const [movie, hls] = await Promise.allSettled([GetSubscriptions(true), GetHlsSubscriptions()])
+                const movieRows = movie.status === 'fulfilled' ? movie.value : this.rows.filter(item => !this.isHls(item))
+                const hlsRows = hls.status === 'fulfilled' ? hls.value : this.rows.filter(item => this.isHls(item))
+                this.rows = mergeSubscriptions(movieRows, hlsRows)
+                const failed = []
+                if (movie.status === 'rejected') failed.push('电影港')
+                if (hls.status === 'rejected') failed.push('电影天堂')
+                this.loadError = failed.length ? failed.join('、') + '订阅加载失败，请刷新重试。' : ''
             } finally {
                 this.loading = false
             }
         },
         metaOf(item) {
-            const parts = [item.year, item.origin, item.genre].filter(Boolean)
+            const parts = (this.isHls(item)
+                ? [item.year, '第 ' + item.season + ' 季', item.sourceName]
+                : [item.year, item.origin, item.genre]).filter(Boolean)
             return parts.length ? parts.join(' / ') : '—'
         },
         async check(item) {
-            this.checking = item.id
+            this.checking = item.subscriptionKey
             try {
-                const result = await CheckSubscription(item.id)
+                const result = await (this.isHls(item) ? CheckHlsSubscription(item.id) : CheckSubscription(item.id))
                 window.$message?.success(result && result.message ? result.message : '巡检完成')
-                await this.reload()
             } catch (e) {
                 // 拦截器已提示
             } finally {
-                this.checking = 0
+                this.checking = ''
+                await this.reload()
             }
         },
         async toggleMagnets(item) {
-            if (this.magnetsOpen === item.id) {
-                this.magnetsOpen = 0
+            if (this.magnetsOpen === item.subscriptionKey) {
+                this.magnetsOpen = ''
                 return
             }
-            this.magnetsOpen = item.id
+            this.magnetsOpen = item.subscriptionKey
             this.magnets = []
             const list = await SubscriptionMagnets(item.id)
-            this.magnets = Array.isArray(list) ? list : []
+            if (this.magnetsOpen === item.subscriptionKey) this.magnets = Array.isArray(list) ? list : []
         },
         /** 手动下载订阅库里的一条磁力：与订阅巡检共用后端逻辑（目录 / 剧名 / 通知一致） */
         async downloadMagnet(m) {
@@ -179,11 +208,22 @@ export default {
             }
         },
         async unsubscribe(item) {
+            if (this.isHls(item)) {
+                await EnableHlsSubscription(item.id, false)
+                window.$message?.success('已暂停追更，正在下载的剧集会继续完成，本地文件保留')
+                await this.reload()
+                return
+            }
             await UnsubscribeMovie(item.id)
             window.$message?.success('已取消订阅，历史磁力与下载记录仍保留')
             await this.reload()
         },
         openSettings(item = null, resubscribe = false) {
+            if (item && this.isHls(item)) {
+                this.hlsMovie = item
+                this.hlsDialog = true
+                return
+            }
             this.settingsMovie = item ? {
                 id: item.resId, title: item.title, year: item.year, origin: item.origin,
                 genre: item.genre, cover: item.cover, url: item.detailUrl
@@ -191,7 +231,13 @@ export default {
             this.settingsResubscribe = resubscribe
             this.settingsDialog = true
         },
-        resubscribe(item) {
+        async resubscribe(item) {
+            if (this.isHls(item)) {
+                await EnableHlsSubscription(item.id, true)
+                window.$message?.success('已恢复追更')
+                await this.reload()
+                return
+            }
             this.openSettings(item, true)
         },
         remove(item) {
@@ -216,6 +262,15 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 18px;
+}
+
+.subs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-3);
 }
 
 .empty {
@@ -293,6 +348,18 @@ export default {
 .badge.off {
     color: var(--text-3);
     border-color: var(--line-2);
+}
+
+.badge.source {
+    color: #A5B4FC;
+    border-color: rgba(99, 102, 241, .4);
+    background: rgba(99, 102, 241, .12);
+}
+
+.badge.source.dytt {
+    color: #7DD3FC;
+    border-color: rgba(14, 165, 233, .4);
+    background: rgba(14, 165, 233, .12);
 }
 
 .meta {

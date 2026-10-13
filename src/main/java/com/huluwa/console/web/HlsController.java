@@ -42,6 +42,10 @@ public class HlsController {
     public ApiResult<Map<String, Object>> subscribe(@RequestBody HlsRequests.Subscription body) {
         return ApiResult.ok(subscriptions.subscribe(body));
     }
+    @PostMapping("/subscriptions/quick")
+    public ApiResult<Map<String, Object>> quickSubscribe(@RequestBody HlsRequests.QuickSubscription body) {
+        return ApiResult.ok(subscriptions.quickSubscribe(body));
+    }
     @PostMapping("/subscriptions/{id}/check")
     public ApiResult<Map<String, Object>> check(@PathVariable long id) { return ApiResult.ok(subscriptions.check(id)); }
     @PostMapping("/subscriptions/{id}/enabled")

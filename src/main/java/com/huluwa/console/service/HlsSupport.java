@@ -24,6 +24,7 @@ public final class HlsSupport {
     private static final Pattern EPISODE = Pattern.compile("(?i)(?:S\\d{1,3}E|(?:^|[ ._-])EP?)(\\d{1,4})(?!\\d)");
     private static final Pattern CHINESE_EPISODE = Pattern.compile("第\\s*([0-9零〇一二两三四五六七八九十百千]+)\\s*[集话期]");
     private static final Pattern NUMBER = Pattern.compile("^(\\d{1,4})(?:集|话|期)?$");
+    private static final Pattern SEASON = Pattern.compile("(?i)第\\s*([0-9零〇一二两三四五六七八九十百千]+)\\s*季|(?:\\bSeason\\s+|\\bS)(\\d{1,3})(?!\\d)");
     private HlsSupport() { }
 
     public static String now() { return LocalDateTime.now(ZoneId.of("Asia/Shanghai")).format(TIME); }
@@ -121,6 +122,19 @@ public final class HlsSupport {
     }
     public static String filename(String title, int season, int episode) {
         return safeName(title) + String.format(" S%02dE%02d", season, episode);
+    }
+    /** 一键订阅只识别显式季号；作品名称中的普通数字保留。 */
+    public static int defaultSeason(String title) {
+        var match = SEASON.matcher(text(title));
+        if (!match.find()) return 1;
+        int season = match.group(1) == null ? Integer.parseInt(match.group(2)) : chineseNumber(match.group(1));
+        return season > 0 && season <= 999 ? season : 1;
+    }
+    public static String defaultTitle(String title) {
+        String name = text(title).trim().replaceAll("[（(\\[]?\\s*(?:更新至|更新到|全)\\s*(?:第\\s*)?\\d+\\s*集.*$", "");
+        name = SEASON.matcher(name).replaceAll("").replaceAll("[（(\\[]\\s*[）)\\]]", "")
+                .replaceAll("^[\\s._-]+|[\\s._-]+$", "");
+        return safeName(name.isBlank() ? title : name);
     }
     public static String seriesKey(String provider, String resourceId, String title, String year) {
         String identity = resourceId != null && !resourceId.isBlank()

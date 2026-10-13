@@ -11,8 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,6 +64,37 @@ public class HlsSubscriptionService {
 
     public synchronized Map<String, Object> subscribe(HlsRequests.Subscription body) {
         downloads.requireEnvironment();
+        return saveSubscription(body, source.detail(HlsSupport.providerUrl(body.apiUrl()), HlsSupport.resourceId(body.resId())));
+    }
+
+    /** 卡片只提交作品身份，参数从完整资源目录生成；再次点击保留原有订阅设置。 */
+    public synchronized Map<String, Object> quickSubscribe(HlsRequests.QuickSubscription body) {
+        downloads.requireEnvironment();
+        String api = HlsSupport.providerUrl(body.apiUrl());
+        String resId = HlsSupport.resourceId(body.resId());
+        String key = HlsSupport.seriesKey(api, resId, "", "");
+        List<Map<String, Object>> existing = db.queryForList(
+                "SELECT * FROM hls_subscription WHERE series_key = ? ORDER BY enabled DESC, season, id LIMIT 1", key);
+        if (!existing.isEmpty()) {
+            Map<String, Object> saved = existing.getFirst();
+            boolean paused = HlsSupport.number(saved.get("enabled")) == 0;
+            Map<String, Object> subscription = paused ? enabled(HlsSupport.number(saved.get("id")), true) : view(saved);
+            return Map.of("subscription", subscription, "message", paused ? "已恢复订阅，继续使用原有设置" : "已订阅，继续使用原有设置");
+        }
+        DyttSearchService.DyttItem detail = source.detail(api, resId);
+        int season = HlsSupport.defaultSeason(detail.title());
+        DyttSearchService.PlaySource selected = detail.playSources().stream()
+                .sorted(Comparator.comparing(candidate -> !candidate.name().toLowerCase(Locale.ROOT).contains("m3u8")))
+                .filter(candidate -> {
+                    try { return !episodes(candidate, season).isEmpty(); }
+                    catch (BusinessException e) { return false; }
+                }).findFirst().orElseThrow(() -> new BusinessException(400, "该资源暂没有可自动下载的正片剧集线路"));
+        String year = HlsSupport.text(detail.year()).matches("[12][0-9]{3}") ? detail.year() : "";
+        return saveSubscription(new HlsRequests.Subscription(api, resId, HlsSupport.defaultTitle(detail.title()),
+                year, season, selected.name(), 60, 1, true, detail.url(), null, null, false), detail);
+    }
+
+    private Map<String, Object> saveSubscription(HlsRequests.Subscription body, DyttSearchService.DyttItem detail) {
         String api = HlsSupport.providerUrl(body.apiUrl());
         String resId = HlsSupport.resourceId(body.resId());
         String title = HlsSupport.safeName(HlsSupport.required(body.title(), "标准剧名"));
@@ -73,7 +106,6 @@ public class HlsSubscriptionService {
         List<Map<String, Object>> old = db.queryForList("SELECT * FROM hls_subscription WHERE series_key = ? AND season = ?", key, season);
         String previous = old.isEmpty() || Boolean.TRUE.equals(body.clearCookie()) ? null : HlsSupport.text(old.getFirst().get("headers"));
         String headers = HlsSupport.headers(body.referer(), body.userAgent(), body.cookie(), previous);
-        DyttSearchService.DyttItem detail = source.detail(api, resId);
         DyttSearchService.PlaySource selected = HlsDownloadService.selectSource(detail, body.sourceName());
         Map<Integer, DyttSearchService.PlayItem> episodes = episodes(selected, season);
         if (episodes.isEmpty()) throw new BusinessException(400, "该线路没有可识别季集编号的正片，请选择剧集资源");

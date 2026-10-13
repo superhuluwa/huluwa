@@ -52,6 +52,8 @@ public class HlsDownloadService implements ApplicationRunner {
     private volatile boolean ready;
     private volatile boolean stopping;
     private volatile Process activeProcess;
+    private record ActiveProgress(long taskId, HlsDownloadProgress progress) { }
+    private volatile ActiveProgress activeProgress;
 
     public HlsDownloadService(JdbcTemplate db, ConfigService config, HlsProperties paths,
                               DyttSearchService source, HlsNoticeService notices, ObjectMapper json) {
@@ -98,7 +100,7 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     public List<Map<String, Object>> list() {
-        return db.queryForList("""
+        List<Map<String, Object>> tasks = db.queryForList("""
                 SELECT t.id, t.subscription_id AS subscriptionId, t.series_title AS seriesTitle,
                        t.season, t.episode, t.episode_title AS episodeTitle, t.source_name AS sourceName,
                        t.status, t.attempts, t.next_attempt_at AS nextAttemptAt, t.save_path AS savePath,
@@ -107,6 +109,22 @@ public class HlsDownloadService implements ApplicationRunner {
                   FROM hls_download_task t LEFT JOIN hls_subscription s ON s.id = t.subscription_id
                  ORDER BY t.id DESC LIMIT 500
                 """);
+        ActiveProgress active = activeProgress;
+        for (Map<String, Object> task : tasks) {
+            String status = HlsSupport.text(task.get("status"));
+            boolean running = status.equals("downloading") || status.equals("verifying");
+            HlsDownloadProgress.Snapshot progress = running && active != null
+                    && active.taskId() == HlsSupport.number(task.get("id")) ? active.progress().snapshot() : null;
+            Double percent = null;
+            if (status.equals("completed")) percent = 100d;
+            else if (status.equals("verifying")) percent = 99d;
+            else if (progress != null) percent = progress.percent();
+            task.put("progressPercent", percent);
+            task.put("downloadSpeed", status.equals("downloading") && progress != null ? progress.speed() : "");
+            task.put("phase", status.equals("verifying") ? "verifying"
+                    : status.equals("downloading") ? progress == null ? "parsing" : progress.phase() : status);
+        }
+        return tasks;
     }
 
     /** 仅返回归属于该任务的脱敏日志尾部，不接受客户端传入文件路径。 */
@@ -257,6 +275,8 @@ public class HlsDownloadService implements ApplicationRunner {
         int season = (int) HlsSupport.number(task.get("season"));
         int episode = (int) HlsSupport.number(task.get("episode"));
         String name = HlsSupport.filename(title, season, episode);
+        ActiveProgress progress = new ActiveProgress(id, new HlsDownloadProgress());
+        activeProgress = progress;
         try {
             requireEnvironment();
             Settings settings = settings();
@@ -292,7 +312,7 @@ public class HlsDownloadService implements ApplicationRunner {
             Map<String, String> headers = HlsSupport.headerMap(HlsSupport.text(task.get("headers")));
             headers.forEach((key, value) -> { command.add("--header"); command.add(key + ": " + value); });
             if (!settings.maxSpeed().isBlank()) { command.add("--max-speed"); command.add(settings.maxSpeed()); }
-            execute(command, attempt, taskLog, settings.timeoutMinutes(), headers);
+            execute(command, attempt, taskLog, settings.timeoutMinutes(), headers, progress.progress());
             if (stopping) throw new InterruptedException();
             db.update("UPDATE hls_download_task SET status = 'verifying', updated_at = ? WHERE id = ?", HlsSupport.now(), id);
             List<Path> results;
@@ -323,6 +343,8 @@ public class HlsDownloadService implements ApplicationRunner {
                     """, failed ? "failed" : "pending", message,
                     failed ? null : HlsSupport.afterMinutes(Math.min(60, 5L << Math.min(attempts - 1, 4))), HlsSupport.now(), id);
             if (failed) notices.publish("剧集下载失败", name + "：" + message, true);
+        } finally {
+            activeProgress = null;
         }
     }
 
@@ -366,7 +388,8 @@ public class HlsDownloadService implements ApplicationRunner {
         return year;
     }
 
-    private void execute(List<String> command, Path directory, Path taskLog, int timeout, Map<String, String> secrets) throws Exception {
+    private void execute(List<String> command, Path directory, Path taskLog, int timeout, Map<String, String> secrets,
+                         HlsDownloadProgress progress) throws Exception {
         Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
         activeProcess = process;
         process.getOutputStream().close();
@@ -379,6 +402,7 @@ public class HlsDownloadService implements ApplicationRunner {
                 long logged = 0;
                 try {
                     while ((line = input.readLine()) != null) {
+                        progress.accept(line);
                         // 日志无法写入或达到上限后仍消费管道，防止下载进程阻塞。
                         if (output == null || logged > 4_000_000) continue;
                         for (String secret : secrets.values()) if (secret.length() >= 4) line = line.replace(secret, "[已隐藏]");

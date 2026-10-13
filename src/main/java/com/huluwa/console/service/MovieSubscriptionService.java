@@ -79,7 +79,8 @@ public class MovieSubscriptionService {
     /** 订阅条目视图（订阅列表 / 搜索结果卡片上的按钮状态） */
     public record Subscription(long id, String resId, String title, String year, String origin, String genre,
                                String cover, String detailUrl, boolean enabled, int magnetCount,
-                               String baselineAt, String lastCheckAt, String nextCheckAt, String lastError, String downloader) {
+                               String baselineAt, String lastCheckAt, String nextCheckAt, String lastError, String downloader,
+                               String createdAt) {
     }
 
     /**
@@ -1264,7 +1265,7 @@ public class MovieSubscriptionService {
                 string(row.get("cover")), string(row.get("detail_url")), number(row.get("enabled")) == 1,
                 count == null ? 0 : count.intValue(), string(row.get("baseline_at")),
                 string(row.get("last_check_at")), string(row.get("next_check_at")), string(row.get("last_error")),
-                subscriptionDownloader(row));
+                subscriptionDownloader(row), string(row.get("created_at")));
     }
 
     /** 描述一条磁力（用于通知 / 下载列表）：集号 + 清晰度 + 标题 */

@@ -472,11 +472,15 @@ public class ChatService {
         int shown = Math.min(found.size(), DYTT_SHOW_MAX);
         replies.add(append(sessionId, "bot", "text",
                 "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
-                        + "点卡片下方「播放地址」可查看在线线路（复制链接即可播放）。", null, null));
+                        + "点卡片下方「订阅」即可自动下载并追更，也可查看播放地址。", null, null));
+        List<String> subscribed = jdbcTemplate.queryForList(
+                "SELECT res_id FROM hls_subscription WHERE api_url = ? AND enabled = 1", String.class, HlsSupport.providerUrl(null));
         for (int i = 0; i < shown; i++) {
             DyttSearchService.DyttItem item = found.get(i);
             String caption = dyttCaption(item);
-            String payload = toJson(dyttSearchService.toPayload(item));
+            Map<String, Object> payloadMap = dyttSearchService.toPayload(item);
+            payloadMap.put("subscribed", subscribed.contains(item.id()));
+            String payload = toJson(payloadMap);
             if (item.cover() == null || item.cover().isBlank()) {
                 replies.add(append(sessionId, "bot", "text", caption, null, payload));
             } else {

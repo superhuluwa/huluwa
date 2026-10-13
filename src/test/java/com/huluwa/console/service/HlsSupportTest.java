@@ -7,6 +7,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class HlsSupportTest {
     @Test
+    void oneClickDefaultsRecognizeSeasonsAndKeepDigitsInSeriesNames() {
+        assertEquals(2, HlsSupport.defaultSeason("剧名（第二季）更新至第03集"));
+        assertEquals("剧名", HlsSupport.defaultTitle("剧名（第二季）更新至第03集"));
+        assertEquals(3, HlsSupport.defaultSeason("剧名 Season 3"));
+        assertEquals("剧名", HlsSupport.defaultTitle("剧名 S03"));
+        assertEquals(1, HlsSupport.defaultSeason("庆余年2"));
+        assertEquals("庆余年2", HlsSupport.defaultTitle("庆余年2"));
+        assertEquals("剧名", HlsSupport.defaultTitle("剧名（全12集）"));
+    }
+
+    @Test
     void recognizesExplicitNumbersAndRejectsExtrasAndCombinedEpisodes() {
         assertEquals(2, HlsSupport.episodeNumber("第02集"));
         assertEquals(123, HlsSupport.episodeNumber("第一百二十三集"));

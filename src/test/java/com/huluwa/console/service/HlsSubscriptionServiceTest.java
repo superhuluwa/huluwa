@@ -63,6 +63,53 @@ class HlsSubscriptionServiceTest {
     }
 
     @Test
+    void oneClickSubscribeQueuesExistingEpisodesWithAutomaticDefaults() {
+        DyttSearchService.DyttItem original = detail(65, "old");
+        when(source.detail(anyString(), anyString())).thenReturn(new DyttSearchService.DyttItem(
+                original.id(), "剧名（第二季）更新至第65集", "2026", "", "", "", "https://dyttzyw.com/series/42", "", "",
+                original.playSources()));
+        Map<?, ?> subscription = (Map<?, ?>) subscriptions.quickSubscribe(new HlsRequests.QuickSubscription(null, "42")).get("subscription");
+        assertEquals("剧名", subscription.get("title"));
+        assertEquals(2L, HlsSupport.number(subscription.get("season")));
+        assertEquals(60L, HlsSupport.number(subscription.get("intervalMinutes")));
+        assertEquals(1L, HlsSupport.number(subscription.get("fromEpisode")));
+        assertEquals("m3u8", subscription.get("sourceName"));
+        assertEquals(65, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
+        verify(source, times(1)).detail(anyString(), anyString());
+    }
+
+    @Test
+    void oneClickSubscribeRestoresExistingSettingsWithoutResettingHistory() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(2, "old"));
+        long id = subscribe(false, 2);
+        subscriptions.enabled(id, false);
+        db.update("UPDATE hls_subscription SET interval_minutes = 180 WHERE id = ?", id);
+        String created = db.queryForObject("SELECT created_at FROM hls_subscription WHERE id = ?", String.class, id);
+        clearInvocations(source);
+        Map<?, ?> subscription = (Map<?, ?>) subscriptions.quickSubscribe(new HlsRequests.QuickSubscription(null, "42")).get("subscription");
+        assertEquals(id, HlsSupport.number(subscription.get("id")));
+        assertEquals(true, subscription.get("enabled"));
+        assertEquals(180L, HlsSupport.number(subscription.get("intervalMinutes")));
+        assertEquals(2L, HlsSupport.number(subscription.get("fromEpisode")));
+        assertEquals(created, subscription.get("createdAt"));
+        assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'skipped'", Integer.class));
+        verifyNoInteractions(source);
+    }
+
+    @Test
+    void oneClickSubscribeFallsBackFromAnUnusableLine() {
+        DyttSearchService.DyttItem original = detail(2, "old");
+        when(source.detail(anyString(), anyString())).thenReturn(new DyttSearchService.DyttItem(
+                original.id(), original.title(), "未知", "", "", "", "", "", "", List.of(
+                new DyttSearchService.PlaySource("first-m3u8", 1, List.of(new DyttSearchService.PlayItem("预告第01集", "https://cdn.example/trailer.m3u8"))),
+                original.playSources().getFirst())));
+        Map<?, ?> subscription = (Map<?, ?>) subscriptions.quickSubscribe(new HlsRequests.QuickSubscription(null, "42")).get("subscription");
+        assertEquals("m3u8", subscription.get("sourceName"));
+        assertEquals("", subscription.get("year"));
+        assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
+    }
+
+    @Test
     void onlyFutureEpisodesAreQueuedWhenExistingDownloadsAreDisabled() {
         when(source.detail(anyString(), anyString())).thenReturn(detail(2, "old"));
         long id = subscribe(false, 1);

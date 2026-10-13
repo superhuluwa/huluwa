@@ -59,8 +59,10 @@
                             rel="noopener">
                             <i class="fa-solid fa-up-right-from-square"></i>详情页
                         </a>
-                        <button class="subscribe-btn" type="button" @click="hlsDialog = true">
-                            <i class="fa-regular fa-bell"></i>订阅离线追更
+                        <button class="subscribe-btn" type="button" :class="{ subscribed, busy }"
+                            :disabled="subscribed || busy" @click="onHlsSubscribe">
+                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            {{ subscribed ? '已订阅' : busy ? '订阅中…' : '订阅' }}
                         </button>
                         <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
@@ -96,8 +98,10 @@
                             rel="noopener">
                             <i class="fa-solid fa-up-right-from-square"></i>详情页
                         </a>
-                        <button class="subscribe-btn" type="button" @click="hlsDialog = true">
-                            <i class="fa-regular fa-bell"></i>订阅离线追更
+                        <button class="subscribe-btn" type="button" :class="{ subscribed, busy }"
+                            :disabled="subscribed || busy" @click="onHlsSubscribe">
+                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            {{ subscribed ? '已订阅' : busy ? '订阅中…' : '订阅' }}
                         </button>
                         <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
@@ -117,7 +121,6 @@
     <!-- 电影天堂播放地址弹窗：卡片载荷里的在线线路，点击复制 m3u8 直链 -->
     <PlaySourceDialog v-model:show="playDialog" :title="parsedPayload.title || ''"
         :sources="parsedPayload.playSources || []" :movie="parsedPayload" />
-    <HlsResourceDialog v-model:show="hlsDialog" :movie="parsedPayload" />
 
     <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」使用本剧选择的下载工具 -->
     <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
@@ -138,14 +141,14 @@ import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
 import PlaySourceDialog from './PlaySourceDialog.vue'
-import HlsResourceDialog from './HlsResourceDialog.vue'
 import MovieSearchWatchAction from './MovieSearchWatchAction.vue'
 import { PreviewMagnets } from '@/api/chat'
+import { QuickSubscribeHls } from '@/api/hls'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, HlsResourceDialog, MovieSearchWatchAction },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
     props: {
         message: {
             type: Object,
@@ -167,8 +170,7 @@ export default {
             /** 磁力列表弹窗状态 */
             magnetDialog: { show: false, url: '', title: '' },
             /** 电影天堂播放地址弹窗状态 */
-            playDialog: false,
-            hlsDialog: false
+            playDialog: false
         }
     },
     computed: {
@@ -380,6 +382,19 @@ export default {
                 return
             }
             this.subscriptionDialog = true
+        },
+        async onHlsSubscribe() {
+            if (this.subscribed || this.busy) return
+            this.busy = true
+            try {
+                const result = await QuickSubscribeHls({ resId: String(this.parsedPayload.id || ''), apiUrl: this.parsedPayload.apiUrl })
+                this.onSubscriptionSaved(result)
+                window.$message?.success(result.message || '已订阅，剧集将自动下载')
+            } catch (error) {
+                // 请求拦截器已提示，失败后仍可再次点击订阅。
+            } finally {
+                this.busy = false
+            }
         },
         onSubscriptionSaved(result) {
             this.subscribedLocal = !!result.subscription?.enabled
