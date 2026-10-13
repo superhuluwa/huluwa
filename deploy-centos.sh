@@ -26,7 +26,14 @@ case "${DATA_DIR}" in
 esac
 log "数据目录：${DATA_DIR}"
 mkdir -p "${DATA_DIR}"
+MEDIA_DIR="$(grep -E '^HULUWA_MEDIA_DIR=' .env | tail -n1 | cut -d= -f2- || true)"
+MEDIA_DIR="${MEDIA_DIR:-./data/media}"
+mkdir -p "${MEDIA_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
+# 默认媒体目录位于数据目录内；外部共享目录通过 ACL 授权当前目录，不递归修改属主。
+if command -v setfacl >/dev/null 2>&1; then
+  setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}" || true
+fi
 
 # Frp 管理：宿主机 frpc.ini 目录（compose 挂载到容器 /app/frp）
 FRP_DIR_DEFAULT="/root/frp"

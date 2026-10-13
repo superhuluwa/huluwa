@@ -227,3 +227,56 @@ VALUES (2, datetime('now', 'localtime'));
 -- v3：WebSocket 聊天请求幂等 / 恢复表
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (3, datetime('now', 'localtime'));
+
+-- HLS 订阅与剧集任务：剧集发现、首次跳过和下载状态共用一条稳定记录。
+CREATE TABLE IF NOT EXISTS hls_subscription (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_key TEXT NOT NULL,
+    api_url TEXT NOT NULL,
+    res_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    year TEXT,
+    season INTEGER NOT NULL,
+    source_name TEXT NOT NULL,
+    interval_minutes INTEGER NOT NULL DEFAULT 60,
+    from_episode INTEGER NOT NULL DEFAULT 1,
+    headers TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    initialized INTEGER NOT NULL DEFAULT 0,
+    last_check_at TEXT,
+    next_check_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(series_key, season)
+);
+CREATE INDEX IF NOT EXISTS idx_hls_subscription_due ON hls_subscription(enabled, next_check_at);
+
+CREATE TABLE IF NOT EXISTS hls_download_task (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscription_id INTEGER REFERENCES hls_subscription(id),
+    series_key TEXT NOT NULL,
+    api_url TEXT,
+    res_id TEXT,
+    series_title TEXT NOT NULL,
+    year TEXT,
+    season INTEGER NOT NULL,
+    episode INTEGER NOT NULL,
+    episode_title TEXT,
+    source_name TEXT,
+    url TEXT NOT NULL,
+    headers TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- pending|downloading|verifying|completed|failed|skipped
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    save_path TEXT,
+    log_path TEXT,
+    message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE(series_key, season, episode)
+);
+CREATE INDEX IF NOT EXISTS idx_hls_task_due ON hls_download_task(status, next_attempt_at, id);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (4, datetime('now', 'localtime'));

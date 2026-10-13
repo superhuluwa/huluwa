@@ -48,7 +48,7 @@ export function CancelMovieSearchWatch(id) {
     return http.delete('/chat/movie-search-watches/' + id, { silent: true })
 }
 
-// ------------------------------------------------------------------ 电影港订阅
+// ------------------------------------------------------------------ 我的订阅 / 我的下载
 
 /** 已订阅的详情页地址集合（搜索结果卡片据此渲染「已订阅」） */
 export function GetSubscriptionUrls() {

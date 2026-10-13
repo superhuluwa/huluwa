@@ -37,6 +37,7 @@
                     <template #icon><i class="fa-regular fa-copy"></i></template>
                     复制
                 </n-button>
+                <n-button v-if="movie && isM3u8(item.url)" size="tiny" @click="download(item)">离线下载</n-button>
             </div>
             <div v-if="current.truncated" class="ps-more">
                 该线路剧集较多，仅展示前 {{ current.items.length }} 条；完整列表见详情页
@@ -45,27 +46,30 @@
 
         <template #footer>
             <div class="ps-footer">
-                <span class="ps-foot-tip">电影天堂资源为在线播放，不参与订阅下载</span>
+                <span class="ps-foot-tip">可订阅追更或按集下载到飞牛影视目录</span>
                 <n-button size="small" @click="visible = false">关闭</n-button>
             </div>
         </template>
     </n-modal>
+    <HlsResourceDialog v-model:show="downloadDialog" mode="download" :movie="movie" :play="selectedPlay" :source-name="current.name" />
 </template>
 
 <script>
 import { NButton, NModal } from 'naive-ui'
+import HlsResourceDialog from './HlsResourceDialog.vue'
 
 /**
  * 播放地址弹窗（电影天堂搜索结果卡片的「播放地址」按钮）：
  *  - 数据来自卡片载荷里的 playSources（MacCMS 采集接口的 vod_play_from / vod_play_url）；
  *  - 多线路（dytt / dyttm3u8 等）用标签页切换，默认第一条；
  *  - 每行「复制」把 m3u8 直链写入剪贴板，配合本地播放器使用；
- *  - 电影天堂只有在线资源（无磁力），因此不接入订阅下载链路。
+ *  - m3u8 线路可将单集提交到独立离线下载队列。
  */
 export default {
-    components: { NButton, NModal },
+    components: { NButton, NModal, HlsResourceDialog },
     name: 'PlaySourceDialog',
     props: {
+        movie: { type: Object, default: null },
         show: {
             type: Boolean,
             default: false
@@ -83,7 +87,9 @@ export default {
     emits: ['update:show'],
     data() {
         return {
-            activeIndex: 0
+            activeIndex: 0,
+            downloadDialog: false,
+            selectedPlay: null
         }
     },
     computed: {
@@ -111,6 +117,8 @@ export default {
         }
     },
     methods: {
+        isM3u8(url) { return /\.m3u8(?:[?#]|$)/i.test(url || '') },
+        download(item) { this.selectedPlay = item; this.downloadDialog = true },
         async copy(url) {
             if (!url) {
                 return

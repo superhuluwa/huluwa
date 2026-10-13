@@ -14,12 +14,16 @@ services:
     environment:
       # docker-java SDK 直连宿主机 Docker 守护进程，无需容器内安装 docker CLI。
       DOCKER_HOST: unix:///var/run/docker.sock
+      HULUWA_HLS_MEDIA_ROOT: /media
     # 容器进程以 10001:10001 运行，需加入 socket 所属组才能访问。
     # 取值命令：stat -c '%g' /var/run/docker.sock（CentOS 常见 999 或 994）
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:
       - ${HULUWA_DATA_DIR:-./data}:/app/data
+      # HLS 临时分片与正式影视目录共用同一挂载，便于完成后原子归档。
+      # 飞牛影视只添加此根目录下的“电视剧”子目录。
+      - ${HULUWA_MEDIA_DIR:-./data/media}:/media
       # 管理宿主机上的容器 / 镜像 / 网络 / 卷。
       # :z 用于 CentOS 默认的 SELinux enforcing 重新标记。
       - /var/run/docker.sock:/var/run/docker.sock:z

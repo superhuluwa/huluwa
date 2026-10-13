@@ -59,7 +59,10 @@
                             rel="noopener">
                             <i class="fa-solid fa-up-right-from-square"></i>详情页
                         </a>
-                        <span class="subscribe-tip">在线资源，点击按钮复制播放链接</span>
+                        <button class="subscribe-btn" type="button" @click="hlsDialog = true">
+                            <i class="fa-regular fa-bell"></i>订阅离线追更
+                        </button>
+                        <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
                 </template>
                 <!-- 视频气泡（视频解析会话）：封面 + 内联播放，点按在气泡内播放 -->
@@ -93,7 +96,10 @@
                             rel="noopener">
                             <i class="fa-solid fa-up-right-from-square"></i>详情页
                         </a>
-                        <span class="subscribe-tip">在线资源，点击按钮复制播放链接</span>
+                        <button class="subscribe-btn" type="button" @click="hlsDialog = true">
+                            <i class="fa-regular fa-bell"></i>订阅离线追更
+                        </button>
+                        <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
                 </template>
             </div>
@@ -110,7 +116,8 @@
 
     <!-- 电影天堂播放地址弹窗：卡片载荷里的在线线路，点击复制 m3u8 直链 -->
     <PlaySourceDialog v-model:show="playDialog" :title="parsedPayload.title || ''"
-        :sources="parsedPayload.playSources || []" />
+        :sources="parsedPayload.playSources || []" :movie="parsedPayload" />
+    <HlsResourceDialog v-model:show="hlsDialog" :movie="parsedPayload" />
 
     <!-- 磁力列表弹窗：详情页实时抓取，行内「下载」使用本剧选择的下载工具 -->
     <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
@@ -131,13 +138,14 @@ import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
 import PlaySourceDialog from './PlaySourceDialog.vue'
+import HlsResourceDialog from './HlsResourceDialog.vue'
 import MovieSearchWatchAction from './MovieSearchWatchAction.vue'
 import { PreviewMagnets } from '@/api/chat'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
+    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, HlsResourceDialog, MovieSearchWatchAction },
     props: {
         message: {
             type: Object,
@@ -159,7 +167,8 @@ export default {
             /** 磁力列表弹窗状态 */
             magnetDialog: { show: false, url: '', title: '' },
             /** 电影天堂播放地址弹窗状态 */
-            playDialog: false
+            playDialog: false,
+            hlsDialog: false
         }
     },
     computed: {

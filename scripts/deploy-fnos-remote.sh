@@ -10,12 +10,12 @@
 #   5. 校验容器内可访问宿主机 Docker socket、等待健康检查通过
 #
 # 用法：
-#   sudo bash deploy-fnos-remote.sh APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER
+#   sudo bash deploy-fnos-remote.sh APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [MEDIA_DIR]
 
 set -euo pipefail
 
-if [ "$#" -ne 7 ]; then
-  echo "用法: sudo bash $0 APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER" >&2
+if [ "$#" -ne 7 ] && [ "$#" -ne 8 ]; then
+  echo "用法: sudo bash $0 APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [MEDIA_DIR]" >&2
   exit 2
 fi
 
@@ -30,6 +30,16 @@ DEPLOY_USER="$7"
 SRC_DIR="${APP_DIR}/src"
 TARBALL="/tmp/huluwa-src.tar.gz"
 BUILD_LOG="/tmp/huluwa-build.log"
+MEDIA_DIR="${8:-${HULUWA_MEDIA_DIR:-}}"
+# 源码目录随后会被替换，提前保留用户上次配置的媒体挂载路径。
+if [ -z "$MEDIA_DIR" ] && [ -f "${SRC_DIR}/.env" ]; then
+  MEDIA_DIR="$(sed -n 's/^HULUWA_MEDIA_DIR=//p' "${SRC_DIR}/.env" | tail -n 1)"
+fi
+MEDIA_DIR="${MEDIA_DIR:-${DATA_DIR}/media}"
+case "$MEDIA_DIR" in
+  /*) ;;
+  *) printf '飞牛媒体目录必须是绝对路径：%s\n' "$MEDIA_DIR" >&2; exit 2 ;;
+esac
 
 log()  { printf '\033[36m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*"; }
 warn() { printf '\033[33m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*" >&2; }
@@ -78,9 +88,19 @@ if grep -q '^# syntax=docker/dockerfile:1' Dockerfile; then
 fi
 
 # ---------- 3. 数据目录 ----------
-mkdir -p "${DATA_DIR}"
+mkdir -p "${DATA_DIR}" "${MEDIA_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
 log "数据目录：${DATA_DIR}（属主 10001:10001 -> 容器内 /app/data）"
+# 共享媒体根目录仅授予当前目录及新建内容的权限，不递归改变共享媒体属主。
+if command -v setfacl >/dev/null 2>&1; then
+  setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}" || warn "媒体根目录授权失败，请在飞牛上设置 uid 10001 写权限"
+  if [ -d "${MEDIA_DIR}/电视剧" ]; then
+    setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}/电视剧" || warn "已有电视剧目录授权失败"
+  fi
+else
+  warn "请确认媒体目录 ${MEDIA_DIR} 可由 uid 10001 写入"
+fi
+log "媒体目录：${MEDIA_DIR}（容器内 /media，飞牛影视添加其电视剧子目录）"
 
 # ---------- 4. Frp 配置目录 ----------
 mkdir -p "${FRP_DIR}"
@@ -105,6 +125,7 @@ cat > .env <<ENV
 HULUWA_BIND_ADDRESS=0.0.0.0
 HULUWA_PORT=${HOST_PORT}
 HULUWA_DATA_DIR=${DATA_DIR}
+HULUWA_MEDIA_DIR=${MEDIA_DIR}
 HULUWA_FRP_DIR=${FRP_DIR}
 DOCKER_GID=${SOCKET_GID}
 COMPOSE_PROJECT_NAME=huluwa

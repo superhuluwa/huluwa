@@ -26,7 +26,7 @@ import java.util.Map;
  *   <li>接口返回 UTF-8 JSON（{@code /api.php/provide/vod/?ac=detail&amp;wd=…}），不用解析 HTML；</li>
  *   <li>只接受 GET：实测 POST 会忽略关键字并返回全站列表；</li>
  *   <li>关键字只匹配片名与副标题，不匹配演员；</li>
- *   <li>资源是在线 m3u8（没有磁力链），因此不接入「订阅下载」链路（订阅依赖磁力基线）。</li>
+ *   <li>在线 m3u8 通过独立 HLS 队列订阅下载，磁力订阅仍使用电影港链路。</li>
  * </ul>
  *
  * <p>DNS 投毒：dyttzyw.com 在部分网络被解析到 221.228.32.13（江苏反诈页），
@@ -93,6 +93,15 @@ public class DyttSearchService {
         String url = API_URL + "?ac=detail&wd=" + encode(trimmed) + "&pg=1&pagesize=" + SEARCH_PAGE_SIZE;
         String json = get(url);
         return parse(json);
+    }
+
+    /** 按作品 ID 拉取完整剧集，订阅和下载重试不受卡片展示条数限制。 */
+    public DyttItem detail(String apiUrl, String id) {
+        String provider = HlsSupport.providerUrl(apiUrl);
+        String resource = HlsSupport.resourceId(id);
+        return parse(get(provider + "?ac=detail&ids=" + encode(resource))).stream()
+                .filter(item -> resource.equals(item.id())).findFirst()
+                .orElseThrow(() -> new DyttSearchException("采集接口没有返回该作品，请检查作品 ID", null));
     }
 
     /** 站点详情页地址（卡片配文里的「详情」链接；MacCMS 固定路由） */

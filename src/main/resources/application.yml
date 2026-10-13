@@ -38,6 +38,12 @@ spring:
 
 huluwa:
   data-dir: ./data
+  hls:
+    # 容器媒体根目录；只将其“电视剧”子目录加入飞牛影视媒体库。
+    media-root: ${HULUWA_HLS_MEDIA_ROOT:/media}
+    binary: ${HULUWA_HLS_BINARY:/usr/local/bin/N_m3u8DL-RE}
+    ffmpeg: ${HULUWA_HLS_FFMPEG:/usr/bin/ffmpeg}
+    ffprobe: ${HULUWA_HLS_FFPROBE:/usr/bin/ffprobe}
   movie:
     # 搜索暂无资源时的监听间隔，由后端执行；命中后发送系统通知并结束。
     search-watch-interval-minutes: 30

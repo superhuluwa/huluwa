@@ -23,6 +23,16 @@ COPY --from=frontend-build /workspace/src/main/resources/static/ ./src/main/reso
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -Dmaven.test.skip=true package
 
+# 下载固定版本的原生工具，不执行目标架构二进制。
+FROM --platform=$BUILDPLATFORM ubuntu:24.04 AS hls-tools
+ARG TARGETARCH
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/install-hls-tools.sh /tmp/install-hls-tools.sh
+RUN sed -i 's/\r$//' /tmp/install-hls-tools.sh \
+    && sh /tmp/install-hls-tools.sh "$TARGETARCH"
+
 FROM eclipse-temurin:21-jre-noble AS runtime
 WORKDIR /app
 ENV TZ=Asia/Shanghai \
@@ -32,13 +42,17 @@ ENV TZ=Asia/Shanghai \
     JAVA_TOOL_OPTIONS="-Duser.timezone=Asia/Shanghai"
 
 # Named volumes inherit this directory's ownership on first use.
-RUN groupadd --gid 10001 huluwa \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libicu74 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 huluwa \
     && useradd --uid 10001 --gid huluwa --no-create-home \
         --home-dir /app --shell /usr/sbin/nologin huluwa \
-    && mkdir -p /app/data \
-    && chown huluwa:huluwa /app/data
+    && mkdir -p /app/data /media \
+    && chown huluwa:huluwa /app/data /media
 
 COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
+COPY --from=hls-tools /out/N_m3u8DL-RE /usr/local/bin/N_m3u8DL-RE
 
 USER 10001:10001
 VOLUME ["/app/data"]

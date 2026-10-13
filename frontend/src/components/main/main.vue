@@ -269,11 +269,17 @@ export default {
                         ]),
                         icon: renderIcon('fa-solid fa-comments')
                     },
-                    // 电影港订阅管理：查看片名 / 具体链接 / 每集磁力基线 / 巡检与下载结果
+                    // 我的订阅：查看片名 / 具体链接 / 每集磁力基线 / 巡检状态
                     {
                         key: 'movie-subscriptions',
-                        label: () => h(RouterLink, { to: { name: 'movie-subscriptions' } }, { default: () => '电影港订阅' }),
+                        label: () => h(RouterLink, { to: { name: 'movie-subscriptions' } }, { default: () => '我的订阅' }),
                         icon: renderIcon('fa-solid fa-bell')
+                    },
+                    // 我的下载：订阅巡检 / 手动提交触发的下载任务，与「我的订阅」同级
+                    {
+                        key: 'movie-downloads',
+                        label: () => h(RouterLink, { to: { name: 'movie-downloads' } }, { default: () => '我的下载' }),
+                        icon: renderIcon('fa-solid fa-download')
                     }
                 ]
             }
@@ -284,7 +290,7 @@ export default {
             // 消息中心（会话页）：分组保持展开，便于随时切换会话
             // （用户手动展开其它分组时这里不能把 messages 之外的手动展开态清掉——
             //   accordion 模式下 n-menu 自己只保留一个，这里只需确保当前页所在分组可见）
-            if (currentName === 'messages' || currentName === 'movie-subscriptions') {
+            if (currentName === 'messages' || currentName === 'movie-subscriptions' || currentName === 'movie-downloads') {
                 this.ensureMessagesExpanded()
                 return
             }
@@ -309,7 +315,7 @@ export default {
         handleExpandedChange(keys) {
             // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
             // 会把「消息中心」分组意外收起；会话页要求该分组常开，这里补回。
-            const pinned = this.$route.name === 'messages' || this.$route.name === 'movie-subscriptions'
+            const pinned = this.$route.name === 'messages' || this.$route.name === 'movie-subscriptions' || this.$route.name === 'movie-downloads'
             if (pinned && !keys.includes('messages')) {
                 this.expandedKeys = [...keys, 'messages']
                 return

@@ -1,6 +1,11 @@
 <template>
     <div class="subs-page">
-        <n-spin :show="loading">
+        <n-tabs v-model:value="kind" type="line">
+            <n-tab-pane name="hls" tab="电影天堂离线追更" />
+            <n-tab-pane name="magnet" tab="电影港磁力订阅" />
+        </n-tabs>
+        <HlsSubscriptionsPanel v-if="kind === 'hls'" />
+        <n-spin v-else :show="loading">
             <div v-if="!rows.length" class="empty">
                 还没有订阅。到「消息中心 → 电影港」搜索片名，点结果卡片上的「订阅」即可。
             </div>
@@ -77,80 +82,48 @@
 
         <MovieSubscriptionDialog v-model:show="settingsDialog" :movie="settingsMovie"
             :resubscribe="settingsResubscribe" @saved="reload" />
-
-        <div class="downloads">
-            <div class="downloads-head">
-                <h3>下载任务</h3>
-                <n-button size="tiny" :loading="loadingDownloads" @click="loadDownloads">
-                    <template #icon><i class="fa-solid fa-rotate"></i></template>
-                    刷新
-                </n-button>
-            </div>
-            <div v-if="!downloads.length" class="empty small">还没有订阅触发的下载任务</div>
-            <n-data-table v-else size="small" :columns="downloadColumns" :data="downloads" :bordered="false"
-                :max-height="360" />
-        </div>
     </div>
 </template>
 
 <script>
-import { NButton, NDataTable, NSpin } from 'naive-ui'
+import { NButton, NSpin, NTabPane, NTabs } from 'naive-ui'
 /**
- * 电影港订阅管理：订阅清单（片名 / 具体链接 / 磁力基线 / 巡检状态）+ 订阅触发的下载任务。
+ * 我的订阅：订阅清单（片名 / 具体链接 / 磁力基线 / 巡检状态）。下载记录已独立为同级的「我的下载」页。
  * 订阅动作本身在「消息中心 → 电影港」的结果卡片上完成，本页负责查看与维护。
  */
 import {
     GetSubscriptions, CheckSubscription, UnsubscribeMovie,
-    DeleteSubscription, SubscriptionMagnets, SubscriptionDownloads, DownloadMagnet
+    DeleteSubscription, SubscriptionMagnets, DownloadMagnet
 } from '@/api/chat'
 import MovieSubscriptionDialog from '@/views/message/components/MovieSubscriptionDialog.vue'
-
-const STATUS_LABEL = {
-    pending: '待提交',
-    added: '已提交',
-    downloading: '下载中',
-    completed: '已完成',
-    failed: '失败',
-    removed: '已移除'
-}
+import HlsSubscriptionsPanel from './components/HlsSubscriptionsPanel.vue'
 
 export default {
     name: 'MovieSubscriptions',
     components: {
+        HlsSubscriptionsPanel,
+        NTabs,
+        NTabPane,
         MovieSubscriptionDialog,
         NButton,
-        NDataTable,
         NSpin
     },
     data() {
         return {
+            kind: 'hls',
             loading: false,
             settingsDialog: false,
             settingsMovie: null,
             settingsResubscribe: false,
-            loadingDownloads: false,
             rows: [],
-            downloads: [],
             magnetsOpen: 0,
             magnets: [],
             checking: 0,
-            downloading: 0,
-            downloadColumns: [
-                { title: '剧名', key: 'seriesTitle', ellipsis: { tooltip: true } },
-                { title: '集号', key: 'episode', width: 70 },
-                { title: '清晰度', key: 'quality', width: 90 },
-                { title: '工具', key: 'downloader', width: 100, render: row => row.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' },
-                {
-                    title: '状态', key: 'status', width: 90,
-                    render: (row) => STATUS_LABEL[row.status] || row.status
-                },
-                { title: '保存目录', key: 'savePath', ellipsis: { tooltip: true } },
-                { title: '时间', key: 'createdAt', width: 160 }
-            ]
+            downloading: 0
         }
     },
     async mounted() {
-        await Promise.all([this.reload(), this.loadDownloads()])
+        await this.reload()
     },
     methods: {
         async reload() {
@@ -162,15 +135,6 @@ export default {
                 this.loading = false
             }
         },
-        async loadDownloads() {
-            this.loadingDownloads = true
-            try {
-                const list = await SubscriptionDownloads(0)
-                this.downloads = Array.isArray(list) ? list : []
-            } finally {
-                this.loadingDownloads = false
-            }
-        },
         metaOf(item) {
             const parts = [item.year, item.origin, item.genre].filter(Boolean)
             return parts.length ? parts.join(' / ') : '—'
@@ -180,7 +144,7 @@ export default {
             try {
                 const result = await CheckSubscription(item.id)
                 window.$message?.success(result && result.message ? result.message : '巡检完成')
-                await Promise.all([this.reload(), this.loadDownloads()])
+                await this.reload()
             } catch (e) {
                 // 拦截器已提示
             } finally {
@@ -205,7 +169,6 @@ export default {
                 if (result && result.ok) {
                     window.$message?.success(result.message || '已提交下载')
                     m.downloaded = true
-                    await this.loadDownloads()
                 } else {
                     window.$message?.warning((result && result.message) || '提交失败')
                 }
@@ -240,7 +203,7 @@ export default {
                 onPositiveClick: async () => {
                     await DeleteSubscription(item.id)
                     window.$message?.success('已删除订阅')
-                    await Promise.all([this.reload(), this.loadDownloads()])
+                    await this.reload()
                 }
             })
         }
@@ -260,10 +223,6 @@ export default {
     text-align: center;
     color: var(--text-3);
     font-size: 13px;
-}
-
-.empty.small {
-    padding: 20px 0;
 }
 
 .sub-card {
@@ -441,29 +400,6 @@ export default {
     flex: none;
     font-size: 11.5px;
     color: var(--text-3);
-}
-
-.downloads {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: rgba(20, 28, 46, .35);
-    padding: 14px;
-}
-
-.downloads-head {
-    display: flex;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.downloads-head h3 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--text);
-}
-
-.downloads-head .n-button {
-    margin-left: auto;
 }
 
 @media (max-width: 900px) {
