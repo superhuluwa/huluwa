@@ -53,6 +53,9 @@ public class HlsController {
     public ApiResult<Map<String, Object>> enabled(@PathVariable long id, @RequestBody HlsRequests.Enabled body) {
         return ApiResult.ok(subscriptions.enabled(id, body.enabled()));
     }
+    /** 取消订阅即删除：清除该订阅与后续追更任务，本地已归档文件保留 */
+    @DeleteMapping("/subscriptions/{id}")
+    public ApiResult<Map<String, Object>> delete(@PathVariable long id) { return ApiResult.ok(subscriptions.delete(id)); }
     @GetMapping("/downloads")
     public ApiResult<List<Map<String, Object>>> downloads() { return ApiResult.ok(downloads.list()); }
     /** 清空下载记录：隐藏已完成 / 失败 / 跳过的历史行，进行中的任务保留 */

@@ -25,6 +25,34 @@
             </div>
             <n-spin :show="loading">
                 <div v-if="!rows.length" class="empty">还没有订阅触发的下载任务</div>
+                <!-- 手机端改用卡片：表格列多，横滑查看很难读 -->
+                <div v-else-if="isMobile" class="cards">
+                    <article v-for="row in rows" :key="row.id" class="task-card">
+                        <div class="task-head">
+                            <span class="task-title">{{ row.seriesTitle || '未知剧集' }}</span>
+                            <span class="pill" :class="statusTone(row.status)">{{ statusLabel(row.status) }}</span>
+                        </div>
+                        <div class="task-tags">
+                            <span v-if="row.episode" class="tag">第 {{ row.episode }} 集</span>
+                            <span v-if="row.quality" class="tag">{{ row.quality }}</span>
+                            <span class="tag">{{ row.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
+                        </div>
+                        <div class="task-fields">
+                            <div class="field">
+                                <span class="field-label">保存目录</span>
+                                <span class="field-value mono">{{ row.savePath || '—' }}</span>
+                            </div>
+                            <div class="field">
+                                <span class="field-label">时间</span>
+                                <span class="field-value">{{ row.createdAt || '—' }}</span>
+                            </div>
+                            <div v-if="row.message" class="field">
+                                <span class="field-label">提示</span>
+                                <span class="field-value">{{ row.message }}</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
                 <n-data-table v-else size="small" :columns="columns" :data="rows" :bordered="false"
                     :max-height="560" />
             </n-spin>
@@ -34,6 +62,7 @@
 
 <script>
 import { NButton, NDataTable, NSpin, NTabPane, NTabs } from 'naive-ui'
+import { useIsMobile } from '@/composables/useIsMobile'
 import HlsDownloadsPanel from './components/HlsDownloadsPanel.vue'
 /**
  * 我的下载：订阅巡检 / 手动提交触发的下载任务清单。
@@ -50,6 +79,16 @@ const STATUS_LABEL = {
     removed: '已移除'
 }
 
+/** 状态色：沿用全局 .pill 主题（手机端卡片与表格共用语义） */
+const STATUS_TONE = {
+    pending: 'warn',
+    added: 'off',
+    downloading: 'accent',
+    completed: 'ok',
+    failed: 'danger',
+    removed: 'off'
+}
+
 export default {
     name: 'MovieDownloads',
     components: {
@@ -59,6 +98,10 @@ export default {
         NButton,
         NDataTable,
         NSpin
+    },
+    setup() {
+        // 窄屏（<= 900px）改用卡片列表，桌面端保持表格
+        return { isMobile: useIsMobile() }
     },
     data() {
         return {
@@ -98,6 +141,12 @@ export default {
         await this.load()
     },
     methods: {
+        statusLabel(status) {
+            return STATUS_LABEL[status] || status
+        },
+        statusTone(status) {
+            return STATUS_TONE[status] || 'off'
+        },
         clearRecords() {
             window.$dialog?.warning({
                 title: '清空下载记录',
@@ -164,5 +213,103 @@ export default {
 
 .downloads-head .n-button + .n-button {
     margin-left: 8px;
+}
+
+/* 手机端卡片列表：每行任务一块，字段纵向排布，长路径换行不截断 */
+.cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.task-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(20, 28, 46, .5);
+    padding: 12px;
+}
+
+.task-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.task-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.pill.accent {
+    background: var(--accent-weak);
+    color: var(--accent-2);
+}
+
+.task-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.tag {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: rgba(148, 163, 184, .12);
+    color: var(--text-2);
+}
+
+.task-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 10px;
+}
+
+.field {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.field-label {
+    flex: none;
+    color: var(--text-3);
+}
+
+.field-value {
+    min-width: 0;
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+}
+
+/* 移动端：标题独占一行，操作按钮换行铺满，方便手指点击 */
+@media (max-width: 900px) {
+    .downloads {
+        padding: 12px;
+    }
+
+    .downloads-head {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .downloads-head h3 {
+        width: 100%;
+        margin-right: 0;
+    }
+
+    .downloads-head .n-button {
+        flex: 1 1 auto;
+    }
+
+    .downloads-head .n-button + .n-button {
+        margin-left: 0;
+    }
 }
 </style>

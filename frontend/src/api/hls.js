@@ -8,6 +8,8 @@ export const SubscribeHls = body => http.post('/hls/subscriptions', body, { time
 export const QuickSubscribeHls = body => http.post('/hls/subscriptions/quick', body, { timeout: 60000 })
 export const CheckHlsSubscription = id => http.post('/hls/subscriptions/' + id + '/check', {}, { timeout: 60000 })
 export const EnableHlsSubscription = (id, enabled) => http.post('/hls/subscriptions/' + id + '/enabled', { enabled })
+/** 取消订阅即删除：清除该订阅与下载任务记录，本地已归档文件保留 */
+export const DeleteHlsSubscription = id => http.delete('/hls/subscriptions/' + id)
 export const GetHlsDownloads = () => http.get('/hls/downloads')
 export const GetHlsDownloadLog = id => http.get('/hls/downloads/' + id + '/log')
 export const DownloadHls = body => http.post('/hls/downloads', body, { timeout: 60000 })

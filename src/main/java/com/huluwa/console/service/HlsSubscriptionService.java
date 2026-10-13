@@ -200,6 +200,24 @@ public class HlsSubscriptionService {
         downloads.kick(); return view(row(id));
     }
 
+    /**
+     * 取消订阅即删除：连同该订阅的下载任务记录一起清除（本地已归档文件保留）。
+     * 电影天堂没有「暂停」状态，取消订阅与暂停追更都按删除处理。
+     */
+    public synchronized Map<String, Object> delete(long id) {
+        Map<String, Object> row = row(id);
+        transaction.executeWithoutResult(status -> {
+            db.update("DELETE FROM hls_download_task WHERE subscription_id = ?", id);
+            db.update("DELETE FROM hls_subscription WHERE id = ?", id);
+        });
+        downloads.kick();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ok", true);
+        result.put("title", HlsSupport.text(row.get("title")));
+        result.put("message", "已取消订阅，订阅记录已删除");
+        return result;
+    }
+
     private Map<String, Object> row(long id) {
         List<Map<String, Object>> rows = db.queryForList("SELECT * FROM hls_subscription WHERE id = ?", id);
         if (rows.isEmpty()) throw new BusinessException(404, "订阅不存在");

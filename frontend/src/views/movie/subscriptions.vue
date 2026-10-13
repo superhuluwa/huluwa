@@ -17,8 +17,17 @@
                         <div class="title-row">
                             <span class="title">{{ item.title }}</span>
                             <span class="badge source" :class="{ dytt: isHls(item) }">{{ isHls(item) ? '电影天堂' : '电影港' }}</span>
-                            <span v-if="item.enabled" class="badge on">订阅中</span>
-                            <span v-else class="badge off">{{ isHls(item) ? '已暂停' : '已取消' }}</span>
+                            <!-- 订阅状态即删除入口：点击「订阅中」确认后取消订阅并删除记录；暂停追更同样删除 -->
+                            <button v-if="item.enabled" type="button" class="badge on action"
+                                :disabled="deleting === item.subscriptionKey"
+                                :title="isHls(item) ? '取消追更并删除该订阅' : '取消订阅并删除该订阅'"
+                                @click="cancel(item)">
+                                <i :class="deleting === item.subscriptionKey ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-trash-can'"></i>已订阅
+                            </button>
+                            <button v-else type="button" class="badge off action"
+                                :disabled="deleting === item.subscriptionKey" title="删除该订阅" @click="cancel(item)">
+                                <i class="fa-solid fa-trash-can"></i>{{ isHls(item) ? '已暂停' : '已取消' }}
+                            </button>
                         </div>
                         <div class="meta">{{ metaOf(item) }}</div>
                         <a v-if="item.detailUrl" class="link" :href="item.detailUrl" target="_blank" rel="noreferrer">{{ item.detailUrl }}</a>
@@ -54,17 +63,9 @@
                         <template #icon><i class="fa-solid fa-list"></i></template>
                         {{ magnetsOpen === item.subscriptionKey ? '收起列表' : '资源列表' }}
                     </n-button>
-                    <n-button v-if="item.enabled" size="tiny" @click="unsubscribe(item)">
-                        <template #icon><i class="fa-regular fa-bell-slash"></i></template>
-                        {{ isHls(item) ? '暂停追更' : '取消订阅' }}
-                    </n-button>
-                    <n-button v-else size="tiny" type="primary" ghost @click="resubscribe(item)">
+                    <n-button v-if="!item.enabled" size="tiny" type="primary" ghost @click="resubscribe(item)">
                         <template #icon><i class="fa-regular fa-bell"></i></template>
                         {{ isHls(item) ? '恢复追更' : '重新订阅' }}
-                    </n-button>
-                    <n-button v-if="!isHls(item)" size="tiny" type="error" ghost @click="remove(item)">
-                        <template #icon><i class="fa-solid fa-trash-can"></i></template>
-                        删除
                     </n-button>
                 </div>
                 <div v-if="!isHls(item) && magnetsOpen === item.subscriptionKey" class="magnet-panel">
@@ -102,12 +103,12 @@ import { NButton, NSpin } from 'naive-ui'
  * 来源只在每项信息中标明，操作按该项对应的订阅服务执行。
  */
 import {
-    GetSubscriptions, CheckSubscription, UnsubscribeMovie,
+    GetSubscriptions, CheckSubscription,
     DeleteSubscription, SubscriptionMagnets, DownloadMagnet
 } from '@/api/chat'
 import MovieSubscriptionDialog from '@/views/message/components/MovieSubscriptionDialog.vue'
 import HlsResourceDialog from '@/views/message/components/HlsResourceDialog.vue'
-import { CheckHlsSubscription, EnableHlsSubscription, GetHlsSubscriptions } from '@/api/hls'
+import { CheckHlsSubscription, DeleteHlsSubscription, EnableHlsSubscription, GetHlsSubscriptions } from '@/api/hls'
 import { mergeSubscriptions } from '@/utils/subscriptionList'
 
 export default {
@@ -132,7 +133,8 @@ export default {
             magnetsOpen: '',
             magnets: [],
             checking: '',
-            downloading: 0
+            downloading: 0,
+            deleting: ''
         }
     },
     async mounted() {
@@ -207,16 +209,39 @@ export default {
                 this.downloading = 0
             }
         },
-        async unsubscribe(item) {
-            if (this.isHls(item)) {
-                await EnableHlsSubscription(item.id, false)
-                window.$message?.success('已暂停追更，正在下载的剧集会继续完成，本地文件保留')
-                await this.reload()
-                return
-            }
-            await UnsubscribeMovie(item.id)
-            window.$message?.success('已取消订阅，历史磁力与下载记录仍保留')
-            await this.reload()
+        /**
+         * 订阅状态即删除入口：点击「订阅中」弹「是否取消订阅」，确认后取消订阅并删除记录；
+         * 电影天堂没有「暂停」状态，暂停追更同样按删除处理。
+         */
+        cancel(item) {
+            const hls = this.isHls(item)
+            const active = item.enabled
+            window.$dialog?.warning({
+                title: active ? '是否取消订阅' : '是否删除订阅',
+                content: active
+                    ? (hls
+                        ? '取消订阅后将删除该订阅及后续追更任务；正在下载的一集会在后台完成，本地文件保留。'
+                        : '取消订阅后将删除该订阅、磁力基线与下载记录；下载器里已提交的任务不受影响。')
+                    : (hls
+                        ? '删除后将清除该订阅及后续追更任务，是否继续？'
+                        : '删除后将清除该订阅、磁力基线与下载记录，是否继续？'),
+                positiveText: active ? '取消订阅' : '删除',
+                negativeText: '取消',
+                onPositiveClick: async () => {
+                    this.deleting = item.subscriptionKey
+                    try {
+                        if (hls) {
+                            await DeleteHlsSubscription(item.id)
+                        } else {
+                            await DeleteSubscription(item.id)
+                        }
+                        window.$message?.success('已取消订阅，订阅记录已删除')
+                        await this.reload()
+                    } finally {
+                        this.deleting = ''
+                    }
+                }
+            })
         },
         openSettings(item = null, resubscribe = false) {
             if (item && this.isHls(item)) {
@@ -239,19 +264,6 @@ export default {
                 return
             }
             this.openSettings(item, true)
-        },
-        remove(item) {
-            window.$dialog?.warning({
-                title: '删除订阅',
-                content: '删除订阅并清除磁力基线？下载器里已提交的任务不受影响。',
-                positiveText: '删除',
-                negativeText: '取消',
-                onPositiveClick: async () => {
-                    await DeleteSubscription(item.id)
-                    window.$message?.success('已删除订阅')
-                    await this.reload()
-                }
-            })
         }
     }
 }
@@ -348,6 +360,38 @@ export default {
 .badge.off {
     color: var(--text-3);
     border-color: var(--line-2);
+}
+
+/* 订阅状态即删除入口：外观仍是徽标，悬停变红提示点击会取消订阅（=删除记录） */
+.badge.action {
+    font-family: inherit;
+    /* 清掉按钮默认底色，否则半透明状态色叠在系统灰底上会看不清文字 */
+    background-color: transparent;
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+}
+
+.badge.action.on {
+    background: rgba(34, 197, 94, .14);
+}
+
+.badge.action.off {
+    background: rgba(148, 163, 184, .10);
+}
+
+.badge.action i {
+    margin-right: 4px;
+}
+
+.badge.action:hover:not(:disabled) {
+    color: #FCA5A5;
+    border-color: rgba(248, 113, 113, .55);
+    background: rgba(248, 113, 113, .16);
+}
+
+.badge.action:disabled {
+    cursor: default;
+    opacity: .65;
 }
 
 .badge.source {

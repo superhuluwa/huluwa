@@ -240,6 +240,25 @@ class HlsSubscriptionServiceTest {
         assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
     }
 
+    /** 取消订阅即删除：订阅行与下载任务一并清除，本地已归档文件不受影响。 */
+    @Test
+    void cancelSubscriptionDeletesTheSubscriptionAndItsDownloadTasks() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(3, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_download_task SET status = 'completed' WHERE episode = 1");
+        db.update("UPDATE hls_download_task SET status = 'pending' WHERE episode = 2");
+
+        Map<String, Object> deleted = subscriptions.delete(id);
+        assertEquals(true, deleted.get("ok"));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM hls_subscription", Integer.class));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
+        assertEquals(0, subscriptions.list().size());
+        assertEquals(0, downloads.list().size());
+
+        // 删除后同一作品可以重新订阅，不会被旧记录挡住
+        assertThrows(BusinessException.class, () -> subscriptions.enabled(id, true));
+    }
+
     @Test
     void duplicateNumberingRejectsTheManifestBeforeAnyTasksAreCreated() {
         var repeated = new DyttSearchService.DyttItem("42", "剧名", "2026", "", "", "", "", "", "",
