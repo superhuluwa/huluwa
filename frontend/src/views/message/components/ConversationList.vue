@@ -1,14 +1,6 @@
 <template>
     <aside class="conversation-list" :class="{ mobile }">
         <div class="list-head">
-            <div class="list-title">
-                <h3>会话</h3>
-                <span class="count">{{ filtered.length }} 个</span>
-                <!-- 手机端是全屏沉浸页面：这里提供进入控制台其它模块（Docker/首页等）的唯一入口 -->
-                <button v-if="showMenu" class="menu-btn" type="button" title="更多功能" @click="$emit('menu')">
-                    <i class="fa-solid fa-bars"></i>
-                </button>
-            </div>
             <n-input v-model:value="keyword" :size="mobile ? 'medium' : 'small'" clearable
                 placeholder="搜索会话或消息内容">
                 <template #prefix>
@@ -46,7 +38,7 @@ import { NInput } from 'naive-ui'
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
  * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载 + 系统通知虚拟会话），列表不做删除。
  *
- * 手机端（mobile）：列表本身就是一级「全屏页面」——标题区留出状态栏安全区、行高与触控目标放大、
+ * 手机端（mobile）：标题与状态栏安全区由公共顶栏处理，列表行高与触控目标放大、
  * 右侧加箭头提示可进入聊天详情，因此不再需要高亮当前会话。
  */
 import { sessionPreview, formatTimeLabel } from '@/utils/chatFormat'
@@ -63,18 +55,13 @@ export default {
             type: String,
             default: ''
         },
-        /** 手机端形态：全屏一级页面（大标题 + 大行高 + 箭头） */
+        /** 手机端形态：全屏一级页面（大行高 + 箭头） */
         mobile: {
-            type: Boolean,
-            default: false
-        },
-        /** 是否显示「更多功能」入口（全屏沉浸页面里没有主框架菜单，需要它拉出抽屉） */
-        showMenu: {
             type: Boolean,
             default: false
         }
     },
-    emits: ['select', 'menu'],
+    emits: ['select'],
     data() {
         return {
             keyword: ''
@@ -149,26 +136,6 @@ export default {
 .list-head {
     flex: none;
     padding: 14px 14px 10px;
-}
-
-.list-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.list-title h3 {
-    font-size: 16px;
-    font-weight: 700;
-    margin: 0;
-    color: var(--text);
-}
-
-.count {
-    margin-left: auto;
-    font-size: 11.5px;
-    color: var(--text-2);
 }
 
 .list-body {
@@ -305,26 +272,6 @@ export default {
     color: var(--text-3);
 }
 
-.menu-btn {
-    width: 36px;
-    height: 36px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-    background: rgba(148, 163, 184, .06);
-    color: var(--text-2);
-    font-size: 14px;
-    cursor: pointer;
-}
-
-.menu-btn:hover {
-    color: var(--text);
-    border-color: var(--line-2);
-}
-
 /* ==========================================================================
    手机端：会话列表 = 一级全屏页面
    ========================================================================== */
@@ -340,34 +287,6 @@ export default {
     border-bottom: 1px solid var(--line);
     background: linear-gradient(180deg, rgba(20, 28, 46, .9) 0%, rgba(11, 15, 25, .75) 100%);
     backdrop-filter: blur(10px);
-}
-
-.conversation-list.mobile .list-title {
-    margin-bottom: 12px;
-}
-
-.conversation-list.mobile .list-title h3 {
-    font-size: 22px;
-    letter-spacing: .5px;
-}
-
-.conversation-list.mobile .count {
-    margin-left: auto;
-}
-
-.conversation-list.mobile .count {
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--accent-weak);
-    color: var(--accent-2);
-}
-
-.conversation-list.mobile .menu-btn {
-    width: 38px;
-    height: 38px;
-    margin-left: 2px;
-    font-size: 15px;
 }
 
 .conversation-list.mobile .list-body {

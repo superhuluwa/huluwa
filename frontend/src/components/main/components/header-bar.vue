@@ -31,6 +31,9 @@ export default {
     emits: ['on-coll-change'],
     computed: {
         currentTitle() {
+            if (this.$route.name === 'messages') {
+                return '会话'
+            }
             return (this.$route.meta && this.$route.meta.title) || '首页'
         }
     }
