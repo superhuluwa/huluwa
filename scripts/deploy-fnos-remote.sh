@@ -78,6 +78,7 @@ find "${SRC_DIR}" -type f \
 
 [ -f "${SRC_DIR}/compose.yaml" ] || fail "源码包中缺少 compose.yaml"
 [ -f "${SRC_DIR}/Dockerfile" ]   || fail "源码包中缺少 Dockerfile"
+[ -f "${SRC_DIR}/scripts/hls-download-dir.sh" ] || fail "源码包中缺少下载目录授权脚本"
 cd "${SRC_DIR}"
 
 # 飞牛的镜像加速源拉不到 docker/dockerfile:1 这个前端镜像（HEAD 返回 401），
@@ -92,14 +93,8 @@ fi
 mkdir -p "${DATA_DIR}" "${MEDIA_DIR}" "${DOWNLOAD_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
 log "数据目录：${DATA_DIR}（属主 10001:10001 -> 容器内 /app/data）"
-# 共享下载目录授予 UID 10001 写入权限，已有剧名目录只处理第一层，不改变属主。
-if command -v setfacl >/dev/null 2>&1; then
-  setfacl -m u:10001:rwx,d:u:10001:rwx "${DOWNLOAD_DIR}" || warn "下载根目录授权失败，请在飞牛上设置 uid 10001 写权限"
-  find "${DOWNLOAD_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec setfacl -m u:10001:rwx,d:u:10001:rwx {} + || warn "已有剧名目录授权失败，请检查目录权限"
-else
-  warn "请确认下载目录 ${DOWNLOAD_DIR} 及已有剧名目录可由 uid 10001 写入"
-fi
+# 授权失败立即停止，避免容器看似部署成功而订阅下载不可用。
+bash scripts/hls-download-dir.sh prepare || fail "共享下载目录准备失败（线上容器未被改动）"
 log "下载目录：${DOWNLOAD_DIR}（容器内同一路径，与迅雷、qBittorrent 共用，文件直接放在剧名目录）"
 log "旧媒体目录：${MEDIA_DIR}（容器内 /media，只读保留历史文件和日志）"
 
@@ -154,6 +149,10 @@ log "重建容器 ${CONTAINER}"
 docker compose down --remove-orphans >/dev/null 2>&1 || true
 docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12
+
+# API 健康检查无法证明媒体目录可写，必须另行核对绑定挂载并以应用 UID 验证。
+log "检查共享下载目录挂载和 UID 10001 写权限"
+bash scripts/hls-download-dir.sh check "${CONTAINER}" || fail "下载目录检查失败，请先修复挂载或权限，再使用电影天堂订阅"
 
 # ---------- 8. 校验容器内可访问宿主机 Docker socket ----------
 if ! docker exec "${CONTAINER}" sh -c 'curl -sS --max-time 5 --unix-socket /var/run/docker.sock http://localhost/_ping' 2>/dev/null | grep -q OK; then

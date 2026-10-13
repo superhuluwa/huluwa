@@ -89,8 +89,15 @@ public class HlsDownloadService implements ApplicationRunner {
 
     public void requireEnvironment() {
         if (!toolsReady()) throw new BusinessException(400, "当前运行环境缺少 HLS 下载工具，请先更新包含下载工具的 Docker 镜像");
-        if (!Files.isDirectory(root()) || !Files.isWritable(root())) {
-            throw new BusinessException(400, "媒体目录不存在或无法写入，请检查媒体挂载及容器 UID 10001 的权限");
+        Path directory = root();
+        if (!Files.exists(directory)) {
+            throw new BusinessException(400, "下载目录 " + directory + " 不存在或无法访问，请检查 Docker 目录挂载");
+        }
+        if (!Files.isDirectory(directory)) {
+            throw new BusinessException(400, "下载路径 " + directory + " 不是目录，请检查 Docker 目录挂载");
+        }
+        if (!Files.isWritable(directory)) {
+            throw new BusinessException(400, "下载目录 " + directory + " 无法写入，请在飞牛宿主机授予容器 UID 10001 写权限");
         }
     }
 
