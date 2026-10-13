@@ -179,6 +179,12 @@ public class MovieSubscriptionController {
         return ApiResult.ok(subscriptionService.downloads(id));
     }
 
+    /** 清空下载记录：隐藏已完成 / 失败的历史行，进行中的任务保留 */
+    @DeleteMapping("/downloads")
+    public ApiResult<Map<String, Object>> clearDownloads() {
+        return ApiResult.ok(subscriptionService.clearDownloads());
+    }
+
     /** 手动下载请求体：magnet 直传原文；magnetId 表示用订阅库里的磁力记录 */
     public record DownloadMagnetRequest(Long magnetId, String url, String title,
                                         String magnet, String quality, String episode) {

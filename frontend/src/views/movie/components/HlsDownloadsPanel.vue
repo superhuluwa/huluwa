@@ -1,6 +1,8 @@
 <template>
     <div>
         <div class="head"><span>离线剧集任务（最近 500 条）</span>
+            <n-button size="small" type="error" ghost :disabled="!clearable" :loading="clearing"
+                @click="clearRecords">清空下载记录</n-button>
             <n-button size="small" @click="settings = true">下载设置</n-button>
             <n-button size="small" :loading="loading" @click="load">刷新</n-button>
         </div>
@@ -19,15 +21,17 @@
 <script>
 import { h } from 'vue'
 import { NButton, NDataTable, NModal, NProgress, NSpin } from 'naive-ui'
-import { GetHlsDownloadLog, GetHlsDownloads, RetryHlsDownload } from '@/api/hls'
+import { ClearHlsDownloads, GetHlsDownloadLog, GetHlsDownloads, RetryHlsDownload } from '@/api/hls'
 import HlsSettingsDialog from './HlsSettingsDialog.vue'
 const LABELS = { pending: '等待下载', downloading: '下载中', verifying: '检查中', completed: '已完成', failed: '失败', skipped: '首次跳过' }
 const PHASES = { parsing: '正在解析资源', downloading: '下载中', merging: '正在合并', verifying: '检查并归档中' }
 export default {
     components: { NButton, NDataTable, NModal, NSpin, HlsSettingsDialog },
-    data() { return { rows: [], loading: false, fetching: false, settings: false, retrying: 0, timer: null,
+    data() { return { rows: [], loading: false, fetching: false, settings: false, retrying: 0, clearing: false, timer: null,
         logDialog: false, logLoading: false, logContent: '' } },
     computed: {
+        /** 只有已结束的历史行可清空；等待与下载中的任务会保留 */
+        clearable() { return this.rows.some(row => ['completed', 'failed', 'skipped'].includes(row.status)) },
         columns() { return [
             { title: '剧名', key: 'seriesTitle', width: 180, ellipsis: { tooltip: true } },
             { title: '季集', key: 'episode', width: 90, render: row => `S${String(row.season).padStart(2, '0')}E${String(row.episode).padStart(2, '0')}` },
@@ -76,6 +80,23 @@ export default {
             if (!quiet) this.loading = true
             try { this.rows = await GetHlsDownloads() } catch (error) { /* 拦截器已提示 */ }
             finally { this.loading = false; this.fetching = false }
+        },
+        clearRecords() {
+            window.$dialog?.warning({
+                title: '清空下载记录',
+                content: '将清空已完成 / 失败 / 跳过的历史记录，等待与下载中的任务保留。已归档的视频文件不受影响，确认清空？',
+                positiveText: '清空',
+                negativeText: '取消',
+                onPositiveClick: async () => {
+                    this.clearing = true
+                    try {
+                        const result = await ClearHlsDownloads()
+                        window.$message?.success(result?.message || '已清空下载记录')
+                        await this.load()
+                    } catch (error) { /* 拦截器已提示 */ }
+                    finally { this.clearing = false }
+                }
+            })
         },
         async retry(row) {
             this.retrying = row.id

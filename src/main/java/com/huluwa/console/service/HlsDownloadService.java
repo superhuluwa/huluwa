@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -114,6 +115,7 @@ public class HlsDownloadService implements ApplicationRunner {
                        t.message, t.created_at AS createdAt, t.completed_at AS completedAt,
                        CASE WHEN s.enabled = 0 THEN 1 ELSE 0 END AS paused
                   FROM hls_download_task t LEFT JOIN hls_subscription s ON s.id = t.subscription_id
+                 WHERE t.hidden_at IS NULL
                  ORDER BY t.id DESC LIMIT 500
                 """);
         ActiveProgress active = activeProgress;
@@ -132,6 +134,27 @@ public class HlsDownloadService implements ApplicationRunner {
                     : status.equals("downloading") ? progress == null ? "parsing" : progress.phase() : status);
         }
         return tasks;
+    }
+
+    /**
+     * 清空下载记录：只隐藏终态行（已完成 / 失败 / 首次跳过），
+     * 等待与下载中的任务保留在列表里。隐藏而非删除：
+     * 同一剧集不重复下载的判定仍依赖这些历史行。
+     */
+    public synchronized Map<String, Object> clearHistory() {
+        int hidden = db.update("""
+                UPDATE hls_download_task SET hidden_at = ?
+                 WHERE hidden_at IS NULL AND status NOT IN ('pending', 'downloading', 'verifying')
+                """, HlsSupport.now());
+        long kept = HlsSupport.number(db.queryForObject(
+                "SELECT COUNT(*) FROM hls_download_task WHERE hidden_at IS NULL", Integer.class));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("hidden", hidden);
+        result.put("kept", kept);
+        result.put("message", hidden > 0
+                ? "已清空 " + hidden + " 条下载记录" + (kept > 0 ? "，保留 " + kept + " 条进行中的任务" : "")
+                : kept > 0 ? "进行中的任务不会被清空，当前没有可清理的下载记录" : "暂无下载记录");
+        return result;
     }
 
     /** 仅返回归属于该任务的脱敏日志尾部，不接受客户端传入文件路径。 */
@@ -173,11 +196,11 @@ public class HlsDownloadService implements ApplicationRunner {
             DyttSearchService.PlaySource chosen = selectSource(source.detail(api, resId), sourceName);
             sourceName = chosen.name();
             // 卡片地址可能已失效；入队时也从完整详情重新解析。
-            url = episodeUrl(chosen, season, episode);
+            url = episodeUrl(chosen, season, episode, url, HlsSupport.text(body.episodeTitle()));
         }
         long id = discover(subscription, key, api, resId, title, year, season, episode,
                 HlsSupport.text(body.episodeTitle()), sourceName, url, headers, false);
-        retrySkipped(id);
+        reactivate(id);
         kick();
         return publicTask(id);
     }
@@ -197,7 +220,8 @@ public class HlsDownloadService implements ApplicationRunner {
         db.update("""
                 UPDATE hls_download_task SET subscription_id = COALESCE(?, subscription_id),
                     api_url = ?, res_id = ?, url = ?, source_name = ?, headers = ?,
-                    series_title = ?, year = ?, episode_title = ?, updated_at = ?
+                    series_title = ?, year = ?, episode_title = ?,
+                    hidden_at = CASE WHEN status = 'failed' THEN NULL ELSE hidden_at END, updated_at = ?
                  WHERE series_key = ? AND season = ? AND episode = ?
                    AND status NOT IN ('downloading', 'verifying', 'completed')
                 """, subscription, api, resId, url, sourceName, headers, title, year, episodeTitle, now, key, season, episode);
@@ -209,9 +233,15 @@ public class HlsDownloadService implements ApplicationRunner {
                 Long.class, key, season, episode);
     }
 
-    private synchronized void retrySkipped(long id) {
-        db.update("UPDATE hls_download_task SET status = 'pending', message = NULL, updated_at = ? WHERE id = ? AND status = 'skipped'",
-                HlsSupport.now(), id);
+    /**
+     * 手动提交某一集时把此前「跳过」或「失败」的记录重新排队：用户这次是明确要下载，
+     * 同时解除 hidden_at，让被「清空下载记录」隐藏过的历史行重新出现在列表里。
+     */
+    private synchronized void reactivate(long id) {
+        db.update("""
+                UPDATE hls_download_task SET status = 'pending', message = NULL, hidden_at = NULL, updated_at = ?
+                 WHERE id = ? AND status IN ('skipped', 'failed')
+                """, HlsSupport.now(), id);
     }
 
     public synchronized Map<String, Object> retry(long id) {
@@ -222,7 +252,7 @@ public class HlsDownloadService implements ApplicationRunner {
         }
         db.update("""
                 UPDATE hls_download_task SET status = 'pending', attempts = 0, next_attempt_at = NULL,
-                       message = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'skipped')
+                       message = NULL, hidden_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'skipped')
                 """, HlsSupport.now(), id);
         kick(); return publicTask(id);
     }
@@ -358,7 +388,7 @@ public class HlsDownloadService implements ApplicationRunner {
         if (resId.isBlank()) return m3u8(HlsSupport.text(task.get("url")));
         DyttSearchService.DyttItem item = source.detail(HlsSupport.text(task.get("api_url")), resId);
         DyttSearchService.PlaySource selected = selectSource(item, HlsSupport.text(task.get("source_name")));
-        String url = episodeUrl(selected, (int) HlsSupport.number(task.get("season")), (int) HlsSupport.number(task.get("episode")));
+        String url = episodeUrl(selected, (int) HlsSupport.number(task.get("season")), (int) HlsSupport.number(task.get("episode")), HlsSupport.text(task.get("url")), HlsSupport.text(task.get("episode_title")));
         db.update("UPDATE hls_download_task SET url = ? WHERE id = ?", url, task.get("id"));
         return url;
     }
@@ -371,11 +401,58 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     public static String episodeUrl(DyttSearchService.PlaySource selected, int season, int episode) {
+        return episodeUrl(selected, season, episode, null, null);
+    }
+
+    /**
+     * 剧集按标题集号严格匹配；电影等整条线路都没有集号时，默认参数（第 1 集）落到所选正片：
+     * 依次按播放条目标题、完整地址、地址路径匹配，最后才允许线路只有一条的兜底。
+     */
+    public static String episodeUrl(DyttSearchService.PlaySource selected, int season, int episode,
+                                    String preferredUrl, String preferredTitle) {
         List<DyttSearchService.PlayItem> matches = selected.items().stream()
                 .filter(play -> Integer.valueOf(episode).equals(HlsSupport.episodeNumber(play.title())))
                 .filter(play -> HlsSupport.matchesSeason(play.title(), season)).toList();
-        if (matches.size() != 1) throw new BusinessException(400, "指定集号未找到或存在重复，请核实作品和线路的剧集编号");
-        return m3u8(matches.getFirst().url());
+        if (matches.size() == 1) return m3u8(matches.getFirst().url());
+        boolean numbered = selected.items().stream().anyMatch(play -> HlsSupport.episodeNumber(play.title()) != null);
+        if (matches.isEmpty() && episode == 1 && !numbered) {
+            DyttSearchService.PlayItem preferred = preferredMovieItem(selected, preferredUrl, preferredTitle);
+            if (preferred != null) return m3u8(preferred.url());
+            if (selected.items().size() == 1) return m3u8(selected.items().getFirst().url());
+        }
+        throw new BusinessException(400, "指定集号未找到或存在重复，请核实作品和线路的剧集编号");
+    }
+
+    /** 电影正片定位：标题最稳定，其次完整地址，最后忽略签名查询串按路径比较。 */
+    private static DyttSearchService.PlayItem preferredMovieItem(DyttSearchService.PlaySource selected,
+                                                                    String preferredUrl, String preferredTitle) {
+        String title = HlsSupport.text(preferredTitle).trim();
+        if (!title.isEmpty()) {
+            for (DyttSearchService.PlayItem play : selected.items()) {
+                if (title.equals(play.title().trim())) return play;
+            }
+        }
+        String url = HlsSupport.text(preferredUrl).trim();
+        if (url.isEmpty()) return null;
+        String wanted = m3u8(url);
+        for (DyttSearchService.PlayItem play : selected.items()) {
+            if (wanted.equals(m3u8(play.url()))) return play;
+        }
+        String wantedPath = path(wanted);
+        if (wantedPath.isEmpty()) return null;
+        for (DyttSearchService.PlayItem play : selected.items()) {
+            if (wantedPath.equals(path(m3u8(play.url())))) return play;
+        }
+        return null;
+    }
+
+    private static String path(String url) {
+        try {
+            String value = java.net.URI.create(url).getPath();
+            return value == null ? "" : value;
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public static boolean isM3u8(String value) {

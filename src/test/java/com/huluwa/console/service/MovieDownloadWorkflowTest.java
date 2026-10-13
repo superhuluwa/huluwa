@@ -153,6 +153,28 @@ class MovieDownloadWorkflowTest {
     }
 
     @Test
+    void clearingDownloadsHidesFinishedMagnetRowsAndKeepsTrackingVisible() {
+        MovieSubscriptionService.Subscription subscription = subscribe("qb");
+        service.downloadMagnet(URL, TITLE, magnet('7'), "1080P", "1");
+        service.downloadMagnet(URL, TITLE, magnet('8'), "1080P", "2");
+        jdbc.update("UPDATE movie_download_task SET status = 'completed' WHERE magnet = ?", magnet('7'));
+
+        Map<String, Object> cleared = service.clearDownloads();
+        assertEquals(1, cleared.get("hidden"));
+        assertEquals(1, cleared.get("kept"));
+        assertEquals(List.of(magnet('8')), service.downloads(0).stream()
+                .map(row -> String.valueOf(row.get("id"))).map(id -> jdbc.queryForObject(
+                        "SELECT magnet FROM movie_download_task WHERE id = ?", String.class, Long.parseLong(id))).toList());
+
+        // 清空不移除去重历史：同一磁力再次提交仍然命中「已在下载列表」
+        Map<String, Object> duplicate = service.downloadMagnet(URL, TITLE, magnet('7'), "1080P", "1");
+        assertEquals(true, duplicate.get("duplicate"));
+        verify(qb, times(2)).add(anyList(), anyString());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL AND status = 'completed'", Integer.class));
+    }
+
+    @Test
     void oldDatabaseMigrationIsIdempotentAndKeepsHistoricalQbTasks() {
         subscribe("qb");
         service.downloadMagnet(URL, TITLE, magnet('1'), "1080P", "1");

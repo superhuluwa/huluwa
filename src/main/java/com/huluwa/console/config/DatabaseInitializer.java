@@ -41,6 +41,7 @@ public class DatabaseInitializer implements ApplicationRunner {
             }
         }
         migrateMovieDownloadTasks();
+        migrateDownloadHistory();
         boolean hasSubscriptionTool = jdbcTemplate.queryForList("PRAGMA table_info(movie_subscription)").stream()
                 .anyMatch(column -> "downloader".equals(column.get("name")));
         if (!hasSubscriptionTool) {
@@ -71,6 +72,20 @@ public class DatabaseInitializer implements ApplicationRunner {
         }
         if (!columns.contains("external_task_id")) {
             jdbcTemplate.execute("ALTER TABLE movie_download_task ADD COLUMN external_task_id TEXT");
+        }
+    }
+
+    /** 「清空下载记录」依赖 hidden_at：旧库启动时补列，历史行保留给订阅去重与重复提交判定。 */
+    private void migrateDownloadHistory() {
+        addColumnIfMissing("hls_download_task", "hidden_at", "TEXT");
+        addColumnIfMissing("movie_download_task", "hidden_at", "TEXT");
+    }
+
+    private void addColumnIfMissing(String table, String column, String definition) {
+        boolean exists = jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")").stream()
+                .anyMatch(item -> column.equals(item.get("name")));
+        if (!exists) {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
         }
     }
 

@@ -4,6 +4,7 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.DyttSearchService;
 import com.huluwa.console.service.HlsDownloadService;
 import com.huluwa.console.service.HlsSubscriptionService;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -54,6 +55,9 @@ public class HlsController {
     }
     @GetMapping("/downloads")
     public ApiResult<List<Map<String, Object>>> downloads() { return ApiResult.ok(downloads.list()); }
+    /** 清空下载记录：隐藏已完成 / 失败 / 跳过的历史行，进行中的任务保留 */
+    @DeleteMapping("/downloads")
+    public ApiResult<Map<String, Object>> clearDownloads() { return ApiResult.ok(downloads.clearHistory()); }
     @PostMapping("/downloads")
     public ApiResult<Map<String, Object>> download(@RequestBody HlsRequests.Download body) {
         return ApiResult.ok(downloads.enqueue(body));

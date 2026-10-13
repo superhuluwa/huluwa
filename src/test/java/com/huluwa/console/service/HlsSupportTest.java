@@ -48,6 +48,38 @@ class HlsSupportTest {
     }
 
     @Test
+    void singleFeatureMovieUsesDefaultEpisodeOne() {
+        DyttSearchService.PlaySource movie = new DyttSearchService.PlaySource("dyttm3u8", 1,
+                java.util.List.of(new DyttSearchService.PlayItem("HD国语", "https://cdn.example/movie/index.m3u8")));
+        assertEquals("https://cdn.example/movie/index.m3u8", HlsDownloadService.episodeUrl(movie, 1, 1));
+        // 剧集线路仍然必须按集号严格匹配
+        DyttSearchService.PlaySource series = new DyttSearchService.PlaySource("dyttm3u8", 1,
+                java.util.List.of(new DyttSearchService.PlayItem("第01集", "https://cdn.example/1.m3u8")));
+        assertThrows(BusinessException.class, () -> HlsDownloadService.episodeUrl(series, 1, 2));
+        assertThrows(BusinessException.class, () -> HlsDownloadService.episodeUrl(movie, 1, 2));
+    }
+
+    /** 多版本无集号正片：默认第 1 集优先使用刚解析出的卡片地址，不靠列表位置猜。 */
+    @Test
+    void singleFeatureMoviePrefersTheResolvedAddress() {
+        DyttSearchService.PlaySource versions = new DyttSearchService.PlaySource("dyttm3u8", 3,
+                java.util.List.of(
+                        new DyttSearchService.PlayItem("HD国语", "https://cdn.example/hd.m3u8?sign=1"),
+                        new DyttSearchService.PlayItem("BD国语", "https://cdn.example/bd.m3u8?sign=1"),
+                        new DyttSearchService.PlayItem("抢先版", "https://cdn.example/cam.m3u8?sign=1")));
+        // 标题最稳定：签名刷新后仍能定位所选版本
+        assertEquals("https://cdn.example/bd.m3u8?sign=1",
+                HlsDownloadService.episodeUrl(versions, 1, 1, "https://cdn.example/bd.m3u8?sign=old", "BD国语"));
+        // 标题缺失时回退完整地址，再回退忽略签名查询串的路径
+        assertEquals("https://cdn.example/hd.m3u8?sign=1",
+                HlsDownloadService.episodeUrl(versions, 1, 1, "https://cdn.example/hd.m3u8?sign=1", null));
+        assertEquals("https://cdn.example/cam.m3u8?sign=1",
+                HlsDownloadService.episodeUrl(versions, 1, 1, "https://cdn.example/cam.m3u8?sign=old", null));
+        // 没有任何线索的多版本正片不按列表位置猜
+        assertThrows(BusinessException.class, () -> HlsDownloadService.episodeUrl(versions, 1, 1));
+    }
+
+    @Test
     void validatesDirectLinksAndRedactsSecrets() {
         assertTrue(HlsDownloadService.isM3u8("https://cdn.example/1.m3u8?token=temporary"));
         assertThrows(BusinessException.class, () -> HlsDownloadService.m3u8("https://example/play/1.html"));

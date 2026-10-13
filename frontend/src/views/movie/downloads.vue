@@ -1,13 +1,23 @@
 <template>
     <div class="downloads-page">
         <n-tabs v-model:value="kind" type="line">
-            <n-tab-pane name="hls" tab="离线剧集下载" />
-            <n-tab-pane name="magnet" tab="磁力下载" />
+            <!-- 标签用 #tab 插槽：当前 Vue 与 naive-ui 组合下 tab 属性会渲染成空白 -->
+            <n-tab-pane name="hls">
+                <template #tab>离线剧集下载</template>
+            </n-tab-pane>
+            <n-tab-pane name="magnet">
+                <template #tab>磁力下载</template>
+            </n-tab-pane>
         </n-tabs>
         <HlsDownloadsPanel v-if="kind === 'hls'" />
         <div v-else class="downloads">
             <div class="downloads-head">
                 <h3>下载任务</h3>
+                <n-button size="tiny" type="error" ghost :disabled="!clearable" :loading="clearing"
+                    @click="clearRecords">
+                    <template #icon><i class="fa-solid fa-trash-can"></i></template>
+                    清空下载记录
+                </n-button>
                 <n-button size="tiny" :loading="loading" @click="load">
                     <template #icon><i class="fa-solid fa-rotate"></i></template>
                     刷新
@@ -29,7 +39,7 @@ import HlsDownloadsPanel from './components/HlsDownloadsPanel.vue'
  * 我的下载：订阅巡检 / 手动提交触发的下载任务清单。
  * 与「我的订阅」同级，订阅页只保留订阅维护，下载记录独立成页查看。
  */
-import { SubscriptionDownloads } from '@/api/chat'
+import { ClearSubscriptionDownloads, SubscriptionDownloads } from '@/api/chat'
 
 const STATUS_LABEL = {
     pending: '待提交',
@@ -54,6 +64,7 @@ export default {
         return {
             kind: 'hls',
             loading: false,
+            clearing: false,
             // 首次由 mounted 负责拉取，避免 activated 紧跟挂载时重复请求
             firstActivate: true,
             rows: [],
@@ -71,6 +82,10 @@ export default {
             ]
         }
     },
+    computed: {
+        /** 只有已结束的历史行可清空；待提交 / 已提交 / 下载中的任务会保留 */
+        clearable() { return this.rows.some(row => ['completed', 'failed', 'removed'].includes(row.status)) }
+    },
     async mounted() {
         await this.load()
     },
@@ -83,6 +98,23 @@ export default {
         await this.load()
     },
     methods: {
+        clearRecords() {
+            window.$dialog?.warning({
+                title: '清空下载记录',
+                content: '将清空已完成 / 失败的历史记录，待提交与下载中的任务保留。下载器里已提交的任务不受影响，确认清空？',
+                positiveText: '清空',
+                negativeText: '取消',
+                onPositiveClick: async () => {
+                    this.clearing = true
+                    try {
+                        const result = await ClearSubscriptionDownloads()
+                        window.$message?.success(result?.message || '已清空下载记录')
+                        await this.load()
+                    } catch (error) { /* 拦截器已提示 */ }
+                    finally { this.clearing = false }
+                }
+            })
+        },
         async load() {
             this.loading = true
             try {
@@ -127,9 +159,10 @@ export default {
     margin: 0;
     font-size: 15px;
     color: var(--text);
+    margin-right: auto;
 }
 
-.downloads-head .n-button {
-    margin-left: auto;
+.downloads-head .n-button + .n-button {
+    margin-left: 8px;
 }
 </style>

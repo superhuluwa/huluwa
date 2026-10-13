@@ -549,9 +549,10 @@ public class MovieSubscriptionService {
                 headline = "⚠️ 提交失败：" + (result == null ? toolLabel(tool) + " 未返回结果" : result.message());
             }
         }
+        // 重新提交（含自动重试此前失败的行）时解除隐藏，让被「清空下载记录」隐藏的条目重新可见。
         jdbcTemplate.update("""
                 UPDATE movie_download_task SET status = ?, message = ?, save_path = ?, downloader = ?,
-                       external_task_id = ?, updated_at = ?
+                       external_task_id = ?, hidden_at = NULL, updated_at = ?
                  WHERE id = ?
                 """, status, headline, savePath, tool, externalTaskId, now(), taskId);
 
@@ -1167,12 +1168,12 @@ public class MovieSubscriptionService {
         return data;
     }
 
-    /** 下载任务明细（订阅页查看进度；默认最近 100 条） */
+    /** 下载任务明细（订阅页查看进度；默认最近 100 条，已清空的历史行不再返回） */
     public List<Map<String, Object>> downloads(long subscriptionId) {
-        StringBuilder sql = new StringBuilder("SELECT * FROM movie_download_task");
+        StringBuilder sql = new StringBuilder("SELECT * FROM movie_download_task WHERE hidden_at IS NULL");
         List<Object> params = new ArrayList<>();
         if (subscriptionId > 0) {
-            sql.append(" WHERE subscription_id = ?");
+            sql.append(" AND subscription_id = ?");
             params.add(subscriptionId);
         }
         sql.append(" ORDER BY id DESC LIMIT 100");
@@ -1193,6 +1194,28 @@ public class MovieSubscriptionService {
             list.add(item);
         }
         return list;
+    }
+
+    /**
+     * 清空下载记录：只隐藏终态行（已完成 / 失败 / 已移除），
+     * 已提交与下载中的任务保留在列表里；隐藏而非删除，
+     * 重复提交判定与订阅巡检去重仍依赖这些历史行。
+     */
+    public Map<String, Object> clearDownloads() {
+        int hidden = jdbcTemplate.update("""
+                UPDATE movie_download_task SET hidden_at = ?
+                 WHERE hidden_at IS NULL AND status NOT IN ('pending', 'added', 'downloading')
+                """, now());
+        Integer kept = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL", Integer.class);
+        int keptInt = kept == null ? 0 : kept;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("hidden", hidden);
+        result.put("kept", keptInt);
+        result.put("message", hidden > 0
+                ? "已清空 " + hidden + " 条下载记录" + (keptInt > 0 ? "，保留 " + keptInt + " 条进行中的任务" : "")
+                : keptInt > 0 ? "进行中的任务不会被清空，当前没有可清理的下载记录" : "暂无下载记录");
+        return result;
     }
 
     // ------------------------------------------------------------------ 工具

@@ -100,6 +100,11 @@ export function DownloadMagnet(payload) {
     return http.post('/chat/subscriptions/magnets/download', payload, { timeout: 60000 })
 }
 
+/** 清空磁力下载记录：只隐藏已结束的历史行，进行中的任务保留 */
+export function ClearSubscriptionDownloads() {
+    return http.delete('/chat/subscriptions/downloads')
+}
+
 /** 电影港默认下载工具与固定保存根目录。 */
 export function GetMovieDownloadSettings() {
     return http.get('/chat/subscriptions/settings')

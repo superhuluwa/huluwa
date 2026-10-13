@@ -171,6 +171,32 @@ class HlsSubscriptionServiceTest {
     }
 
     @Test
+    void clearingDownloadHistoryHidesFinishedRowsButKeepsQueueAndDeduplication() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(3, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_download_task SET status = 'completed' WHERE episode = 1");
+        db.update("UPDATE hls_download_task SET status = 'failed' WHERE episode = 2");
+        // episode 3 保持 pending，代表进行中的任务
+
+        Map<String, Object> cleared = downloads.clearHistory();
+        assertEquals(2, HlsSupport.number(cleared.get("hidden")));
+        assertEquals(1, HlsSupport.number(cleared.get("kept")));
+        assertEquals(List.of(3), downloads.list().stream().map(row -> (int) HlsSupport.number(row.get("episode"))).toList());
+        assertEquals(3, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
+
+        // 隐藏只是列表与重试入口的变化：已完成的一集仍不会被巡检重复下载
+        when(source.detail(anyString(), anyString())).thenReturn(detail(3, "new"));
+        assertEquals(0, subscriptions.check(id).get("added"));
+
+        // 重试此前失败的一集：解除隐藏并重新排队
+        long failed = db.queryForObject("SELECT id FROM hls_download_task WHERE episode = 2", Long.class);
+        Map<String, Object> retried = downloads.retry(failed);
+        assertEquals("pending", retried.get("status"));
+        assertTrue(downloads.list().stream().anyMatch(row -> HlsSupport.number(row.get("episode")) == 2));
+        assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE hidden_at IS NULL", Integer.class));
+    }
+
+    @Test
     void duplicateNumberingRejectsTheManifestBeforeAnyTasksAreCreated() {
         var repeated = new DyttSearchService.DyttItem("42", "剧名", "2026", "", "", "", "", "", "",
                 List.of(new DyttSearchService.PlaySource("m3u8", 2, List.of(

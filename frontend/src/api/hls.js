@@ -12,3 +12,5 @@ export const GetHlsDownloads = () => http.get('/hls/downloads')
 export const GetHlsDownloadLog = id => http.get('/hls/downloads/' + id + '/log')
 export const DownloadHls = body => http.post('/hls/downloads', body, { timeout: 60000 })
 export const RetryHlsDownload = id => http.post('/hls/downloads/' + id + '/retry')
+/** 清空下载记录：只隐藏已结束的历史行，进行中的任务保留 */
+export const ClearHlsDownloads = () => http.delete('/hls/downloads')
