@@ -31,7 +31,7 @@
 
         <CoverViewer v-model:show="viewer.show" :url="viewer.url" :title="viewer.title" />
 
-        <!-- 首次在「磁力下载」会话提交磁力时，自动弹出 qBittorrent 配置表单 -->
+        <!-- 首次在「qBittorrent 下载」会话提交磁力时，自动弹出 qBittorrent 配置表单 -->
         <QbSettingsDialog v-model:show="qbDialog" intro="提交磁力前需要先配置 qBittorrent 的连接信息。"
             @saved="onQbSaved" />
 
@@ -56,7 +56,7 @@
  *    机器人回复经推送到达；WS 断开自动降级为 8s 轮询，发送走 HTTP 兜底（requestId 幂等）；
  *  - 内置「电影港」会话：用户发送的内容即搜索关键字，回复为「摘要 + 封面图 + 详情链接」气泡；
  *  - 内置「电影天堂」会话：同样整条输入即关键字，卡片带评分与在线播放线路（无磁力，不订阅下载）；
- *  - 内置「磁力下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
+ *  - 内置「qBittorrent 下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
  *  - 内置「迅雷下载」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
  *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
@@ -148,7 +148,7 @@ export default {
             const kindText = {
                 movie: '影视搜索',
                 dytt: '在线影库',
-                magnet: '磁力下载',
+                magnet: 'qBittorrent 下载',
                 video: '分享口令解析',
                 xunlei: '迅雷远程下载',
                 system: '系统事件与运行通知'
@@ -190,7 +190,7 @@ export default {
                 return '还没有搜索记录'
             }
             if (this.currentKind === 'magnet') {
-                return '还没有磁力下载记录'
+                return '还没有 qBittorrent 下载记录'
             }
             if (this.currentKind === 'video') {
                 return '还没有视频解析记录'
@@ -209,7 +209,7 @@ export default {
             }
             if (this.currentKind === 'magnet') {
                 return this.isMobile
-                    ? '把磁力链接粘贴到下方输入框，发送即提交下载'
+                    ? '把磁力链接粘贴到下方输入框，发送即提交 qBittorrent 下载'
                     : '把磁力链接粘贴到下方输入框，回车即提交 qBittorrent 下载'
             }
             if (this.currentKind === 'video') {

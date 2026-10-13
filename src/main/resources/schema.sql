@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
 
--- 消息中心会话（聊天对象）：当前内置「电影港」「电影天堂」搜索、「磁力下载」、「视频解析」与「迅雷下载」会话；
+-- 消息中心会话（聊天对象）：当前内置「电影港」「电影天堂」搜索、「qBittorrent 下载」、「视频解析」与「迅雷下载」会话；
 -- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
@@ -127,9 +127,11 @@ VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('n
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('dytt', '电影天堂', 'dytt', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
--- 内置会话：磁力下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
+-- 内置会话：qBittorrent 下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
-VALUES ('magnet', '磁力下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));
+VALUES ('magnet', 'qBittorrent 下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));
+-- 老库标题同步：历史版本该会话标题为「磁力下载」，按 id 幂等更新，避免仅新部署生效
+UPDATE chat_session SET title = 'qBittorrent 下载' WHERE id = 'magnet' AND title = '磁力下载';
 
 -- 内置会话：视频解析（把抖音等分享口令交给内网解析服务，回复视频 / 图集气泡；
 -- 服务地址与账号存 sys_config：video.url / video.username / video.password，幂等）
@@ -145,7 +147,7 @@ VALUES ('xunlei', '迅雷下载', 'xunlei', datetime('now', 'localtime'), dateti
 -- 电影港订阅（对齐 quantum 的 dygangs_search.cs / dygangs.cs）：
 --   movie_subscription        订阅清单：片名 + 电影港具体链接 + 巡检状态（默认每小时一轮）
 --   movie_subscription_magnet 详情页下已采集的磁力（订阅基线 + 后续新增），用于对比更新
---   movie_download_task       订阅触发的磁力下载任务：qB 任务哈希 / 状态 / 两类通知标记
+--   movie_download_task       订阅触发的 qBittorrent 下载任务：qB 任务哈希 / 状态 / 两类通知标记
 -- ============================================================
 CREATE TABLE IF NOT EXISTS movie_subscription (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

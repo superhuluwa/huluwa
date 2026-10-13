@@ -76,7 +76,7 @@ export default {
                 return this.mobile ? '输入片名开始搜索' : '输入片名搜索电影天堂（Enter 发送 / Shift+Enter 换行）'
             }
             if (this.kind === 'magnet') {
-                return this.mobile ? '粘贴磁力链接提交下载' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交；可一次贴多条'
+                return this.mobile ? '粘贴磁力链接提交 qBittorrent 下载' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交 qBittorrent；可一次贴多条'
             }
             if (this.kind === 'video') {
                 return this.mobile

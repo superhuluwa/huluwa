@@ -39,7 +39,7 @@
                     @click="$emit('movie-settings')">
                     <i class="fa-solid fa-sliders"></i>
                 </button>
-                <button v-if="magnet" class="icon-btn" type="button" title="qBittorrent 设置（仅磁力下载会话）"
+                <button v-if="magnet" class="icon-btn" type="button" title="qBittorrent 设置（仅 qBittorrent 下载会话）"
                     @click="$emit('qb-settings')">
                     <i class="fa-solid fa-magnet"></i>
                 </button>

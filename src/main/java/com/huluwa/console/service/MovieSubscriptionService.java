@@ -863,7 +863,7 @@ public class MovieSubscriptionService {
                 chatPushService.messages(sessionId, List.of(row));
             }
         } catch (Exception e) {
-            log.warn("写入磁力下载会话失败：{}", safeMessage(e));
+            log.warn("写入 qBittorrent 下载会话失败：{}", safeMessage(e));
         }
     }
 

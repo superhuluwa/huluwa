@@ -16,7 +16,8 @@
             <template v-else>Q</template>
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
-        <div class="bubble" :class="{ 'is-cover': isImage, 'is-video': isVideo, 'is-error': isError, 'hold-open': holdOpen }"
+        <div class="bubble"
+            :class="{ 'is-cover': isImage, 'is-cover-wide': isImage && hasCoverCaption, 'is-video': isVideo, 'is-error': isError, 'hold-open': holdOpen }"
             :title="fullTime" @touchstart.passive="onHoldStart" @touchend="endHold" @touchcancel="endHold"
             @touchmove.passive="endHold">
             <div class="bubble-tools">
@@ -165,6 +166,10 @@ export default {
         },
         isImage() {
             return this.message.type === 'image' && !!this.message.content
+        },
+        /** 封面卡是否有配文：有配文的卡片铺到右侧头像栏前，纯图（图集后续张）仍保持窄图卡 */
+        hasCoverCaption() {
+            return String(this.message.contentText || '').trim().length > 0
         },
         /** 视频气泡：type=video 且正文是直链（视频解析会话的视频 / 实况照片） */
         isVideo() {
@@ -477,11 +482,20 @@ export default {
     min-width: 0;
 }
 
-/* 封面气泡：图片贴边、配文单独留白，视觉更接近海报卡（border-box 见 .bubble） */
+/* 封面气泡：纯图（无配文）仍是一张窄图卡，宽度跟着图片走（border-box 见 .bubble） */
 .bubble.is-cover {
     padding: 6px;
     max-width: calc(100% - var(--chat-rail-both, 96px));
     max-width: min(46%, calc(100% - var(--chat-rail-both, 96px)), 320px);
+}
+
+/* 带配文的卡片（影视卡片等）：卡片宽度不再跟着图片走——配文与操作条要撑满到右侧头像栏前，
+   图片单独缩到原来的约 2/3（见 .is-cover-wide .cover），所以卡片更宽、里面的图更小。 */
+.bubble.is-cover.is-cover-wide {
+    /* 卡片宽度只受「右侧头像栏」约束，不再套用普通气泡的 68% / 74% 上限 */
+    width: calc(100% - var(--chat-rail-both, 96px));
+    width: min(calc(100% - var(--chat-rail-both, 96px)), 720px);
+    max-width: 100%;
 }
 
 /* 视频气泡：播放器要够宽（320px 播放区），但比整块消息流窄（border-box 见 .bubble） */
@@ -570,6 +584,15 @@ export default {
     background: rgba(148, 163, 184, .08);
     color: var(--text-3);
     font-size: 12.5px;
+}
+
+/* 铺宽卡片：封面（含加载失败占位）高宽同步缩到原来的约 2/3。
+   旧卡片宽 = min(46% / 62%, 扣除头像栏, 320px / 300px)，减去左右 6px 内边距；
+   缩到 2/3 后窄屏约等于卡片宽的 55%，宽屏约 192px 封顶，单独封顶避免卡片变宽后图片跟着变大。 */
+.bubble.is-cover-wide .cover,
+.bubble.is-cover-wide .cover-fallback {
+    width: 55%;
+    width: min(55%, 192px);
 }
 
 .cover-caption {
@@ -679,6 +702,7 @@ export default {
         border-radius: 17px;
     }
 
+    /* 纯图卡：手机端回到 300px 上限；带配文的铺宽卡片由 .is-cover-wide 接管，不受这条影响 */
     .bubble.is-cover {
         max-width: calc(100% - var(--chat-rail-both, 92px));
         max-width: min(62%, calc(100% - var(--chat-rail-both, 92px)), 300px);
