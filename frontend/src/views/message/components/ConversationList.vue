@@ -324,8 +324,8 @@ export default {
 }
 
 .conversation-list.mobile .list-head {
-    /* 顶部留出状态栏安全区，标题区本身兼作页面头部 */
-    padding: calc(env(safe-area-inset-top) + 14px) max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
+    /* 状态栏安全区由公共控制台顶栏处理，内容只保留左右安全区 */
+    padding: 14px max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
     border-bottom: 1px solid var(--line);
     background: linear-gradient(180deg, rgba(20, 28, 46, .9) 0%, rgba(11, 15, 25, .75) 100%);
     backdrop-filter: blur(10px);

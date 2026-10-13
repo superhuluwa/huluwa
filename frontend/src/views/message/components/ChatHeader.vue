@@ -9,7 +9,9 @@
             <div v-if="metaText" class="head-meta">{{ metaText }}</div>
         </div>
         <div class="head-actions">
-            <n-popover v-model:show="searching" trigger="click" placement="bottom-end" style="width: 420px">
+            <!-- 弹层从搜索按钮右侧对齐，宽度需为后面的操作按钮与页面留白预留空间 -->
+            <n-popover v-model:show="searching" trigger="click" placement="bottom-end"
+                :style="{ width: compact ? 'min(420px, calc(100vw - 96px))' : 'min(420px, calc(100vw - 176px))', boxSizing: 'border-box' }">
                 <template #trigger>
                     <button class="icon-btn" type="button" title="搜索消息">
                         <i class="fa-solid fa-magnifying-glass"></i>
@@ -386,12 +388,11 @@ export default {
     word-break: break-word;
 }
 
-/* 手机端：顶栏增高到 58px（含状态栏安全区的高度由页面统一处理），
+/* 手机端：顶栏增高到 58px（状态栏安全区由公共控制台顶栏处理），
    标题字号放大到聊天软件常用尺寸，操作按钮保持 34px 触控目标 */
 @media (max-width: 900px) {
     .chat-header.compact {
-        height: calc(56px + env(safe-area-inset-top));
-        padding-top: env(safe-area-inset-top);
+        height: 58px;
         gap: 4px;
     }
 

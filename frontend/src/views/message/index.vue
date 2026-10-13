@@ -1,20 +1,20 @@
 <template>
     <!--
-      会话中心：手机端是一个「聊天软件」式的两级全屏页面 ——
+      会话中心：手机端在公共控制台顶栏下切换两级页面 ——
       一级 = 会话列表（默认落地），点击会话进入二级 = 聊天详情，顶栏返回键回到列表。
       桌面端（宽屏 / 非触屏）保持原有双栏布局，样式与交互不变。
     -->
     <div class="message-page"
         :class="{ narrow, 'show-room': narrowShowRoom, mobile: isMobile, desktop: !isMobile, chrome: !fullscreen }">
         <ConversationList v-if="showList" :sessions="sessions" :current-key="currentKey" :mobile="isMobile"
-            :show-menu="isMobile" @select="switchSession" @menu="openShellDrawer" />
+            @select="switchSession" />
 
         <section v-if="showRoom" class="chat-room">
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
-                :compact="isMobile" :clearable="canSend" :markable="isSystem" :show-menu="isMobile"
+                :compact="isMobile" :clearable="canSend" :markable="isSystem"
                 :magnet="isMagnet" :video="isVideoSession" :xunlei="isXunleiSession"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
-                @mark-all="onMarkAll" @menu="openShellDrawer" @qb-settings="openQbDialog"
+                @mark-all="onMarkAll" @qb-settings="openQbDialog"
                 @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog" @movie-settings="movieDialog = true" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
@@ -61,15 +61,14 @@
  *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
  *
  * 手机端（触屏 + 窄视口）的页面形态：
- *  - 全屏沉浸（主框架收起侧栏与顶栏，见 composables/useFullscreenPage）：一级会话列表独占整屏，
- *    点击会话进入二级聊天页，返回键回到列表，形态与聊天软件一致；
+ *  - 复用公共控制台顶栏，内容区铺满剩余空间；点击会话进入二级聊天页，返回键回到列表；
  *  - 桌面端仍是双栏同屏，手机端不做宽高占位，直接铺满。
  */
 import { mapActions, mapState } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import http from '@/libs/http'
 import { isMobileDevice } from '@/composables/useIsMobile'
-import { requestShellDrawer, useFullscreenPage } from '@/composables/useFullscreenPage'
+import { useFullscreenPage } from '@/composables/useFullscreenPage'
 import ConversationList from './components/ConversationList.vue'
 import ChatHeader from './components/ChatHeader.vue'
 import MessageList from './components/MessageList.vue'
@@ -97,7 +96,7 @@ export default {
         MovieSubscriptionDialog
     },
     setup() {
-        // 手机端会话页由路由守卫标记为全屏沉浸（壳层收起）；桌面端恒为 false
+        // 手机端会话内容铺满公共顶栏下的剩余空间；桌面端恒为 false
         const fullscreen = useFullscreenPage()
         return { fullscreen }
     },
@@ -380,10 +379,6 @@ export default {
             this.narrowShowRoom = false
             this.syncQuery(this.currentKey)
         },
-        /** 全屏沉浸页面没有主框架侧栏：菜单按钮通过回调把抽屉请求转给主框架 */
-        openShellDrawer() {
-            requestShellDrawer()
-        },
         async refresh() {
             await this.refreshSessions()
             await useChatStore().reloadSession(this.currentKey)
@@ -458,6 +453,7 @@ export default {
 
 <style scoped>
 .message-page {
+    box-sizing: border-box;
     /* ======================================================================
        聊天区统一水平留白：顶栏标题 / 消息流头像列 / 输入框三者的左右边缘
        必须落在同一条垂直线上，否则会出现「头像、气泡、输入框各对齐各」的错位。
@@ -519,8 +515,7 @@ export default {
 }
 
 .message-page.mobile :deep(.chat-header) {
-    padding-top: env(safe-area-inset-top);
-    height: calc(58px + env(safe-area-inset-top));
+    height: 58px;
 }
 
 .message-page.mobile :deep(.composer) {

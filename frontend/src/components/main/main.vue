@@ -22,7 +22,7 @@
         <div v-if="shellVisible && isMobile && mobileDrawerOpen" class="sider-mask" @click="closeDrawer"></div>
 
         <div class="main-body">
-            <header-bar v-if="!shellHidden" :collapsed="headerCollapsed" :mobile="isMobile"
+            <header-bar :collapsed="headerCollapsed" :mobile="isMobile"
                 @on-coll-change="handleCollapsedChange">
                 <user-chip />
             </header-bar>
@@ -63,7 +63,7 @@ export default {
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()
-        // 手机端会话页等「全屏沉浸」页面：外壳整体不渲染，内容独占整屏
+        // 手机端会话内容铺满公共顶栏下方，侧栏通过顶栏菜单按需打开
         const shellHidden = useFullscreenPage()
         return { appStore, chatStore, shellHidden }
     },
@@ -78,9 +78,8 @@ export default {
     },
     computed: {
         /**
-         * 外壳（侧栏 / 遮罩 / 顶栏）是否渲染：
-         * 沉浸态（手机端会话页）整体隐藏，但用户请求打开抽屉时仍要把侧栏渲染出来，
-         * 否则全屏页面里没有任何进入其它模块的通道。
+         * 侧栏是否渲染：手机端会话页默认隐藏侧栏，公共顶栏始终显示，
+         * 点击顶栏菜单后再渲染抽屉，所有页面共用同一个导航入口。
          */
         shellVisible() {
             return !this.shellHidden || this.mobileDrawerOpen
@@ -145,7 +144,7 @@ export default {
     async mounted() {
         this.handleResize()
         window.addEventListener('resize', this.handleResize)
-        // 全屏沉浸页面（手机端会话页）里的「菜单」按钮 → 打开这里同款抽屉
+        // 兼容内容组件请求打开公共侧栏抽屉
         onShellDrawerRequest(() => {
             this.mobileDrawerOpen = true
         })
@@ -433,15 +432,17 @@ export default {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
 }
 
 .content-wrapper {
     flex: 1;
+    min-height: 0;
     padding: 18px;
     overflow: auto;
     position: relative;
 }
-/* 全屏沉浸（手机端会话页）：外壳不渲染，内容区去掉留白与滚动容器，交给页面自己管理 */
+/* 手机端会话内容在公共顶栏下铺满剩余空间，列表与消息流各自滚动 */
 .main-console.is-immersive .main-body {
     width: 100%;
 }

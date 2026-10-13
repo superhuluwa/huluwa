@@ -171,4 +171,22 @@ export default {
     justify-content: flex-end;
     gap: 10px;
 }
+
+@media (max-width: 900px) {
+    .user-chip {
+        max-width: 140px;
+    }
+
+    .ava,
+    .user-chip > i {
+        flex: none;
+    }
+
+    .name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
 </style>

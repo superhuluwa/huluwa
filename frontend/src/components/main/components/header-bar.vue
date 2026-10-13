@@ -37,6 +37,7 @@ export default {
 
 <style scoped>
 .header-bar {
+    box-sizing: border-box;
     height: 56px;
     flex: none;
     background: rgba(13, 21, 38, .7);
@@ -48,6 +49,7 @@ export default {
 }
 
 .icon-btn {
+    flex: none;
     background: transparent;
     border: none;
     color: var(--text-2);
@@ -65,6 +67,8 @@ export default {
 }
 
 .crumb {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
 }
 
@@ -73,6 +77,7 @@ export default {
 }
 
 .custom-content-con {
+    flex: none;
     margin-left: auto;
     display: flex;
     align-items: center;
@@ -81,13 +86,27 @@ export default {
 /* 移动端：顶栏宽度紧张，压缩间距并允许标题省略 */
 @media (max-width: 900px) {
     .header-bar {
+        height: calc(56px + env(safe-area-inset-top));
         gap: 8px;
-        padding: 0 12px;
+        padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+    }
+
+    .icon-btn {
+        width: 40px;
+        height: 40px;
+        justify-content: center;
     }
 
     .crumb {
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .crumb :deep(.n-breadcrumb-item__link) {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .custom-content-con {
