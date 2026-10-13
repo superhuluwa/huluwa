@@ -63,7 +63,11 @@ export default {
             if (this.watching || this.busy) return
             try {
                 const task = await this.watches.start(this.keyword)
-                if (task) window.$message?.success('已开启监听，每 ' + task.intervalMinutes + ' 分钟检查一次')
+                if (task?.status === 'watching') {
+                    window.$message?.success('已开启监听，每 ' + task.intervalMinutes + ' 分钟检查一次')
+                } else if (task?.status === 'found') {
+                    window.$message?.success('该监听已找到资源，请查看系统通知')
+                }
             } catch (e) {
                 window.$message?.error(e.message || '开启监听失败')
             }
@@ -72,7 +76,11 @@ export default {
             if (!this.watching || this.busy) return
             try {
                 const task = await this.watches.cancel(this.keyword)
-                if (task) window.$message?.success('已取消监听')
+                if (task?.status === 'cancelled') {
+                    window.$message?.success('已取消监听')
+                } else if (task?.status === 'found') {
+                    window.$message?.success('该监听已找到资源，请查看系统通知')
+                }
             } catch (e) {
                 window.$message?.error(e.message || '取消监听失败')
             }

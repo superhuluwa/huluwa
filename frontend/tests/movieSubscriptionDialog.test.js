@@ -8,7 +8,8 @@ vi.mock('@/libs/http', () => ({ default: { get: vi.fn(), post: vi.fn(), delete: 
 vi.mock('@/api/chat', () => ({
     GetMovieDownloadSettings: vi.fn(), SaveMovieDownloadSettings: vi.fn(),
     GetMovieSubscriptionStatus: vi.fn(), UpdateMovieSubscriptionSettings: vi.fn(),
-    SubscribeMovie: vi.fn(), PreviewMagnets: vi.fn(), DownloadMagnet: vi.fn()
+    SubscribeMovie: vi.fn(), PreviewMagnets: vi.fn(), DownloadMagnet: vi.fn(),
+    GetMovieSearchWatches: vi.fn(), StartMovieSearchWatch: vi.fn(), CancelMovieSearchWatch: vi.fn()
 }))
 
 function dialog(movie, resubscribe = false) {
