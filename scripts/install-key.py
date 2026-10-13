@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""一次性把本机部署公钥安装到服务器 ~/.ssh/authorized_keys。
+"""一次性把本机部署公钥安装到服务器的 authorized_keys。
+
+默认写入 root 的 /root/.ssh；用 --ssh-dir 可指定其它用户的家目录 .ssh（如飞牛普通用户）。
 
 只在 deploy.bat 首次运行(或更换密钥)时被调用, 需要输入一次服务器密码。
 密码不会被保存; 装好公钥后, 后续部署全部免密自动认证。
@@ -28,6 +30,8 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=22)
     ap.add_argument("--user", required=True)
     ap.add_argument("--pubkey", required=True)
+    ap.add_argument("--ssh-dir", default="",
+                    help="目标 .ssh 目录（默认 /root/.ssh）；飞牛等禁用 root 登录的系统填普通用户的 .ssh")
     ap.add_argument("--config", default=str(DEFAULT_CONFIG))
     args = ap.parse_args()
 
@@ -68,13 +72,21 @@ def main() -> int:
 
     try:
         quoted = "'" + pub.replace("'", "'\\''") + "'"
+        # 目标目录：默认 root 家目录；飞牛等系统用 --ssh-dir 指向普通用户（root 登录被禁用）。
+        ssh_dir = (args.ssh_dir or "/root/.ssh").rstrip("/")
+        q_dir = "'" + ssh_dir.replace("'", "'\\''") + "'"
+        auth_keys = q_dir + "/authorized_keys"
+        # sudo 场景下目录可能尚不存在（飞牛用户家目录由系统按需创建），必要时提权创建。
         cmd = (
-            "mkdir -p /root/.ssh && chmod 700 /root/.ssh && "
-            "touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && "
-            "grep -qF %s /root/.ssh/authorized_keys || echo %s >> /root/.ssh/authorized_keys; "
-            "restorecon -R /root/.ssh 2>/dev/null || true; "
-            "grep -cF %s /root/.ssh/authorized_keys"
-        ) % (quoted, quoted, quoted)
+            "if [ ! -d %s ]; then sudo -n mkdir -p %s 2>/dev/null || mkdir -p %s; "
+            "sudo -n chown -R $(id -u):$(id -g) %s 2>/dev/null || true; fi; "
+            "mkdir -p %s && chmod 700 %s && "
+            "touch %s && chmod 600 %s && "
+            "grep -qF %s %s || echo %s >> %s; "
+            "restorecon -R %s 2>/dev/null || true; "
+            "grep -cF %s %s"
+        ) % (q_dir, q_dir, q_dir, q_dir, q_dir, q_dir, auth_keys, auth_keys,
+             quoted, auth_keys, quoted, auth_keys, q_dir, quoted, auth_keys)
         _, stdout, stderr = client.exec_command(cmd, timeout=30)
         out = stdout.read().decode("utf-8", "replace").strip()
         err = stderr.read().decode("utf-8", "replace").strip()

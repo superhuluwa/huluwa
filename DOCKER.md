@@ -67,6 +67,45 @@ docker compose up -d
 
 公网部署务必配置带 HTTPS 的反向代理、防火墙与来源限制。
 
+## 一键部署到飞牛 fnOS（deploy_fnos.bat）
+
+从本机 Windows 直接把当前源码部署到飞牛 NAS。飞牛默认禁止 root 登录，脚本用普通管理员账号 + `sudo` 完成，**不需要**在飞牛上安装 Node.js / Maven / Java。
+
+```shell
+deploy_fnos.bat
+```
+
+脚本流程：`git pull` → 打包源码 → `scp` 上传 → 远端 `docker build` → `docker compose up -d` → 校验 Docker socket 挂载与健康检查。
+
+默认配置（写在 `deploy_fnos.bat` 顶部，可按需修改）：
+
+| 项 | 默认值 |
+|---|---|
+| 目标主机 | `192.168.3.77:22` |
+| 部署账号 | `397383523`（需在 `docker` 组，并使用 sudo） |
+| 应用目录 | `/vol1/@appdata/huluwa` |
+| 源码目录 | `/vol1/@appdata/huluwa/src` |
+| 数据目录 | `/vol1/@appdata/huluwa/data` |
+| Frp 目录 | `/vol1/@appdata/huluwa/frp` |
+| 监听端口 | `8000` |
+
+首次运行会自动生成部署密钥、安装公钥到 `/home/<账号>/.ssh/authorized_keys`，并需要认证一次；之后全程免密。
+
+sudo 密码的取得顺序：环境变量 `HULUWA_FNOS_SUDO_PW` → 本机凭据文件（`--config`，默认 `~/.codex/private/fnos/config.json`）→ 交互式隐藏输入。密码只经 stdin 交给远端 `sudo -S`，不写入命令行参数或日志，部署结束即删除临时文件。
+
+飞牛适配要点：
+
+- **无 root 登录**：`PermitRootLogin no`，全部特权操作通过 `sudo` 执行。
+- **无 SELinux**：脚本会自动移除 compose 中 socket 挂载的 `:z` 标记。
+- **镜像源限制**：飞牛的加速源拉不到 `docker/dockerfile:1`（HEAD 返回 401），脚本会去掉 `Dockerfile` 的 `# syntax=` 行，改用 Docker 自带的 BuildKit 前端（Docker 28 已支持本项目用到的 `RUN --mount=type=cache`）。
+- **项目名固定**：源码位于 `src/` 子目录，`.env` 中写入 `COMPOSE_PROJECT_NAME=huluwa`，避免项目名变成 `src` 与既有容器/网络脱节。
+- **Docker 服务**：脚本会自动 `systemctl start docker` 并校验 `/var/run/docker.sock`（飞牛该 socket 的 GID 为 994）。
+
+配套文件：
+
+- `scripts/deploy-fnos-remote.sh` — 远端执行体（以 root 运行，负责目录属主、构建、重建、校验）
+- `scripts/fnos-sudo-pw.py` — 准备 sudo 密码临时文件
+- `scripts/install-key.py --ssh-dir` — 把公钥装到普通用户家目录（`--ssh-dir` 为新增参数，默认仍是 `/root/.ssh`）
 ## 手动部署（不使用脚本）
 
 ```shell
