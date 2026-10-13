@@ -6,23 +6,43 @@ set -euo pipefail
 MODE="${1:-fix}"
 CONTAINER="${2:-huluwa-console}"
 DOWNLOAD_DIR="/vol1/1000/downloads"
+# 飞牛 fnOS 在 POSIX ACL 之上叠加自家的 TrimACL：/vol1 下的目录以 system.trim_acl
+# 扩展属性为准，setfacl 写入的 POSIX ACL 在该卷上不参与权限判定，必须用 trimacl 授权。
+TRIMACL_BIN="/usr/trim/bin/trimacl"
 
 log() { printf '%s\n' "$*"; }
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
+grant_uid_10001() {
+  local dir="$1"
+  if [ -x "${TRIMACL_BIN}" ]; then
+    # sfd = 自身、文件、子目录均继承，等价于 CentOS 上的默认 ACL。
+    "${TRIMACL_BIN}" -m a:u:10001:rwxpdDaAeEc:sfd "${dir}" \
+      || fail "TrimACL 授权失败（飞牛）：${dir}"
+    return 0
+  fi
+  command -v setfacl >/dev/null 2>&1 \
+    || fail "未找到 trimacl 或 setfacl，无法授予 UID 10001 下载目录权限"
+  setfacl -m u:10001:rwx,d:u:10001:rwx "${dir}" \
+    || fail "POSIX ACL 授权失败：${dir}"
+}
+
 prepare_directory() {
   [ "$(id -u)" -eq 0 ] || fail "目录授权需要 root 权限，请通过 sudo 运行"
-  command -v setfacl >/dev/null 2>&1 || fail "未找到 setfacl，无法授予 UID 10001 下载目录权限"
   [ ! -L "${DOWNLOAD_DIR}" ] || fail "下载根目录不能是符号链接：${DOWNLOAD_DIR}"
   mkdir -p "${DOWNLOAD_DIR}" || fail "无法创建下载目录：${DOWNLOAD_DIR}"
   [ -d "${DOWNLOAD_DIR}" ] || fail "下载路径不是目录：${DOWNLOAD_DIR}"
   # 仅增加应用用户的访问和继承权限，保留迅雷/qBittorrent 的目录属主。
-  setfacl -m u:10001:rwx,d:u:10001:rwx "${DOWNLOAD_DIR}" \
-    || fail "下载根目录 ACL 授权失败：${DOWNLOAD_DIR}"
-  find "${DOWNLOAD_DIR}" -mindepth 1 -maxdepth 1 -type d \
-    -exec setfacl -m u:10001:rwx,d:u:10001:rwx {} + \
-    || fail "已有剧名目录或工作目录 ACL 授权失败：${DOWNLOAD_DIR}"
-  log "已授予 UID 10001 下载根目录及第一层目录的写权限：${DOWNLOAD_DIR}"
+  grant_uid_10001 "${DOWNLOAD_DIR}"
+  local dir
+  while IFS= read -r -d '' dir; do
+    grant_uid_10001 "${dir}"
+  done < <(find "${DOWNLOAD_DIR}" -mindepth 1 -maxdepth 1 -type d -print0)
+  if [ -x "${TRIMACL_BIN}" ]; then
+    log "已通过 TrimACL 授予 UID 10001 下载根目录及第一层目录的写权限：${DOWNLOAD_DIR}"
+  else
+    log "已通过 POSIX ACL 授予 UID 10001 下载根目录及第一层目录的写权限：${DOWNLOAD_DIR}"
+  fi
 }
 
 check_mount() {
@@ -70,7 +90,7 @@ check_write() {
       fi
     done
   '; then
-    fail "容器 UID 10001 无法在 ${DOWNLOAD_DIR} 创建或归档文件；请检查目录 ACL、挂载及磁盘状态"
+    fail "容器 UID 10001 无法在 ${DOWNLOAD_DIR} 创建或归档文件；请检查 TrimACL/POSIX ACL、挂载及磁盘状态"
   fi
   log "下载目录挂载及 UID 10001 实际写入检查通过：${DOWNLOAD_DIR}"
 }
