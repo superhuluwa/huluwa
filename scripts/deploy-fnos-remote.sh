@@ -10,12 +10,12 @@
 #   5. 校验容器内可访问宿主机 Docker socket、等待健康检查通过
 #
 # 用法：
-#   sudo bash deploy-fnos-remote.sh APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [MEDIA_DIR]
+#   sudo bash deploy-fnos-remote.sh APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [LEGACY_MEDIA_DIR]
 
 set -euo pipefail
 
 if [ "$#" -ne 7 ] && [ "$#" -ne 8 ]; then
-  echo "用法: sudo bash $0 APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [MEDIA_DIR]" >&2
+  echo "用法: sudo bash $0 APP_DIR DATA_DIR FRP_DIR HOST_PORT CONTAINER IMAGE DEPLOY_USER [LEGACY_MEDIA_DIR]" >&2
   exit 2
 fi
 
@@ -30,8 +30,9 @@ DEPLOY_USER="$7"
 SRC_DIR="${APP_DIR}/src"
 TARBALL="/tmp/huluwa-src.tar.gz"
 BUILD_LOG="/tmp/huluwa-build.log"
+DOWNLOAD_DIR="/vol1/1000/downloads"
 MEDIA_DIR="${8:-${HULUWA_MEDIA_DIR:-}}"
-# 源码目录随后会被替换，提前保留用户上次配置的媒体挂载路径。
+# 源码目录随后会被替换，保留旧媒体挂载供历史文件和日志只读访问。
 if [ -z "$MEDIA_DIR" ] && [ -f "${SRC_DIR}/.env" ]; then
   MEDIA_DIR="$(sed -n 's/^HULUWA_MEDIA_DIR=//p' "${SRC_DIR}/.env" | tail -n 1)"
 fi
@@ -88,19 +89,19 @@ if grep -q '^# syntax=docker/dockerfile:1' Dockerfile; then
 fi
 
 # ---------- 3. 数据目录 ----------
-mkdir -p "${DATA_DIR}" "${MEDIA_DIR}"
+mkdir -p "${DATA_DIR}" "${MEDIA_DIR}" "${DOWNLOAD_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
 log "数据目录：${DATA_DIR}（属主 10001:10001 -> 容器内 /app/data）"
-# 共享媒体根目录仅授予当前目录及新建内容的权限，不递归改变共享媒体属主。
+# 共享下载目录授予 UID 10001 写入权限，已有剧名目录只处理第一层，不改变属主。
 if command -v setfacl >/dev/null 2>&1; then
-  setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}" || warn "媒体根目录授权失败，请在飞牛上设置 uid 10001 写权限"
-  if [ -d "${MEDIA_DIR}/电视剧" ]; then
-    setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}/电视剧" || warn "已有电视剧目录授权失败"
-  fi
+  setfacl -m u:10001:rwx,d:u:10001:rwx "${DOWNLOAD_DIR}" || warn "下载根目录授权失败，请在飞牛上设置 uid 10001 写权限"
+  find "${DOWNLOAD_DIR}" -mindepth 1 -maxdepth 1 -type d \
+    -exec setfacl -m u:10001:rwx,d:u:10001:rwx {} + || warn "已有剧名目录授权失败，请检查目录权限"
 else
-  warn "请确认媒体目录 ${MEDIA_DIR} 可由 uid 10001 写入"
+  warn "请确认下载目录 ${DOWNLOAD_DIR} 及已有剧名目录可由 uid 10001 写入"
 fi
-log "媒体目录：${MEDIA_DIR}（容器内 /media，飞牛影视添加其电视剧子目录）"
+log "下载目录：${DOWNLOAD_DIR}（容器内同一路径，与迅雷、qBittorrent 共用，文件直接放在剧名目录）"
+log "旧媒体目录：${MEDIA_DIR}（容器内 /media，只读保留历史文件和日志）"
 
 # ---------- 4. Frp 配置目录 ----------
 mkdir -p "${FRP_DIR}"

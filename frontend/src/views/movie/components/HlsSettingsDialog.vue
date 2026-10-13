@@ -2,7 +2,7 @@
     <n-modal v-model:show="visible" preset="card" title="离线下载设置" style="width: 500px; max-width: calc(100vw - 32px)">
         <n-spin :show="loading">
             <n-form v-if="form" label-placement="top">
-                <n-form-item label="容器媒体根目录"><n-input :value="form.mediaRoot" readonly /></n-form-item>
+                <n-form-item label="下载根目录"><n-input :value="form.mediaRoot" readonly /></n-form-item>
                 <p class="tip">{{ form.toolsReady ? '下载工具已就绪' : '缺少下载工具，需要更新 Docker 镜像' }}；{{ form.mediaWritable ? '媒体目录可写' : '媒体目录不可写，请检查挂载与权限' }}。</p>
                 <n-form-item label="分片线程数"><n-input-number v-model:value="form.threadCount" :min="1" :max="32" /></n-form-item>
                 <n-form-item label="最大尝试次数"><n-input-number v-model:value="form.maxAttempts" :min="1" :max="10" /></n-form-item>

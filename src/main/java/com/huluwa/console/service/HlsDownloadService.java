@@ -134,7 +134,7 @@ public class HlsDownloadService implements ApplicationRunner {
         try {
             Path file = Path.of(task.get("log_path").toString());
             if (!Files.exists(file)) return Map.of("content", "日志文件已不存在。");
-            if (Files.isSymbolicLink(file) || !file.toRealPath().startsWith(root().resolve(".huluwa-work").toRealPath())) {
+            if (!managedPath(file, ".huluwa-work")) {
                 throw new IOException("日志路径无效");
             }
             String content = Files.readString(file, StandardCharsets.UTF_8);
@@ -280,12 +280,10 @@ public class HlsDownloadService implements ApplicationRunner {
         try {
             requireEnvironment();
             Settings settings = settings();
-            String folder = HlsSupport.safeName(title) + (HlsSupport.text(task.get("year")).isBlank()
-                    ? "" : " (" + task.get("year") + ")");
-            Path archive = directory(root().resolve("电视剧").resolve(folder).resolve(String.format("Season %02d", season)));
+            Path archive = directory(root().resolve(HlsSupport.safeName(title)));
             // 两种封装都查一遍，避免修改默认格式后重复下载已完成的文件。
             Path previous = task.get("save_path") == null ? null : Path.of(task.get("save_path").toString());
-            if (previous != null && previous.normalize().startsWith(root()) && Files.exists(previous)) {
+            if (previous != null && Files.exists(previous) && managedPath(previous, null)) {
                 verify(previous); complete(id, previous, name); return;
             }
             for (String extension : List.of("mp4", "mkv")) {
@@ -426,7 +424,7 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     private void verify(Path file) throws Exception {
-        if (!file.toRealPath().startsWith(root().toRealPath()) || Files.isSymbolicLink(file)
+        if (!managedPath(file, null)
                 || !Files.isRegularFile(file) || Files.size(file) < 1024) throw new IOException("媒体文件不存在、过小或路径无效");
         Process probe = new ProcessBuilder(paths.getFfprobe(), "-v", "error", "-show_entries",
                 "format=duration:stream=codec_type", "-of", "json", file.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
@@ -458,6 +456,17 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     private Path root() { return Path.of(paths.getMediaRoot()).toAbsolutePath().normalize(); }
+    /** 新目录允许归档，旧挂载仅允许读取已有文件；日志限于各自的工作目录。 */
+    private boolean managedPath(Path file, String subdirectory) throws IOException {
+        if (Files.isSymbolicLink(file)) return false;
+        Path absolute = file.toAbsolutePath().normalize();
+        Path real = file.toRealPath();
+        for (Path base : List.of(root(), Path.of(paths.getLegacyMediaRoot()).toAbsolutePath().normalize())) {
+            Path allowed = subdirectory == null ? base : base.resolve(subdirectory);
+            if (Files.isDirectory(allowed) && absolute.startsWith(allowed) && real.startsWith(allowed.toRealPath())) return true;
+        }
+        return false;
+    }
     private Path directory(Path value) throws IOException {
         Path normalized = value.toAbsolutePath().normalize();
         Path root = root();

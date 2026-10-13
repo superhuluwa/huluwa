@@ -48,8 +48,8 @@ RUN apt-get update \
     && groupadd --gid 10001 huluwa \
     && useradd --uid 10001 --gid huluwa --no-create-home \
         --home-dir /app --shell /usr/sbin/nologin huluwa \
-    && mkdir -p /app/data /media \
-    && chown huluwa:huluwa /app/data /media
+    && mkdir -p /app/data /vol1/1000/downloads /media \
+    && chown huluwa:huluwa /app/data /vol1/1000/downloads /media
 
 COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
 COPY --from=hls-tools /out/N_m3u8DL-RE /usr/local/bin/N_m3u8DL-RE

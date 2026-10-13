@@ -26,14 +26,21 @@ case "${DATA_DIR}" in
 esac
 log "数据目录：${DATA_DIR}"
 mkdir -p "${DATA_DIR}"
+# HULUWA_MEDIA_DIR 仅保留旧版本文件；新下载与迅雷、qBittorrent 使用同一绝对路径。
+DOWNLOAD_DIR="/vol1/1000/downloads"
 MEDIA_DIR="$(grep -E '^HULUWA_MEDIA_DIR=' .env | tail -n1 | cut -d= -f2- || true)"
 MEDIA_DIR="${MEDIA_DIR:-./data/media}"
-mkdir -p "${MEDIA_DIR}"
+mkdir -p "${MEDIA_DIR}" "${DOWNLOAD_DIR}"
 chown -R 10001:10001 "${DATA_DIR}"
-# 默认媒体目录位于数据目录内；外部共享目录通过 ACL 授权当前目录，不递归修改属主。
+# 仅授权共享根目录及第一层剧名目录，不递归修改已有媒体文件属主。
 if command -v setfacl >/dev/null 2>&1; then
-  setfacl -m u:10001:rwx,d:u:10001:rwx "${MEDIA_DIR}" || true
+  setfacl -m u:10001:rwx,d:u:10001:rwx "${DOWNLOAD_DIR}" || log "下载目录授权失败，请检查 uid 10001 的写权限"
+  find "${DOWNLOAD_DIR}" -mindepth 1 -maxdepth 1 -type d \
+    -exec setfacl -m u:10001:rwx,d:u:10001:rwx {} + || log "已有剧名目录授权失败，请检查目录权限"
+else
+  log "请确认下载目录 ${DOWNLOAD_DIR} 及已有剧名目录可由 uid 10001 写入"
 fi
+log "共用下载目录：${DOWNLOAD_DIR}（容器内同一路径，完成文件直接保存到剧名目录）"
 
 # Frp 管理：宿主机 frpc.ini 目录（compose 挂载到容器 /app/frp）
 FRP_DIR_DEFAULT="/root/frp"

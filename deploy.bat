@@ -105,7 +105,7 @@ if errorlevel 1 goto :fail
 
 REM ---------- 5. 重建容器（单容器，挂载宿主机 docker.sock） ----------
 echo [5/5] 重建容器 %CONTAINER% ...
-"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker compose down --remove-orphans >/dev/null 2>&1; docker rm -f %CONTAINER% huluwa-docker-proxy >/dev/null 2>&1; mkdir -p %DATA_DIR%; chown -R 10001:10001 %DATA_DIR%; if [ -d /root/frp ]; then if command -v setfacl >/dev/null 2>&1; then setfacl -m u:10001:rwx /root/frp 2>/dev/null; setfacl -m u:10001:rw /root/frp/frpc.ini 2>/dev/null; else chown 10001:10001 /root/frp; chmod u+rwx /root/frp; chown 10001:10001 /root/frp/frpc.ini; fi; fi; docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12"
+"%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "cd %REMOTE_DIR% && docker compose down --remove-orphans >/dev/null 2>&1; docker rm -f %CONTAINER% huluwa-docker-proxy >/dev/null 2>&1; mkdir -p %DATA_DIR% /vol1/1000/downloads; chown -R 10001:10001 %DATA_DIR%; if command -v setfacl >/dev/null 2>&1; then setfacl -m u:10001:rwx,d:u:10001:rwx /vol1/1000/downloads; find /vol1/1000/downloads -mindepth 1 -maxdepth 1 -type d -exec setfacl -m u:10001:rwx,d:u:10001:rwx {} +; else echo '请确认 /vol1/1000/downloads 及剧名目录可由 uid 10001 写入'; fi; if [ -d /root/frp ]; then if command -v setfacl >/dev/null 2>&1; then setfacl -m u:10001:rwx /root/frp 2>/dev/null; setfacl -m u:10001:rw /root/frp/frpc.ini 2>/dev/null; else chown 10001:10001 /root/frp; chmod u+rwx /root/frp; chown 10001:10001 /root/frp/frpc.ini; fi; fi; docker compose up -d --no-build --remove-orphans 2>&1 | tail -n 12"
 if errorlevel 1 goto :fail
 
 REM ---------- 5b. 校验容器内可访问宿主机 Docker socket ----------
@@ -121,6 +121,7 @@ echo.
 echo ========== 部署完成 ==========
 echo 访问地址: http://%SERVER%:%HOST_PORT%
 echo 数据目录: %DATA_DIR%  (容器内 /app/data)
+echo 下载目录: /vol1/1000/downloads  (迅雷、qBittorrent、电影天堂共用)
 echo 查看日志: "%SSH_EXE%" -i "%SSH_KEY%" -p %SSH_PORT% %USER%@%SERVER% "docker logs -f %CONTAINER%"
 "%SSH_EXE%" -i "%SSH_KEY%" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "docker ps -a --filter name=huluwa --format '{{.Names}} | {{.Status}} | {{.Ports}}'"
 echo.

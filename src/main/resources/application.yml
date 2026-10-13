@@ -39,8 +39,10 @@ spring:
 huluwa:
   data-dir: ./data
   hls:
-    # 容器媒体根目录；只将其“电视剧”子目录加入飞牛影视媒体库。
-    media-root: ${HULUWA_HLS_MEDIA_ROOT:/media}
+    # 与迅雷、qBittorrent 共用下载根目录，文件直接归档到剧名目录。
+    media-root: ${HULUWA_HLS_MEDIA_ROOT:/vol1/1000/downloads}
+    # 只用于读取旧版本媒体文件和日志。
+    legacy-media-root: ${HULUWA_HLS_LEGACY_MEDIA_ROOT:/media}
     binary: ${HULUWA_HLS_BINARY:/usr/local/bin/N_m3u8DL-RE}
     ffmpeg: ${HULUWA_HLS_FFMPEG:/usr/bin/ffmpeg}
     ffprobe: ${HULUWA_HLS_FFPROBE:/usr/bin/ffprobe}

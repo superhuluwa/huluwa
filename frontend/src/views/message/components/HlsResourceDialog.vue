@@ -34,7 +34,7 @@
                 </details>
             </n-form>
             <p class="tip">归档示例：{{ samplePath }}</p>
-            <p class="tip">只下载可识别集号的正片。预告和花絮自动跳过；无法确认集号时请先核实。飞牛影视媒体库选择正式“电视剧”目录。</p>
+            <p class="tip">只下载可识别集号的正片。预告和花絮自动跳过；无法确认集号时请先核实。文件直接放在下载根目录下的剧名文件夹，可将该文件夹加入飞牛影视。</p>
             <p v-if="editing" class="tip">设置影响后续下载；已完成文件保留原名。首次跳过的剧集可在“我的下载”中补下载。</p>
         </n-spin>
         <template #footer>
@@ -73,8 +73,7 @@ export default {
             const title = String(this.form.title || '剧名').replace(/[\\/:*?"<>|]/g, '_')
             const season = String(this.form.season || 1).padStart(2, '0')
             const episode = String(this.mode === 'download' ? this.form.episode || 1 : this.form.fromEpisode || 1).padStart(2, '0')
-            const year = this.form.year ? ' (' + this.form.year + ')' : ''
-            return `${this.settings?.mediaRoot || '/media'}/电视剧/${title}${year}/Season ${season}/${title} S${season}E${episode}.${this.settings?.format || 'mp4'}`
+            return `${this.settings?.mediaRoot || '/vol1/1000/downloads'}/${title}/${title} S${season}E${episode}.${this.settings?.format || 'mp4'}`
         }
     },
     watch: { show(next) { if (next) this.load() } },

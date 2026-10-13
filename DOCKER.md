@@ -8,7 +8,7 @@
 
 视频解析使用独立的 2 线程池，与原有 2 个搜索 / 下载聊天线程分开排队。
 
-电影天堂 m3u8 资源已增加离线订阅与单集下载代码。镜像包含固定版本 `N_m3u8DL-RE v0.6.0-beta`（amd64/arm64 下载包经 SHA-256 校验）与 FFmpeg/ffprobe。设置 `HULUWA_MEDIA_DIR` 为宿主机媒体根目录，容器内映射到 `/media`；飞牛影视添加其“电视剧”子目录并开启实时监控。临时分片和脱敏日志保存在同一根目录的 `.huluwa-work` 中，校验成功后才发布正式媒体文件。完整配置与当前验证状态见 [飞牛影视 m3u8 适配说明](docs/飞牛影视-m3u8-订阅适配方案.md)。
+电影天堂 m3u8 资源已增加离线订阅与单集下载代码。镜像包含固定版本 `N_m3u8DL-RE v0.6.0-beta`（amd64/arm64 下载包经 SHA-256 校验）与 FFmpeg/ffprobe。迅雷、qBittorrent 与电影天堂统一使用 `/vol1/1000/downloads`，该路径直接映射到葫芦娃容器内同一路径；完成文件为 `/vol1/1000/downloads/剧名/剧名 S01E01.mp4`，不追加年份和季号文件夹。临时分片和脱敏日志在根目录的 `.huluwa-work` 中，飞牛影视可添加各剧名目录。`HULUWA_MEDIA_DIR` 只用于把旧版本媒体目录只读挂载到 `/media`，保留历史文件和日志访问。完整配置与当前验证状态见 [飞牛影视 m3u8 适配说明](docs/飞牛影视-m3u8-订阅适配方案.md)。
 
 **只跑一个容器**。该容器挂载宿主机的 `/var/run/docker.sock`，通过 docker-java SDK 直连 Docker 守护进程，在“Docker 管理”页面管理**宿主机上的容器 / 镜像 / 网络 / 卷**。
 
@@ -126,6 +126,8 @@ docker compose logs -f huluwa
 
 单用 Dockerfile 也可以：
 
+手动启动前，确保宿主机 `/vol1/1000/downloads` 及需要写入的剧名目录存在，并向容器 UID `10001` 授予写权限；部署脚本已包含对应 ACL 授权。升级旧版本时继续保留原 `/media` 只读挂载，供历史任务读取文件和日志。
+
 ```shell
 docker build -t huluwa-console:latest .
 docker run -d --name huluwa-console \
@@ -135,6 +137,7 @@ docker run -d --name huluwa-console \
   --group-add "$(stat -c '%g' /var/run/docker.sock)" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /root/huluwa:/app/data \
+  -v /vol1/1000/downloads:/vol1/1000/downloads \
   huluwa-console:latest
 ```
 

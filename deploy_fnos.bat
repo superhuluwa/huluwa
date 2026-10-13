@@ -123,6 +123,7 @@ echo.
 echo ========== 部署完成 ==========
 echo 访问地址: http://%SERVER%:%HOST_PORT%
 echo 数据目录: %DATA_DIR%  (容器内 /app/data)
+echo 下载目录: /vol1/1000/downloads  (迅雷、qBittorrent、电影天堂共用)
 echo 源码目录: %REMOTE_DIR%
 echo Frp 配置: %FRP_DIR%/frpc.ini
 echo 查看日志: "%SSH_EXE%" -i "%SSH_KEY%" -p %SSH_PORT% %USER%@%SERVER% "docker logs -f %CONTAINER%"
