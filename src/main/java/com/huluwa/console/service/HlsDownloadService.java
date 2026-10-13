@@ -298,6 +298,9 @@ public class HlsDownloadService implements ApplicationRunner {
                        message = '应用重启后继续处理', updated_at = ?
                  WHERE status IN ('downloading', 'verifying')
                 """, HlsSupport.now());
+        // 上一次进程被杀或掉电时，工作区可能残留分片与半成品；归档文件已发布或会整体重下，
+        // 这里统一回收，只保留各次尝试的 download.log。
+        cleanupStaleWorkspaces();
         ready = true; kick();
     }
 
@@ -400,6 +403,8 @@ public class HlsDownloadService implements ApplicationRunner {
                     """, failed ? "failed" : "pending", message,
                     failed ? null : HlsSupport.afterMinutes(Math.min(60, 5L << Math.min(attempts - 1, 4))), HlsSupport.now(), id);
             if (failed) notices.publish("剧集下载失败", name + "：" + message, true);
+            // 失败/待重试时清掉本次尝试的工作副本，避免分片与残片越积越多（日志保留）。
+            cleanup(workspaceOf(id));
         } finally {
             activeProgress = null;
         }
@@ -557,7 +562,7 @@ public class HlsDownloadService implements ApplicationRunner {
                        next_attempt_at = NULL, completed_at = ?, updated_at = ? WHERE id = ?
                 """, target.toString(), HlsSupport.now(), HlsSupport.now(), id);
         // 一集成功后清理所有尝试的残片，保留各次脱敏日志。
-        cleanup(root().resolve(".huluwa-work").resolve(Long.toString(id)));
+        cleanup(workspaceOf(id));
         notices.publish("剧集下载完成", name + " 已归档：" + target, false);
     }
 
@@ -587,16 +592,41 @@ public class HlsDownloadService implements ApplicationRunner {
         if (!normalized.toRealPath().startsWith(root.toRealPath())) throw new IOException("媒体目录无效");
         return normalized;
     }
+    private Path workspaceOf(long id) { return root().resolve(".huluwa-work").resolve(Long.toString(id)); }
+
+    /**
+     * 清理一次下载的工作区：删除分片与残片、回收空目录，只保留 download.log 供「日志」查看，
+     * 以及 .huluwa-work / 任务目录两级容器（日志文件需要有目录可挂）。
+     */
     private void cleanup(Path attempt) {
         if (!Files.exists(attempt, LinkOption.NOFOLLOW_LINKS)) return;
         try (var files = Files.walk(attempt)) {
             for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
                 if (Files.isSymbolicLink(file)) throw new IOException("临时目录出现符号链接");
-                if (file.getFileName().toString().equals("download.log") || Files.isDirectory(file)) continue;
+                if (file.getFileName().toString().equals("download.log")) continue;
+                // 非空目录保留（内含 download.log）；空目录与普通文件一并回收
+                if (Files.isDirectory(file) && !isEmptyDirectory(file)) continue;
                 Files.deleteIfExists(file);
             }
         } catch (IOException e) { log.warn("HLS 临时文件清理失败：{}", HlsSupport.error(e)); }
     }
+    /** 启动清扫：遍历 .huluwa-work 下每个任务目录，回收分片与半成品，保留日志。 */
+    private void cleanupStaleWorkspaces() {
+        Path base = root().resolve(".huluwa-work");
+        if (!Files.isDirectory(base)) return;
+        try (var tasks = Files.list(base)) {
+            for (Path task : tasks.toList()) {
+                if (Files.isDirectory(task, LinkOption.NOFOLLOW_LINKS)) cleanup(task);
+            }
+        } catch (IOException e) { log.warn("HLS 启动清理失败：{}", HlsSupport.error(e)); }
+    }
+
+    /** 目录是否为空（关闭流，避免句柄泄漏）。 */
+    private static boolean isEmptyDirectory(Path directory) {
+        try (var entries = Files.list(directory)) { return entries.findAny().isEmpty(); }
+        catch (IOException e) { return false; }
+    }
+
     private static void terminate(Process process) {
         if (process == null) return;
         process.descendants().sorted(Comparator.comparingLong(ProcessHandle::pid).reversed()).forEach(ProcessHandle::destroyForcibly);
