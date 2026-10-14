@@ -23,20 +23,20 @@
             <div class="bubble-tools">
                 <span class="tool" title="复制" @click="copy"><i class="fa-regular fa-copy"></i></span>
             </div>
-            <!-- 电影港卡片：订阅按钮固定在卡片右上角（浮在封面之上，不占操作条位置） -->
+            <!-- 电影港卡片：订阅按钮固定在卡片右上角（极简文字，浮在封面之上） -->
             <button v-if="isMovie && isImage" class="subscribe-corner" type="button"
                 :class="{ subscribed, busy }" :disabled="subscribed || busy"
                 :title="subscribed ? '已订阅' : '订阅该剧'"
                 @click.stop="onSubscribe">
-                <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                <i :class="busy ? 'fa-solid fa-spinner fa-spin' : (subscribed ? 'fa-solid fa-bell' : 'fa-solid fa-plus')"></i>
                 <span>{{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}</span>
             </button>
-            <!-- 电影天堂卡片：订阅按钮同样固定在卡片右上角（浮在封面之上） -->
+            <!-- 电影天堂卡片：订阅按钮同样固定在卡片右上角（极简文字，浮在封面之上） -->
             <button v-if="isDytt && isImage" class="subscribe-corner" type="button"
                 :class="{ subscribed, busy }" :disabled="subscribed || busy"
                 :title="subscribed ? '已订阅' : '订阅该剧，新剧集自动下载'"
                 @click.stop="onHlsSubscribe">
-                <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                <i :class="busy ? 'fa-solid fa-spinner fa-spin' : (subscribed ? 'fa-solid fa-bell' : 'fa-solid fa-plus')"></i>
                 <span>{{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}</span>
             </button>
             <div class="bubble-content">
@@ -80,7 +80,7 @@
                     <div v-if="isMovie" class="movie-actions">
                         <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
                             :disabled="subscribed || busy" @click="onSubscribe">
-                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            <i :class="busy ? 'fa-solid fa-spinner fa-spin' : (subscribed ? 'fa-solid fa-bell' : 'fa-solid fa-plus')"></i>
                             {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
                         </button>
                         <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
@@ -103,7 +103,7 @@
                         </a>
                         <button class="subscribe-btn" type="button" :class="{ subscribed, busy }"
                             :disabled="subscribed || busy" @click="onHlsSubscribe">
-                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                            <i :class="busy ? 'fa-solid fa-spinner fa-spin' : (subscribed ? 'fa-solid fa-bell' : 'fa-solid fa-plus')"></i>
                             {{ subscribed ? '已订阅' : busy ? '订阅中…' : '订阅' }}
                         </button>
                     </div>
@@ -710,81 +710,79 @@ export default {
     flex-wrap: wrap;
 }
 
+/* 无封面回退卡片：订阅按钮与右上角同一套极简文字（无底无框，悬浮才浮出浅底） */
 .subscribe-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(99, 102, 241, .55);
-    background: rgba(99, 102, 241, .16);
-    color: #C7D2FE;
+    height: 30px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: #D8E2FF;
     font-family: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background .15s, border-color .15s, color .15s;
+    transition: background .15s, color .15s;
 }
 
 .subscribe-btn:hover:not(:disabled) {
-    background: rgba(99, 102, 241, .28);
-    border-color: rgba(129, 140, 248, .8);
-    color: #E0E7FF;
+    background: rgba(15, 23, 42, .58);
+    color: #EFF3FF;
 }
 
-.subscribe-btn.subscribed,
 .subscribe-btn:disabled {
     cursor: default;
-    border-color: rgba(74, 222, 128, .45);
-    background: rgba(34, 197, 94, .14);
-    color: #86EFAC;
+}
+
+.subscribe-btn.subscribed {
+    color: #A7F3D0;
 }
 
 .subscribe-btn.busy {
-    opacity: .75;
+    opacity: .82;
 }
 
 
-/* 电影港 / 电影天堂卡片：订阅按钮固定在卡片右上角（浮在封面之上），半透明底避免浅色封面吞字 */
+/* 电影港 / 电影天堂卡片：订阅按钮固定在卡片右上角（极简文字，无底无框，悬浮才浮出浅底） */
 .subscribe-corner {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 6px;
+    right: 6px;
     z-index: 3;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(99, 102, 241, .6);
-    background: rgba(15, 23, 42, .74);
-    color: #C7D2FE;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    color: #D8E2FF;
     font-family: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, .38);
-    transition: background .15s, border-color .15s, color .15s;
+    text-shadow: 0 1px 6px rgba(2, 6, 23, .7);
+    transition: background .15s, color .15s;
 }
 
 .subscribe-corner:hover:not(:disabled) {
-    background: rgba(30, 41, 59, .92);
-    border-color: rgba(129, 140, 248, .85);
-    color: #E0E7FF;
+    background: rgba(15, 23, 42, .58);
+    color: #EFF3FF;
 }
 
-.subscribe-corner.subscribed,
 .subscribe-corner:disabled {
     cursor: default;
-    border-color: rgba(74, 222, 128, .5);
-    background: rgba(6, 78, 59, .78);
-    color: #86EFAC;
+}
+
+.subscribe-corner.subscribed {
+    color: #A7F3D0;
 }
 
 .subscribe-corner.busy {
-    opacity: .8;
+    opacity: .82;
 }
 
 /* 卡片右上角有订阅按钮时，「复制」工具条让位到左上角，避免两个操作挤在一起 */
@@ -853,10 +851,11 @@ export default {
     }
 
     .subscribe-corner {
-        top: 12px;
-        right: 12px;
-        padding: 8px 14px;
-        font-size: 13px;
+        top: 8px;
+        right: 8px;
+        min-height: 40px;
+        padding: 9px 12px;
+        font-size: 14px;
     }
 }
 </style>

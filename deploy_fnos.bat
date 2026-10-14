@@ -114,7 +114,9 @@ if errorlevel 1 goto :no_sudo_pw
 
 REM ---------- 5. 远端构建 + 重建容器 ----------
 echo [5/6] 在飞牛上构建镜像并重建容器（首次构建较慢, 请耐心等待）...
-type "%PW_FILE%" | "%SSH_EXE%" -i "%SSH_KEY%" -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "sed -i 's/\r$//' /tmp/huluwa-fnos-deploy.sh; tr -d '\r' | sudo -S -p '' bash /tmp/huluwa-fnos-deploy.sh %APP_DIR% %DATA_DIR% %FRP_DIR% %HOST_PORT% %CONTAINER% %IMAGE% %USER%"
+set BACKUP_BASE_IMAGES=
+if /i "%HULUWA_BACKUP_BASE_IMAGES%"=="0" set BACKUP_BASE_IMAGES=--no-base-image-backup
+type "%PW_FILE%" | "%SSH_EXE%" -i "%SSH_KEY%" -o StrictHostKeyChecking=no -o UserKnownHostsFile="%KNOWN_HOSTS%" -o LogLevel=ERROR -p %SSH_PORT% %USER%@%SERVER% "sed -i 's/\r$//' /tmp/huluwa-fnos-deploy.sh; tr -d '\r' | sudo -S -p '' bash /tmp/huluwa-fnos-deploy.sh %APP_DIR% %DATA_DIR% %FRP_DIR% %HOST_PORT% %CONTAINER% %IMAGE% %USER% %BACKUP_BASE_IMAGES%"
 if errorlevel 1 goto :deploy_fail
 del /q "%PW_FILE%" 2>nul
 
@@ -125,6 +127,7 @@ echo 访问地址: http://%SERVER%:%HOST_PORT%
 echo 数据目录: %DATA_DIR%  (容器内 /app/data)
 echo 下载目录: /vol1/1000/downloads  (迅雷、qBittorrent、电影天堂共用)
 echo 源码目录: %REMOTE_DIR%
+echo 基础镜像缓存: %APP_DIR%\base-images (设 HULUWA_BACKUP_BASE_IMAGES=0 可关闭导出)
 echo Frp 配置: %FRP_DIR%/frpc.ini
 echo 查看日志: "%SSH_EXE%" -i "%SSH_KEY%" -p %SSH_PORT% %USER%@%SERVER% "docker logs -f %CONTAINER%"
 "%SSH_EXE%" %SSH_OPTS% -p %SSH_PORT% %USER%@%SERVER% "docker ps -a --filter name=huluwa --format '{{.Names}} | {{.Status}} | {{.Ports}}'"
