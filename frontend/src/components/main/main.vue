@@ -13,7 +13,7 @@
                 </div>
             </div>
             <n-menu :value="activeMenu" :options="menuOptions" :collapsed="siderCollapsed" :collapsed-width="64"
-                :collapsed-icon-size="17" :indent="18" :expanded-keys="expandedKeys" accordion
+                :collapsed-icon-size="17" :indent="18" :expanded-keys="expandedKeys" :node-props="menuNodeProps" accordion
                 @update:value="turnToPage" @update:expanded-keys="handleExpandedChange" />
             <div class="sider-foot" v-show="!siderCollapsed">
                 <span>版本</span>
@@ -27,14 +27,19 @@
 
         <div class="main-body">
             <header-bar :collapsed="headerCollapsed" :mobile="isMobile"
+                :page-title="pendingPage && (pendingPage.name === 'messages' ? '会话' : pendingPage.title)"
                 @on-coll-change="handleCollapsedChange">
                 <user-chip />
             </header-bar>
 
-            <div class="content-wrapper">
+            <div class="content-wrapper" :aria-busy="Boolean(pendingPage)">
+                <div v-if="pendingPage" class="page-loading" role="status" aria-live="polite">
+                    <n-spin size="medium" />
+                    <span>正在打开{{ pendingPage.title || '页面' }}…</span>
+                </div>
                 <router-view v-slot="{ Component }">
                     <keep-alive>
-                        <component :is="Component" :key="$route.path" />
+                        <component v-if="!pendingPage" :is="Component" :key="$route.path" />
                     </keep-alive>
                 </router-view>
             </div>
@@ -43,9 +48,9 @@
 </template>
 
 <script>
-import { NMenu } from 'naive-ui'
+import { NMenu, NSpin } from 'naive-ui'
 import { h } from 'vue'
-import { RouterLink } from 'vue-router'
+import { preloadRoute } from '@/utils/routePreload'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { isMobileDevice } from '@/composables/useIsMobile'
@@ -64,7 +69,7 @@ const renderIcon = (iconClass) => {
 
 export default {
     name: 'MainLayout',
-    components: { HeaderBar, UserChip, NMenu },
+    components: { HeaderBar, UserChip, NMenu, NSpin },
     setup() {
         const appStore = useAppStore()
         const chatStore = useChatStore()
@@ -78,7 +83,9 @@ export default {
             expandedKeys: [],
             // 移动端（窄屏，<= 900px）：侧栏改为覆盖式抽屉，默认关闭
             isMobile: false,
-            mobileDrawerOpen: false
+            mobileDrawerOpen: false,
+            pendingPage: null,
+            navigationSequence: 0
         }
     },
     computed: {
@@ -96,10 +103,11 @@ export default {
         },
         activeMenu() {
             // 会话页高亮「消息中心 → 会话」子项，其余页面高亮路由名
-            if (this.$route.name === 'messages') {
+            const name = this.pendingPage ? this.pendingPage.name : this.$route.name
+            if (name === 'messages') {
                 return MESSAGES_INDEX_KEY
             }
-            return this.$route.name
+            return name
         },
         menuOptions() {
             // 顶层路由（登录 / 错误页已通过 hideInMenu 排除）；带 children 的渲染为可折叠子菜单。
@@ -111,6 +119,11 @@ export default {
         },
     },
     watch: {
+        // 浏览器后退或其它入口跳转落地时，也立即结束菜单的加载提示。
+        '$route.fullPath'() {
+            this.navigationSequence++
+            this.pendingPage = null
+        },
         // 沉浸态（手机端会话页）切换时启停菜单角标轮询：外壳隐藏后不需要空转
         shellHidden: {
             immediate: true,
@@ -239,7 +252,7 @@ export default {
             }
             return {
                 key: item.name,
-                label: () => h(RouterLink, { to: { name: item.name } }, { default: () => item.meta.title }),
+                label: () => h('a', this.menuLinkProps(item.name), item.meta.title),
                 icon: renderIcon(item.meta && item.meta.icon)
             }
         },
@@ -263,7 +276,7 @@ export default {
                 children: [
                     {
                         key: MESSAGES_INDEX_KEY,
-                        label: () => h('span', { class: 'menu-label' }, [
+                        label: () => h('a', { ...this.menuLinkProps(MESSAGES_INDEX_KEY), class: 'menu-label' }, [
                             h('span', MESSAGES_INDEX_TITLE),
                             unreadTotal > 0
                                 ? h('span', { class: 'menu-badge' }, unreadTotal > 99 ? '99+' : String(unreadTotal))
@@ -274,19 +287,19 @@ export default {
                     // 我的订阅：查看片名 / 具体链接 / 每集磁力基线 / 巡检状态
                     {
                         key: 'movie-subscriptions',
-                        label: () => h(RouterLink, { to: { name: 'movie-subscriptions' } }, { default: () => '我的订阅' }),
+                        label: () => h('a', this.menuLinkProps('movie-subscriptions'), '我的订阅'),
                         icon: renderIcon('fa-solid fa-bell')
                     },
                     // 我的下载：订阅巡检 / 手动提交触发的下载任务，与「我的订阅」同级
                     {
                         key: 'movie-downloads',
-                        label: () => h(RouterLink, { to: { name: 'movie-downloads' } }, { default: () => '我的下载' }),
+                        label: () => h('a', this.menuLinkProps('movie-downloads'), '我的下载'),
                         icon: renderIcon('fa-solid fa-download')
                     },
                     // 巡检记录：订阅数据的巡检历史，与「我的订阅」「我的下载」平级
                     {
                         key: 'movie-check-logs',
-                        label: () => h(RouterLink, { to: { name: 'movie-check-logs' } }, { default: () => '巡检记录' }),
+                        label: () => h('a', this.menuLinkProps('movie-check-logs'), '巡检记录'),
                         icon: renderIcon('fa-solid fa-list-check')
                     }
                 ]
@@ -308,19 +321,56 @@ export default {
             const owner = groups.find((group) => group.children.some((child) => child.name === currentName))
             this.expandedKeys = owner ? [owner.name] : []
         },
-        turnToPage(name) {
-            // 移动端点完菜单后立即收起抽屉，露出目标页面
-            this.closeDrawer()
-            // 「消息中心 → 会话」子项：进入会话页（保留当前会话，手机端停在会话列表）
-            if (name === MESSAGES_INDEX_KEY) {
-                this.$router.push({ name: 'messages' }).catch(() => {})
-                return
+        menuLinkProps(name) {
+            const routeName = name === MESSAGES_INDEX_KEY ? 'messages' : name
+            return {
+                href: this.$router.resolve({ name: routeName }).href,
+                onClick: (event) => {
+                    // 保留新标签页/复制链接；普通点击只经过一个导航入口。
+                    event.stopPropagation()
+                    if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+                        event.preventDefault()
+                        this.turnToPage(name)
+                    }
+                }
             }
-            if (name !== this.$route.name) {
-                this.$router.push({ name }).catch(() => {})
+        },
+        menuNodeProps(option) {
+            if (option.children) return {}
+            const preload = () => this.preloadMenuPage(option.key)
+            return { onMouseenter: preload, onFocusin: preload, onTouchstart: preload }
+        },
+        preloadMenuPage(name) {
+            return preloadRoute(this.$router, name === MESSAGES_INDEX_KEY ? 'messages' : name)
+        },
+        async turnToPage(name) {
+            this.closeDrawer()
+            const routeName = name === MESSAGES_INDEX_KEY ? 'messages' : name
+            const target = this.$router.resolve({ name: routeName })
+            if (this.pendingPage && this.pendingPage.fullPath === target.fullPath) return
+            if (!this.pendingPage && target.fullPath === this.$route.fullPath) return
+
+            const sequence = ++this.navigationSequence
+            // 高亮、标题和占位立即响应点击，不等待页面代码下载。
+            this.pendingPage = { name: target.name, title: target.meta.title, fullPath: target.fullPath }
+            try {
+                await this.$router.push({ name: routeName })
+            } catch (error) {
+                if (sequence === this.navigationSequence) {
+                    this.$message.error('页面加载失败，请重试')
+                }
+            } finally {
+                // 快速连续点击时，前一次导航不能清掉后一次的加载状态。
+                if (sequence === this.navigationSequence) this.pendingPage = null
             }
         },
         handleExpandedChange(keys) {
+            // 展开分组时提前加载子页面代码，真正进入页面时才请求业务数据。
+            for (const key of keys) {
+                if (this.expandedKeys.includes(key)) continue
+                const group = this.menuOptions.find((option) => option.key === key)
+                for (const child of group?.children || []) this.preloadMenuPage(child.key)
+            }
             // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
             // 会把「消息中心」分组意外收起；会话页要求该分组常开，这里补回。
             const pinned = this.isMessagesGroup(this.$route.name)
@@ -462,6 +512,17 @@ export default {
     overflow: auto;
     position: relative;
 }
+.page-loading {
+    min-height: 180px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-2);
+}
+
 /* 手机端会话内容在公共顶栏下铺满剩余空间，列表与消息流各自滚动 */
 .main-console.is-immersive .main-body {
     width: 100%;

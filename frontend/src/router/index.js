@@ -1,17 +1,18 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { loadingBar } from '@/libs/discrete'
+import { createRouteLoader } from '@/utils/routePreload'
 import { isMobileDevice } from '@/composables/useIsMobile'
 import { setFullscreenPage } from '@/composables/useFullscreenPage'
 
-const Main = () => import('@/components/main/main.vue')
+const Main = createRouteLoader(() => import('@/components/main/main.vue'))
 
 const routes = [
     {
         path: '/login',
         name: 'login',
         meta: { title: '登录', hideInMenu: true },
-        component: () => import('@/views/login/index.vue')
+        component: createRouteLoader(() => import('@/views/login/index.vue'))
     },
     {
         path: '/',
@@ -23,14 +24,14 @@ const routes = [
                 path: 'dashboard',
                 name: 'dashboard',
                 meta: { title: '首页', icon: 'fa-solid fa-gauge-high' },
-                component: () => import('@/views/dashboard/index.vue')
+                component: createRouteLoader(() => import('@/views/dashboard/index.vue'))
             },
             // 消息中心（会话）：登录后的默认落地页，手机端为全屏两级结构
             {
                 path: 'messages',
                 name: 'messages',
                 meta: { title: '消息中心', icon: 'fa-solid fa-bell' },
-                component: () => import('@/views/message/index.vue')
+                component: createRouteLoader(() => import('@/views/message/index.vue'))
             },
             // 消息中心：父级分组可折叠（与 quantum 的「消息中心 → 会话」结构一致），
             // 分组下的「会话」子项由 components/main/main.vue 渲染，未读角标取自 chat store；
@@ -42,32 +43,32 @@ const routes = [
                 path: 'subscriptions',
                 name: 'movie-subscriptions',
                 meta: { title: '我的订阅', icon: 'fa-solid fa-bell', hideInMenu: true },
-                component: () => import('@/views/movie/subscriptions.vue')
+                component: createRouteLoader(() => import('@/views/movie/subscriptions.vue'))
             },
             {
                 path: 'downloads',
                 name: 'movie-downloads',
                 meta: { title: '我的下载', icon: 'fa-solid fa-download', hideInMenu: true },
-                component: () => import('@/views/movie/downloads.vue')
+                component: createRouteLoader(() => import('@/views/movie/downloads.vue'))
             },
             // 巡检记录：订阅数据的巡检历史（电影港 + 电影天堂），与「我的订阅」「我的下载」平级
             {
                 path: 'check-logs',
                 name: 'movie-check-logs',
                 meta: { title: '巡检记录', icon: 'fa-solid fa-list-check', hideInMenu: true },
-                component: () => import('@/views/movie/check-logs.vue')
+                component: createRouteLoader(() => import('@/views/movie/check-logs.vue'))
             },
             {
                 path: 'frp',
                 name: 'frp',
                 meta: { title: 'Frp管理', icon: 'fa-solid fa-network-wired' },
-                component: () => import('@/views/frp/index.vue')
+                component: createRouteLoader(() => import('@/views/frp/index.vue'))
             },
             {
                 path: 'push',
                 name: 'push',
                 meta: { title: '推送设置', icon: 'fa-solid fa-paper-plane' },
-                component: () => import('@/views/push/index.vue')
+                component: createRouteLoader(() => import('@/views/push/index.vue'))
             },
             // Docker 管理：父级分组可折叠，子项对应概览 / 容器 / 镜像 / 网络 / 卷。
             // 父级本身只作为 n-menu 的子菜单容器，不直接渲染页面，因此指向概览页。
@@ -83,31 +84,31 @@ const routes = [
                         path: 'index',
                         name: 'docker-index',
                         meta: { title: '概览', icon: 'fa-solid fa-gauge-high' },
-                        component: () => import('@/views/docker/index.vue')
+                        component: createRouteLoader(() => import('@/views/docker/index.vue'))
                     },
                     {
                         path: 'containers',
                         name: 'docker-containers',
                         meta: { title: '容器管理', icon: 'fa-solid fa-cube' },
-                        component: () => import('@/views/docker/containers.vue')
+                        component: createRouteLoader(() => import('@/views/docker/containers.vue'))
                     },
                     {
                         path: 'images',
                         name: 'docker-images',
                         meta: { title: '镜像管理', icon: 'fa-regular fa-images' },
-                        component: () => import('@/views/docker/images.vue')
+                        component: createRouteLoader(() => import('@/views/docker/images.vue'))
                     },
                     {
                         path: 'networks',
                         name: 'docker-networks',
                         meta: { title: '网络管理', icon: 'fa-solid fa-circle-nodes' },
-                        component: () => import('@/views/docker/networks.vue')
+                        component: createRouteLoader(() => import('@/views/docker/networks.vue'))
                     },
                     {
                         path: 'volumes',
                         name: 'docker-volumes',
                         meta: { title: '卷管理', icon: 'fa-solid fa-folder' },
-                        component: () => import('@/views/docker/volumes.vue')
+                        component: createRouteLoader(() => import('@/views/docker/volumes.vue'))
                     }
                 ]
             }
@@ -117,13 +118,13 @@ const routes = [
         path: '/500',
         name: 'error_500',
         meta: { title: '500', hideInMenu: true },
-        component: () => import('@/views/error-page/500.vue')
+        component: createRouteLoader(() => import('@/views/error-page/500.vue'))
     },
     {
         path: '/:pathMatch(.*)*',
         name: 'error_404',
         meta: { title: '404', hideInMenu: true },
-        component: () => import('@/views/error-page/404.vue')
+        component: createRouteLoader(() => import('@/views/error-page/404.vue'))
     }
 ]
 
@@ -132,7 +133,7 @@ const router = createRouter({
     history: createWebHashHistory()
 })
 
-router.beforeEach(async (to) => {
+router.beforeEach((to) => {
     loadingBar.start()
     const auth = useAuthStore()
 
@@ -158,6 +159,10 @@ router.afterEach((to) => {
         ? `${to.meta.title} - 葫芦娃助手`
         : '葫芦娃助手'
     loadingBar.finish()
+})
+
+router.onError(() => {
+    loadingBar.error()
 })
 
 export default router

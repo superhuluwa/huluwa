@@ -444,7 +444,8 @@ export default {
                 }))
                 const runningIds = new Set(this.containers.filter(row => row.State === 'running').map(row => row.Id))
                 this.previousCpu = Object.fromEntries(Object.entries(this.previousCpu).filter(([id]) => runningIds.has(id)))
-                await this.loadResourceUsage()
+                // 列表先结束加载；CPU/内存统计较慢时在后台补齐。
+                this.loadResourceUsage()
             } catch (error) {
                 if (sequence === this.listSequence) this.containers = []
             } finally {

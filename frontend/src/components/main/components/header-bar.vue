@@ -26,11 +26,14 @@ export default {
     props: {
         collapsed: Boolean,
         /** 移动端：顶栏按钮改为抽屉开关（汉堡图标），与桌面端的侧栏折叠按钮区分 */
-        mobile: Boolean
+        mobile: Boolean,
+        /** 菜单切换期间立即展示目标页标题。 */
+        pageTitle: String
     },
     emits: ['on-coll-change'],
     computed: {
         currentTitle() {
+            if (this.pageTitle) return this.pageTitle
             if (this.$route.name === 'messages') {
                 return '会话'
             }

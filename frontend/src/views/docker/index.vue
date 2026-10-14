@@ -190,10 +190,7 @@ export default {
             ]
         }
     },
-    mounted() {
-        this.refresh()
-        this.loadHosts()
-    },
+    // KeepAlive 首次挂载也会调用 activated，统一在这里加载，避免双份请求。
     activated() {
         this.refresh()
         this.loadHosts()
