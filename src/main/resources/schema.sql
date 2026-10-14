@@ -287,3 +287,25 @@ VALUES (4, datetime('now', 'localtime'));
 -- v5：清空下载记录。隐藏终态行而不是删除：订阅巡检与重复提交判定仍读取这些历史行。
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (5, datetime('now', 'localtime'));
+
+-- v6：订阅巡检记录。「消息中心 → 巡检记录」按时间倒序展示电影港 / 电影天堂每次巡检的
+-- 结果快照；剧名与来源冗余存储，订阅被删除后历史记录仍然可读。
+CREATE TABLE IF NOT EXISTS subscription_check_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT NOT NULL,                      -- dygangs（电影港）| dytt（电影天堂）
+    subscription_id INTEGER,                            -- 原订阅 id，仅作溯源参考
+    series_title    TEXT NOT NULL,                      -- 剧名快照
+    trigger_type    TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled（定时）| manual（立即检查）
+    status          TEXT NOT NULL,                      -- updated（有更新）| ok（无更新）| baseline（补建基线）| failed（失败）
+    found_count     INTEGER NOT NULL DEFAULT 0,         -- 本轮新发现条目数
+    submitted_count INTEGER NOT NULL DEFAULT 0,         -- 本轮提交下载条数
+    message         TEXT,                               -- 结果摘要
+    detail          TEXT,                               -- 新增条目明细，每行一条
+    duration_ms     INTEGER NOT NULL DEFAULT 0,         -- 本轮巡检耗时（毫秒）
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_check_log_created ON subscription_check_log (created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_check_log_source ON subscription_check_log (source, id DESC);
+
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (6, datetime('now', 'localtime'));

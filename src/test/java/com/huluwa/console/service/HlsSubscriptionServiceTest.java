@@ -38,7 +38,8 @@ class HlsSubscriptionServiceTest {
         HlsNoticeService notices = mock(HlsNoticeService.class);
         downloads = spy(new HlsDownloadService(db, new ConfigService(db), new HlsProperties(), source, notices, new ObjectMapper()));
         doNothing().when(downloads).requireEnvironment();
-        subscriptions = new HlsSubscriptionService(db, source, downloads, notices, new DataSourceTransactionManager(dataSource));
+        subscriptions = new HlsSubscriptionService(db, source, downloads, notices,
+                new SubscriptionCheckLogService(db), new DataSourceTransactionManager(dataSource));
     }
 
     @AfterEach

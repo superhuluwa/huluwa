@@ -21,7 +21,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     private static final String[] REQUIRED_TABLES = {
             "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
             "chat_session", "chat_message", "chat_request", "movie_search_watch",
-            "hls_subscription", "hls_download_task"
+            "hls_subscription", "hls_download_task", "subscription_check_log"
     };
 
     private final JdbcTemplate jdbcTemplate;

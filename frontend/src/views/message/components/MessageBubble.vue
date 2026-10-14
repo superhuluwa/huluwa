@@ -8,12 +8,7 @@
     <div v-else class="message-row" :class="{ mine: isMine }">
         <div v-if="!isMine" class="avatar bot"
             :class="{ movie: isMovie || isMovieSearchWatch, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
-            <i v-if="isMovie || isMovieSearchWatch" class="fa-solid fa-film"></i>
-            <i v-else-if="isDytt" class="fa-solid fa-circle-play"></i>
-            <i v-else-if="isMagnet" class="fa-solid fa-magnet"></i>
-            <i v-else-if="isVideoSession" class="fa-solid fa-clapperboard"></i>
-            <i v-else-if="isXunleiSession" class="fa-solid fa-bolt"></i>
-            <template v-else>Q</template>
+            <SessionIcon :kind="botIconKind" fallback-text="Q" />
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
         <div class="bubble"
@@ -139,6 +134,7 @@
  */
 import RichText from './RichText.vue'
 import NotifyCard from './NotifyCard.vue'
+import SessionIcon from './SessionIcon.vue'
 import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
@@ -154,7 +150,7 @@ export default {
     setup() {
         return { hlsSubscriptions: useHlsSubscriptionsStore() }
     },
-    components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
+    components: { RichText, SessionIcon, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
     props: {
         message: {
             type: Object,
@@ -199,6 +195,25 @@ export default {
         },
         isMine() {
             return this.message.role === 'user'
+        },
+        /** 机器人头像的会话类型：决定用哪个官方品牌图标（无品牌时返回空，退回 Q） */
+        botIconKind() {
+            if (this.isMovie || this.isMovieSearchWatch) {
+                return 'movie'
+            }
+            if (this.isDytt) {
+                return 'dytt'
+            }
+            if (this.isMagnet) {
+                return 'magnet'
+            }
+            if (this.isVideoSession) {
+                return 'video'
+            }
+            if (this.isXunleiSession) {
+                return 'xunlei'
+            }
+            return ''
         },
         /** 本地乐观发送态：等待服务端 ack（WS chat.ack / HTTP 响应） */
         isPending() {
@@ -486,40 +501,23 @@ export default {
     font-weight: 700;
 }
 
+/* 内置会话的机器人头像改用各服务官方图标（SessionIcon）：
+   品牌图标是方形应用图标，容器用圆角方形；无品牌图标的会话（默认机器人 / 系统）
+   保留圆形渐变底 + Font Awesome 图标。 */
 .avatar.bot {
     background: linear-gradient(135deg, var(--accent), #6366F1);
     color: #04121B;
     font-size: 16px;
+    overflow: hidden;
 }
 
-.avatar.bot.movie {
-    background: linear-gradient(135deg, #6366F1, #A855F7);
-    color: #F8FAFC;
-    font-size: 15px;
-}
-
-.avatar.bot.dytt {
-    background: linear-gradient(135deg, #10B981, #06B6D4);
-    color: #04121B;
-    font-size: 15px;
-}
-
-.avatar.bot.magnet {
-    background: linear-gradient(135deg, #F59E0B, #EF4444);
-    color: #1B1206;
-    font-size: 14px;
-}
-
-.avatar.bot.video {
-    background: linear-gradient(135deg, #06B6D4, #3B82F6);
-    color: #F8FAFC;
-    font-size: 15px;
-}
-
+.avatar.bot.movie,
+.avatar.bot.dytt,
+.avatar.bot.magnet,
+.avatar.bot.video,
 .avatar.bot.xunlei {
-    background: linear-gradient(135deg, #00C6FB, #005BEA);
-    color: #04121B;
-    font-size: 15px;
+    border-radius: 10px;
+    background: transparent;
 }
 
 .avatar.mine {

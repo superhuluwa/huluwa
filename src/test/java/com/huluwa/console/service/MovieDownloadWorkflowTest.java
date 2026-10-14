@@ -35,7 +35,8 @@ class MovieDownloadWorkflowTest {
         new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
         jdbc = new JdbcTemplate(dataSource);
         service = new MovieSubscriptionService(jdbc, search, qb, xl,
-                mock(MessageService.class), mock(ChatPushService.class));
+                mock(MessageService.class), mock(ChatPushService.class),
+                new SubscriptionCheckLogService(jdbc));
         when(search.fetchDetail(anyString())).thenReturn(new MovieSearchService.DetailPage(TITLE, List.of()));
         when(qb.settings()).thenReturn(new QBittorrentService.Settings("http://qb", null, null, "/old/qb"));
         when(xl.settings()).thenReturn(new XunleiService.Settings("http://xl", "/old/xl", null));
@@ -204,6 +205,54 @@ class MovieDownloadWorkflowTest {
         verify(qb, times(2)).add(anyList(), anyString());
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL AND status = 'completed'", Integer.class));
+    }
+
+    /**
+     * 「消息中心 → 巡检记录」：电影港每次巡检（有无更新、是否失败）都要留一条结果快照，
+     * 且记录在订阅被删除后仍然可读。
+     */
+    @Test
+    void everyScanWritesACheckLogAndKeepsItAfterSubscriptionDeletion() {
+        MovieSubscriptionService.Subscription subscription = subscribe("qb");
+
+        // 无更新：巡检成功留一条 ok 记录
+        when(search.fetchMagnets(URL)).thenReturn(List.of());
+        assertEquals(0, service.scan(subscription.id(), SubscriptionCheckLogService.TRIGGER_MANUAL));
+        Map<String, Object> idle = jdbc.queryForMap("SELECT * FROM subscription_check_log ORDER BY id DESC LIMIT 1");
+        assertEquals("dygangs", idle.get("source"));
+        assertEquals("ok", idle.get("status"));
+        assertEquals("manual", idle.get("trigger_type"));
+        assertEquals(TITLE, idle.get("series_title"));
+        assertEquals(0, idle.get("found_count"));
+
+        // 有新磁力：记录发现条数、提交条数与明细
+        when(search.fetchMagnets(URL)).thenReturn(List.of(
+                new MovieSearchService.MagnetItem(TITLE + "01.2160p.mp4", magnet('3'), "3".repeat(40), "2160P", "1"),
+                new MovieSearchService.MagnetItem(TITLE + "02.1080p.mp4", magnet('4'), "4".repeat(40), "1080P", "2")));
+        assertEquals(2, service.scan(subscription.id(), SubscriptionCheckLogService.TRIGGER_SCHEDULED));
+        Map<String, Object> updated = jdbc.queryForMap("SELECT * FROM subscription_check_log ORDER BY id DESC LIMIT 1");
+        assertEquals("updated", updated.get("status"));
+        assertEquals(2, updated.get("found_count"));
+        assertEquals("scheduled", updated.get("trigger_type"));
+        String detail = String.valueOf(updated.get("detail"));
+        assertTrue(detail.contains("第 1 集"), detail);
+        assertTrue(detail.contains("2160P"), detail);
+
+        // 抓取失败：也要留痕（failed），便于回溯站点不可达的时间点
+        when(search.fetchMagnets(URL)).thenThrow(new IllegalStateException("站点不可达"));
+        assertEquals(0, service.scan(subscription.id(), SubscriptionCheckLogService.TRIGGER_SCHEDULED));
+        Map<String, Object> failed = jdbc.queryForMap("SELECT * FROM subscription_check_log ORDER BY id DESC LIMIT 1");
+        assertEquals("failed", failed.get("status"));
+        assertTrue(String.valueOf(failed.get("message")).contains("站点不可达"), String.valueOf(failed.get("message")));
+
+        // 删除订阅：历史记录保留，只解除关联（列表页仍能读到剧名）
+        long subscriptionId = subscription.id();
+        service.delete(subscriptionId);
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM subscription_check_log", Integer.class));
+        assertEquals(3, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM subscription_check_log WHERE subscription_id IS NULL", Integer.class));
+        assertEquals(TITLE, jdbc.queryForObject(
+                "SELECT series_title FROM subscription_check_log ORDER BY id LIMIT 1", String.class));
     }
 
     @Test

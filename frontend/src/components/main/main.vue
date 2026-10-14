@@ -130,7 +130,7 @@ export default {
         // 消息中心内部切换会话（仅 query 变化）不触发本监听，展开态自然保留。
         '$route.name'(next, prev) {
             // 消息中心 ⇄ 其它页面时都要确保会话分组可见
-            if (next === 'messages' || prev === 'messages') {
+            if (this.isMessagesGroup(next) || this.isMessagesGroup(prev)) {
                 this.ensureMessagesExpanded()
                 if (next === 'messages') {
                     return
@@ -196,6 +196,11 @@ export default {
             if (!sessions.length) {
                 this.chatStore.refreshSessions().catch(() => {})
             }
+        },
+        /** 属于「消息中心」分组的页面：会话 / 我的订阅 / 我的下载 / 巡检记录 */
+        isMessagesGroup(name) {
+            return name === 'messages' || name === 'movie-subscriptions'
+                || name === 'movie-downloads' || name === 'movie-check-logs'
         },
         /** 确保「消息中心」分组处于展开态（会话页内部切换会话时不被收起） */
         ensureMessagesExpanded() {
@@ -277,6 +282,12 @@ export default {
                         key: 'movie-downloads',
                         label: () => h(RouterLink, { to: { name: 'movie-downloads' } }, { default: () => '我的下载' }),
                         icon: renderIcon('fa-solid fa-download')
+                    },
+                    // 巡检记录：订阅数据的巡检历史，与「我的订阅」「我的下载」平级
+                    {
+                        key: 'movie-check-logs',
+                        label: () => h(RouterLink, { to: { name: 'movie-check-logs' } }, { default: () => '巡检记录' }),
+                        icon: renderIcon('fa-solid fa-list-check')
                     }
                 ]
             }
@@ -287,7 +298,7 @@ export default {
             // 消息中心（会话页）：分组保持展开，便于随时切换会话
             // （用户手动展开其它分组时这里不能把 messages 之外的手动展开态清掉——
             //   accordion 模式下 n-menu 自己只保留一个，这里只需确保当前页所在分组可见）
-            if (currentName === 'messages' || currentName === 'movie-subscriptions' || currentName === 'movie-downloads') {
+            if (this.isMessagesGroup(currentName)) {
                 this.ensureMessagesExpanded()
                 return
             }
@@ -312,7 +323,7 @@ export default {
         handleExpandedChange(keys) {
             // n-menu 在 options 刷新（会话轮询）时也会回传内部展开态，
             // 会把「消息中心」分组意外收起；会话页要求该分组常开，这里补回。
-            const pinned = this.$route.name === 'messages' || this.$route.name === 'movie-subscriptions' || this.$route.name === 'movie-downloads'
+            const pinned = this.isMessagesGroup(this.$route.name)
             if (pinned && !keys.includes('messages')) {
                 this.expandedKeys = [...keys, 'messages']
                 return

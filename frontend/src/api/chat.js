@@ -105,6 +105,18 @@ export function ClearSubscriptionDownloads() {
     return http.delete('/chat/subscriptions/downloads')
 }
 
+// ------------------------------------------------------------------ 巡检记录
+
+/** 订阅巡检记录（电影港 + 电影天堂同一条时间线，倒序） */
+export function GetSubscriptionCheckLogs(limit = 100, source = '') {
+    return http.get('/chat/check-logs', { limit, source: source || undefined })
+}
+
+/** 清空巡检记录 */
+export function ClearSubscriptionCheckLogs() {
+    return http.delete('/chat/check-logs')
+}
+
 /** 电影港默认下载工具与固定保存根目录。 */
 export function GetMovieDownloadSettings() {
     return http.get('/chat/subscriptions/settings')

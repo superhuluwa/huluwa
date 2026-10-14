@@ -15,7 +15,7 @@
             <div v-for="item in filtered" :key="item.id" class="conversation"
                 :class="{ active: item.id === currentKey && !mobile }" @click="$emit('select', item.id)">
                 <div class="conv-icon" :class="iconClass(item)">
-                    <i :class="iconOf(item)"></i>
+                    <SessionIcon :kind="item.kind" :fallback-class="iconOf(item)" />
                 </div>
                 <div class="conv-body">
                     <div class="conv-title">{{ item.title }}</div>
@@ -33,9 +33,12 @@
 
 <script>
 import { NInput } from 'naive-ui'
+import SessionIcon from './SessionIcon.vue'
 /**
  * 会话列表（对齐 quantum ConversationList 的视觉）：
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
+ * 各内置会话使用对应服务的官方品牌图标（SessionIcon；见 assets/brand-icons/README.md），
+ * 无品牌图标（系统通知等）退回 Font Awesome。
  * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载 + 系统通知虚拟会话），列表不做删除。
  *
  * 手机端（mobile）：标题与状态栏安全区由公共顶栏处理，列表行高与触控目标放大、
@@ -44,7 +47,7 @@ import { NInput } from 'naive-ui'
 import { sessionPreview, formatTimeLabel } from '@/utils/chatFormat'
 
 export default {
-    components: { NInput },
+    components: { NInput, SessionIcon },
     name: 'ConversationList',
     props: {
         sessions: {
@@ -177,41 +180,19 @@ export default {
     width: 44px;
     height: 44px;
     flex: none;
-    border-radius: 50%;
+    /* 品牌图标是方形应用图标，圆角方形比圆形更贴合官方样式；系统通知仍用圆形图标字体底 */
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 17px;
-    background: rgba(14, 165, 233, .15);
+    background: transparent;
     color: var(--accent);
-}
-
-.conv-icon.movie {
-    background: rgba(99, 102, 241, .16);
-    color: #A5B4FC;
-}
-
-.conv-icon.dytt {
-    background: rgba(16, 185, 129, .16);
-    color: #6EE7B7;
-}
-
-.conv-icon.magnet {
-    background: rgba(245, 158, 11, .16);
-    color: #FCD34D;
-}
-
-.conv-icon.video {
-    background: rgba(6, 182, 212, .16);
-    color: #67E8F9;
-}
-
-.conv-icon.xunlei {
-    background: rgba(0, 169, 255, .16);
-    color: #67D8FF;
+    overflow: hidden;
 }
 
 .conv-icon.system {
+    border-radius: 50%;
     background: rgba(16, 185, 129, .14);
     color: var(--ok);
 }
@@ -307,6 +288,7 @@ export default {
 .conversation-list.mobile .conv-icon {
     width: 52px;
     height: 52px;
+    border-radius: 14px;
     font-size: 20px;
 }
 

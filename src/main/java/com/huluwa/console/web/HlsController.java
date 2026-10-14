@@ -4,6 +4,7 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.DyttSearchService;
 import com.huluwa.console.service.HlsDownloadService;
 import com.huluwa.console.service.HlsSubscriptionService;
+import com.huluwa.console.service.SubscriptionCheckLogService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,7 +52,9 @@ public class HlsController {
         return ApiResult.ok(subscriptions.quickSubscribe(body));
     }
     @PostMapping("/subscriptions/{id}/check")
-    public ApiResult<Map<String, Object>> check(@PathVariable long id) { return ApiResult.ok(subscriptions.check(id)); }
+    public ApiResult<Map<String, Object>> check(@PathVariable long id) {
+        return ApiResult.ok(subscriptions.check(id, SubscriptionCheckLogService.TRIGGER_MANUAL));
+    }
     @PostMapping("/subscriptions/{id}/enabled")
     public ApiResult<Map<String, Object>> enabled(@PathVariable long id, @RequestBody HlsRequests.Enabled body) {
         return ApiResult.ok(subscriptions.enabled(id, body.enabled()));

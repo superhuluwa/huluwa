@@ -3,6 +3,7 @@ package com.huluwa.console.web;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.MovieSubscriptionService;
+import com.huluwa.console.service.SubscriptionCheckLogService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,9 +30,12 @@ import java.util.Set;
 public class MovieSubscriptionController {
 
     private final MovieSubscriptionService subscriptionService;
+    private final SubscriptionCheckLogService checkLogs;
 
-    public MovieSubscriptionController(MovieSubscriptionService subscriptionService) {
+    public MovieSubscriptionController(MovieSubscriptionService subscriptionService,
+                                       SubscriptionCheckLogService checkLogs) {
         this.subscriptionService = subscriptionService;
+        this.checkLogs = checkLogs;
     }
 
     @GetMapping("/settings")
@@ -116,7 +120,7 @@ public class MovieSubscriptionController {
     /** 立即巡检一次（订阅页的「立即检查」按钮）：返回本轮新增的磁力条数 */
     @PostMapping("/{id}/check")
     public ApiResult<Map<String, Object>> check(@PathVariable long id) {
-        int added = subscriptionService.scan(id);
+        int added = subscriptionService.scan(id, SubscriptionCheckLogService.TRIGGER_MANUAL);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("added", added);
         data.put("message", added > 0

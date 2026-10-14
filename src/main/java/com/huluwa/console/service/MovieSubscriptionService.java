@@ -61,19 +61,22 @@ public class MovieSubscriptionService {
     private final XunleiService xunleiService;
     private final MessageService messageService;
     private final ChatPushService chatPushService;
+    private final SubscriptionCheckLogService checkLogs;
 
     public MovieSubscriptionService(JdbcTemplate jdbcTemplate,
                                     MovieSearchService movieSearchService,
                                     QBittorrentService qBittorrentService,
                                     XunleiService xunleiService,
                                     MessageService messageService,
-                                    ChatPushService chatPushService) {
+                                    ChatPushService chatPushService,
+                                    SubscriptionCheckLogService checkLogs) {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.qBittorrentService = qBittorrentService;
         this.xunleiService = xunleiService;
         this.messageService = messageService;
         this.chatPushService = chatPushService;
+        this.checkLogs = checkLogs;
     }
 
     /** 订阅条目视图（订阅列表 / 搜索结果卡片上的按钮状态） */
@@ -213,9 +216,14 @@ public class MovieSubscriptionService {
         return true;
     }
 
-    /** 删除订阅及其磁力 / 下载记录 */
+    /**
+     * 删除订阅及其磁力 / 下载记录。
+     *
+     * <p>「巡检记录」里的历史快照保留：只解除与该订阅行的关联，避免删掉用户回溯更新历史的入口。</p>
+     */
     public void delete(long id) {
         requireExists(id);
+        checkLogs.detach(id);
         jdbcTemplate.update("DELETE FROM movie_subscription_magnet WHERE subscription_id = ?", id);
         jdbcTemplate.update("DELETE FROM movie_download_task WHERE subscription_id = ?", id);
         jdbcTemplate.update("DELETE FROM movie_subscription WHERE id = ?", id);
@@ -277,7 +285,7 @@ public class MovieSubscriptionService {
             }
             handled++;
             try {
-                scan(id);
+                scan(id, SubscriptionCheckLogService.TRIGGER_SCHEDULED);
             } catch (Exception e) {
                 log.warn("订阅巡检异常（订阅 {}）：{}", id, safeMessage(e));
             }
@@ -312,13 +320,22 @@ public class MovieSubscriptionService {
         return ids;
     }
 
+    /** 兼容旧签名：按定时巡检记录结果 */
+    public int scan(long subscriptionId) {
+        return scan(subscriptionId, SubscriptionCheckLogService.TRIGGER_SCHEDULED);
+    }
+
     /**
      * 巡检单个订阅：抓详情页 → 与已存磁力比对 → 新增里按「每集取最高清晰度」提交下载 →
      * 写系统通知与「磁力下载」会话。
      *
+     * <p>无论成功、无更新还是抓取失败，都在「消息中心 → 巡检记录」留一条结果快照，
+     * 记录里的剧名与明细是当轮快照，订阅删除后仍然可读。</p>
+     *
+     * @param triggerType {@link SubscriptionCheckLogService#TRIGGER_MANUAL} 手动 / 定时
      * @return 本轮新增并已入库的磁力条数
      */
-    public int scan(long subscriptionId) {
+    public int scan(long subscriptionId, String triggerType) {
         Map<String, Object> row = findRowById(subscriptionId);
         if (row == null) {
             return 0;
@@ -326,6 +343,7 @@ public class MovieSubscriptionService {
         Subscription subscription = toSubscription(row);
         String url = subscription.detailUrl();
         String stamp = now();
+        long startedAt = System.nanoTime();
 
         List<MovieSearchService.MagnetItem> found;
         try {
@@ -338,6 +356,9 @@ public class MovieSubscriptionService {
                      WHERE id = ?
                     """, stamp, nextCheck(stamp), error, stamp, subscriptionId);
             log.warn("订阅巡检抓取失败（{}）：{}", url, error);
+            checkLogs.record(SubscriptionCheckLogService.SOURCE_DYGANG, subscriptionId, subscription.title(),
+                    triggerType, SubscriptionCheckLogService.STATUS_FAILED, 0, 0,
+                    "巡检失败：" + error, null, elapsedMs(startedAt));
             return 0;
         }
 
@@ -359,6 +380,9 @@ public class MovieSubscriptionService {
         if (fresh.isEmpty()) {
             // 没有新剧集时也顺带重试此前失败（例如刚配好 qB）的提交
             retryFailed(subscription);
+            checkLogs.record(SubscriptionCheckLogService.SOURCE_DYGANG, subscriptionId, subscription.title(),
+                    triggerType, SubscriptionCheckLogService.STATUS_OK, 0, 0,
+                    "巡检完成：暂未发现新磁力。", null, elapsedMs(startedAt));
             return 0;
         }
 
@@ -370,6 +394,10 @@ public class MovieSubscriptionService {
                     UPDATE movie_subscription SET baseline_at = ?, updated_at = ? WHERE id = ?
                     """, stamp, stamp, subscriptionId);
             log.info("订阅 {}（{}）补建基线 {} 条磁力，本轮不下载", subscriptionId, subscription.title(), fresh.size());
+            checkLogs.record(SubscriptionCheckLogService.SOURCE_DYGANG, subscriptionId, subscription.title(),
+                    triggerType, SubscriptionCheckLogService.STATUS_BASELINE, fresh.size(), 0,
+                    "补建磁力基线 " + fresh.size() + " 条，本轮不触发下载。",
+                    describeAll(fresh, subscription), elapsedMs(startedAt));
             return fresh.size();
         }
 
@@ -409,7 +437,30 @@ public class MovieSubscriptionService {
         content.append("\n详情：").append(url);
         messageService.publish("电影港更新：" + subscription.title(), content.toString().trim(), "success", "movie");
         log.info("订阅 {}（{}）新增 {} 条、提交下载 {} 条", subscriptionId, subscription.title(), fresh.size(), submitted);
+
+        // 巡检记录：明细优先展示本轮真正提交的条目，没有提交时展示新发现的条目
+        List<String> details = downloadedTitles.isEmpty() ? describeAll(picks, subscription) : downloadedTitles;
+        checkLogs.record(SubscriptionCheckLogService.SOURCE_DYGANG, subscriptionId, subscription.title(),
+                triggerType, SubscriptionCheckLogService.STATUS_UPDATED, fresh.size(), submitted,
+                "发现 " + fresh.size() + " 条新磁力，已提交下载 " + submitted + " 条。",
+                details, elapsedMs(startedAt));
         return fresh.size();
+    }
+
+    /** 巡检记录明细：每条磁力一行描述（提交失败时补充原因，便于回溯） */
+    private List<String> describeAll(List<MovieSearchService.MagnetItem> items, Subscription subscription) {
+        List<String> lines = new ArrayList<>();
+        if (items == null) {
+            return lines;
+        }
+        for (MovieSearchService.MagnetItem item : items) {
+            lines.add(describe(item, subscription));
+        }
+        return lines;
+    }
+
+    private static long elapsedMs(long startedAt) {
+        return Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
     }
 
     /**

@@ -28,6 +28,7 @@ public class HlsSubscriptionService {
     private final DyttSearchService source;
     private final HlsDownloadService downloads;
     private final HlsNoticeService notices;
+    private final SubscriptionCheckLogService checkLogs;
     private final TransactionTemplate transaction;
     private final ExecutorService checks = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "hls-subscriptions"); thread.setDaemon(true); return thread;
@@ -38,8 +39,10 @@ public class HlsSubscriptionService {
     private volatile boolean stopping;
 
     public HlsSubscriptionService(JdbcTemplate db, DyttSearchService source, HlsDownloadService downloads,
-                                  HlsNoticeService notices, PlatformTransactionManager manager) {
+                                  HlsNoticeService notices, SubscriptionCheckLogService checkLogs,
+                                  PlatformTransactionManager manager) {
         this.db = db; this.source = source; this.downloads = downloads; this.notices = notices;
+        this.checkLogs = checkLogs;
         this.transaction = new TransactionTemplate(manager);
     }
 
@@ -198,9 +201,24 @@ public class HlsSubscriptionService {
         return newTasks;
     }
 
-    public synchronized Map<String, Object> check(long id) {
+    /** 兼容旧签名：立即检查（页面按钮触发） */
+    public Map<String, Object> check(long id) {
+        return check(id, SubscriptionCheckLogService.TRIGGER_MANUAL);
+    }
+
+    /**
+     * 检查一个订阅的更新并排队下载。
+     *
+     * <p>无论有无新剧集、是否失败，都会往「消息中心 → 巡检记录」写一条结果快照；
+     * 记录里的剧名与集数明细是当轮快照，订阅删除后仍然可读。</p>
+     *
+     * @param triggerType {@link SubscriptionCheckLogService#TRIGGER_MANUAL} 手动 / 定时
+     */
+    public synchronized Map<String, Object> check(long id, String triggerType) {
         Map<String, Object> row = row(id);
+        String title = HlsSupport.text(row.get("title"));
         if (HlsSupport.number(row.get("enabled")) == 0) throw new BusinessException(400, "请先恢复订阅再检查更新");
+        long startedAt = System.nanoTime();
         try {
             DyttSearchService.DyttItem detail = source.detail(HlsSupport.text(row.get("api_url")), HlsSupport.text(row.get("res_id")));
             Map<Integer, DyttSearchService.PlayItem> items = episodes(
@@ -215,16 +233,51 @@ public class HlsSubscriptionService {
                         HlsSupport.text(detail.cover()), HlsSupport.now(), id);
                 return count;
             });
-            if (added > 0) notices.publish("订阅剧集更新", row.get("title") + " 发现 " + added + " 集更新，已加入下载队列", false);
+            if (added > 0) notices.publish("订阅剧集更新", title + " 发现 " + added + " 集更新，已加入下载队列", false);
             downloads.kick();
+            if (added == 0) {
+                checkLogs.record(SubscriptionCheckLogService.SOURCE_DYTT, id, title, triggerType,
+                        SubscriptionCheckLogService.STATUS_OK, 0, 0,
+                        "检查完成：暂无新剧集（当前第 " + (int) HlsSupport.number(row.get("season")) + " 季共 "
+                                + items.size() + " 集可识别）。", null, elapsedMs22(startedAt));
+            } else {
+                checkLogs.record(SubscriptionCheckLogService.SOURCE_DYTT, id, title, triggerType,
+                        SubscriptionCheckLogService.STATUS_UPDATED, added, added,
+                        "发现 " + added + " 集更新，已加入离线下载队列。",
+                        episodeLines(items, added), elapsedMs22(startedAt));
+            }
             return Map.of("added", added, "message", added == 0 ? "检查完成，暂无新剧集" : "已发现并排队下载 " + added + " 集");
         } catch (Exception e) {
             String error = HlsSupport.error(e);
             db.update("UPDATE hls_subscription SET last_check_at = ?, next_check_at = ?, last_error = ?, updated_at = ? WHERE id = ?",
                     HlsSupport.now(), HlsSupport.afterMinutes(HlsSupport.number(row.get("interval_minutes"))), error, HlsSupport.now(), id);
-            if (HlsSupport.text(row.get("last_error")).isBlank()) notices.publish("订阅检查失败", row.get("title") + "：" + error, true);
+            if (HlsSupport.text(row.get("last_error")).isBlank()) notices.publish("订阅检查失败", title + "：" + error, true);
+            checkLogs.record(SubscriptionCheckLogService.SOURCE_DYTT, id, title, triggerType,
+                    SubscriptionCheckLogService.STATUS_FAILED, 0, 0,
+                    "检查失败：" + error, null, elapsedMs22(startedAt));
             throw new BusinessException(400, error);
         }
+    }
+
+    /**
+     * 巡检记录明细：只列本轮新入库的集（按集号升序，最多 12 条）。
+     * 采集站的集标题通常已自带「第 N 集」，此时直接用原标题，避免出现「第 1 集 第1集」这类重复。
+     */
+    private static java.util.List<String> episodeLines(Map<Integer, DyttSearchService.PlayItem> items, int added) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, DyttSearchService.PlayItem> entry : items.entrySet()) {
+            if (lines.size() >= Math.max(added, 0)) break;
+            String episodeTitle = HlsSupport.text(entry.getValue().title()).trim();
+            String prefix = "第 " + entry.getKey() + " 集";
+            lines.add(episodeTitle.contains(String.valueOf(entry.getKey())) || episodeTitle.isBlank()
+                    ? (episodeTitle.isBlank() ? prefix : episodeTitle)
+                    : prefix + " " + episodeTitle);
+        }
+        return lines;
+    }
+
+    private static long elapsedMs22(long startedAt) {
+        return Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
     }
 
     public synchronized Map<String, Object> enabled(long id, boolean enabled) {
@@ -259,6 +312,8 @@ public class HlsSubscriptionService {
      */
     public synchronized Map<String, Object> delete(long id) {
         Map<String, Object> row = row(id);
+        // 巡检记录是历史快照：订阅删除后继续保留，只解除关联
+        checkLogs.detach(id);
         transaction.executeWithoutResult(status -> {
             db.update("DELETE FROM hls_download_task WHERE subscription_id = ?", id);
             db.update("DELETE FROM hls_subscription WHERE id = ?", id);
@@ -287,7 +342,7 @@ public class HlsSubscriptionService {
                          ORDER BY COALESCE(next_check_at, created_at), id LIMIT 5
                         """, HlsSupport.now())) {
                     if (stopping) break;
-                    try { check(HlsSupport.number(row.get("id"))); }
+                    try { check(HlsSupport.number(row.get("id")), SubscriptionCheckLogService.TRIGGER_SCHEDULED); }
                     catch (Exception e) { log.warn("HLS 订阅检查失败：{}", HlsSupport.error(e)); }
                 }
             } finally { busy.set(false); }

@@ -18,18 +18,19 @@ const routes = [
         component: Main,
         redirect: '/messages',
         children: [
+            // 侧栏顺序即此处的声明顺序：首页排在最前，其次才是消息中心
+            {
+                path: 'dashboard',
+                name: 'dashboard',
+                meta: { title: '首页', icon: 'fa-solid fa-gauge-high' },
+                component: () => import('@/views/dashboard/index.vue')
+            },
             // 消息中心（会话）：登录后的默认落地页，手机端为全屏两级结构
             {
                 path: 'messages',
                 name: 'messages',
                 meta: { title: '消息中心', icon: 'fa-solid fa-bell' },
                 component: () => import('@/views/message/index.vue')
-            },
-            {
-                path: 'dashboard',
-                name: 'dashboard',
-                meta: { title: '首页', icon: 'fa-solid fa-gauge-high' },
-                component: () => import('@/views/dashboard/index.vue')
             },
             // 消息中心：父级分组可折叠（与 quantum 的「消息中心 → 会话」结构一致），
             // 分组下的「会话」子项由 components/main/main.vue 渲染，未读角标取自 chat store；
@@ -48,6 +49,13 @@ const routes = [
                 name: 'movie-downloads',
                 meta: { title: '我的下载', icon: 'fa-solid fa-download', hideInMenu: true },
                 component: () => import('@/views/movie/downloads.vue')
+            },
+            // 巡检记录：订阅数据的巡检历史（电影港 + 电影天堂），与「我的订阅」「我的下载」平级
+            {
+                path: 'check-logs',
+                name: 'movie-check-logs',
+                meta: { title: '巡检记录', icon: 'fa-solid fa-list-check', hideInMenu: true },
+                component: () => import('@/views/movie/check-logs.vue')
             },
             {
                 path: 'frp',
