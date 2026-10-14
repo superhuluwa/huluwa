@@ -42,6 +42,9 @@ public class DatabaseInitializer implements ApplicationRunner {
         }
         migrateMovieDownloadTasks();
         migrateDownloadHistory();
+        refreshMovieMagnetEpisodes();
+        // 旧库的 HLS 订阅没有海报字段，补列后由订阅巡检按需回填。
+        addColumnIfMissing("hls_subscription", "cover", "TEXT");
         boolean hasSubscriptionTool = jdbcTemplate.queryForList("PRAGMA table_info(movie_subscription)").stream()
                 .anyMatch(column -> "downloader".equals(column.get("name")));
         if (!hasSubscriptionTool) {
@@ -72,6 +75,33 @@ public class DatabaseInitializer implements ApplicationRunner {
         }
         if (!columns.contains("external_task_id")) {
             jdbcTemplate.execute("ALTER TABLE movie_download_task ADD COLUMN external_task_id TEXT");
+        }
+    }
+
+    /**
+     * 历史基线里剧集号可能是旧规则误判的（「…全集.1080p.mp4」把扩展名 mp4 里的 4 当成第 4 集）。
+     * 每次启动按当前规则重算一遍：不清空记录、不动基线时间，只把错的集号改对 / 置空。
+     * 记录数只有订阅量级（数百条），一次性全表重算即可。
+     */
+    private void refreshMovieMagnetEpisodes() {
+        var rows = jdbcTemplate.queryForList(
+                "SELECT id, title, episode FROM movie_subscription_magnet");
+        int fixed = 0;
+        for (var row : rows) {
+            String title = String.valueOf(row.get("title") == null ? "" : row.get("title")).trim();
+            if (title.isEmpty()) {
+                continue;  // 没有标题就无从重算，保留原值避免误清
+            }
+            String current = row.get("episode") == null ? null : String.valueOf(row.get("episode"));
+            String recalculated = com.huluwa.console.service.MovieSearchService.episodeOf(title);
+            if (!java.util.Objects.equals(current, recalculated)) {
+                jdbcTemplate.update("UPDATE movie_subscription_magnet SET episode = ? WHERE id = ?",
+                        recalculated, row.get("id"));
+                fixed++;
+            }
+        }
+        if (fixed > 0) {
+            log.info("已修正 {} 条订阅磁力的历史集号", fixed);
         }
     }
 

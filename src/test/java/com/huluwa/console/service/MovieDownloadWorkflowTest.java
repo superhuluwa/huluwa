@@ -39,6 +39,11 @@ class MovieDownloadWorkflowTest {
         when(search.fetchDetail(anyString())).thenReturn(new MovieSearchService.DetailPage(TITLE, List.of()));
         when(qb.settings()).thenReturn(new QBittorrentService.Settings("http://qb", null, null, "/old/qb"));
         when(xl.settings()).thenReturn(new XunleiService.Settings("http://xl", "/old/xl", null));
+        // magnetNotice 会把 describe() 写进载荷，桩成与真实实现同形的最小配置视图
+        when(qb.describe()).thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of(
+                "url", "http://qb", "configured", true)));
+        when(xl.describe()).thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of(
+                "url", "http://xl", "configured", true)));
         when(qb.add(anyList(), anyString())).thenReturn(new QBittorrentService.AddResult(true, false, "已提交"));
         when(xl.add(anyList(), anyString())).thenReturn(List.of(new XunleiService.TaskResult(true, "已提交", "episode.mp4", 1, 1, "xl-1")));
     }
@@ -140,6 +145,33 @@ class MovieDownloadWorkflowTest {
         service.downloadMagnet(URL, TITLE, magnet('f'), "2160P", "4");
         verify(qb, never()).add(anyList(), anyString());
         verify(xl, times(1)).add(anyList(), anyString());
+    }
+
+    @Test
+    void failedDownloadNoticeIsNotMarkedAsMissingConfigurationWhenToolIsConfigured() {
+        MovieSubscriptionService.Subscription subscription = subscribe("qb");
+        service.downloadMagnet(URL, TITLE, magnet('b'), "2160P", "9");
+        // qB 已配置（setup 里 settings().configured() 为真）：下载失败只标记 failed，不再冒充「未配置」
+        when(qb.torrent("b".repeat(40))).thenReturn(new QBittorrentService.Torrent(
+                "b".repeat(40), TITLE, 0, "error", 0, 0, 0));
+        service.refreshDownloads();
+
+        String payload = jdbc.queryForObject(
+                "SELECT payload FROM chat_message WHERE session_id = 'magnet' ORDER BY id DESC LIMIT 1", String.class);
+        assertTrue(payload.contains("\"status\":\"failed\""), payload);
+        assertFalse(payload.contains("\"status\":\"config\""), payload);
+        assertTrue(payload.contains("\"configured\":true"), payload);
+
+        // 真正没有配置下载器时仍然标记 config，前端据此弹配置引导
+        when(qb.settings()).thenReturn(new QBittorrentService.Settings(null, null, null, null));
+        when(qb.describe()).thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of(
+                "configured", false)));
+        when(qb.add(anyList(), anyString())).thenReturn(new QBittorrentService.AddResult(false, false, "未配置"));
+        service.downloadMagnet(URL, TITLE, magnet('c'), "1080P", "10");
+        String configPayload = jdbc.queryForObject(
+                "SELECT payload FROM chat_message WHERE session_id = 'magnet' ORDER BY id DESC LIMIT 1", String.class);
+        assertTrue(configPayload.contains("\"status\":\"config\""), configPayload);
+        assertTrue(configPayload.contains("\"configured\":false"), configPayload);
     }
 
     @Test

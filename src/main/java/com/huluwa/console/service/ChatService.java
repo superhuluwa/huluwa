@@ -472,7 +472,7 @@ public class ChatService {
         int shown = Math.min(found.size(), DYTT_SHOW_MAX);
         replies.add(append(sessionId, "bot", "text",
                 "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
-                        + "点卡片下方「订阅」即可自动下载并追更，也可查看资源列表。", null, null));
+                        + "点卡片右上角「订阅」即可自动下载并追更，也可查看资源列表。", null, null));
         List<String> subscribed = jdbcTemplate.queryForList(
                 "SELECT res_id FROM hls_subscription WHERE api_url = ? AND enabled = 1", String.class, HlsSupport.providerUrl(null));
         for (int i = 0; i < shown; i++) {
@@ -556,7 +556,7 @@ public class ChatService {
         int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
         replies.add(append(sessionId, "bot", "text",
                 (watched ? "监听关键字「" : "关键字「") + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
-                        + "点卡片下方「订阅」即可监听该剧更新（默认每小时巡检一次）。", null, null));
+                        + "点卡片上的「订阅」即可监听该剧更新（默认每小时巡检一次）。", null, null));
         Set<String> subscribed = movieSubscriptionService.subscribedUrls();
         for (int i = 0; i < shown; i++) {
             MovieSearchService.MovieItem item = found.get(i);

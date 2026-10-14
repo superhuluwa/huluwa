@@ -35,7 +35,10 @@ public class HlsController {
     }
     @GetMapping("/detail")
     public ApiResult<DyttSearchService.DyttItem> detail(@RequestParam String resId, @RequestParam(required = false) String apiUrl) {
-        return ApiResult.ok(source.detail(apiUrl, resId));
+        DyttSearchService.DyttItem item = source.detail(apiUrl, resId);
+        // 顺带回填订阅封面：旧订阅缺图或站点换海报时，「我的订阅」无需等巡检即可显示
+        subscriptions.refreshCover(apiUrl, resId, item.cover());
+        return ApiResult.ok(item);
     }
     @GetMapping("/subscriptions")
     public ApiResult<List<Map<String, Object>>> subscriptions() { return ApiResult.ok(subscriptions.list()); }

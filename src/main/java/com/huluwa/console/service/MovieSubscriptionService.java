@@ -557,7 +557,7 @@ public class MovieSubscriptionService {
                 """, status, headline, savePath, tool, externalTaskId, now(), taskId);
 
         String detail = describeParts(episode, quality, seriesTitle);
-        magnetNotice(tool, headline, detail, savePath, "failed".equals(status) ? "config" : "ready");
+        magnetNotice(tool, headline, detail, savePath, noticeStatus(tool, status));
         out.put("status", status);
         out.put("ok", !"failed".equals(status));
         out.put("headline", headline);
@@ -637,7 +637,7 @@ public class MovieSubscriptionService {
             String headline = ("completed".equals(status) ? "✅ 下载完成：" : "⚠️ 下载失败：")
                     + string(row.get("series_title"));
             magnetNotice("xunlei", headline, describeRow(row) + "\n" + task.message(),
-                    string(row.get("save_path")), "failed".equals(status) ? "config" : "ready");
+                    string(row.get("save_path")), noticeStatus("xunlei", status));
         }
     }
 
@@ -670,7 +670,7 @@ public class MovieSubscriptionService {
                     UPDATE movie_download_task SET status = 'failed', message = ?, updated_at = ? WHERE id = ?
                     """, QBittorrentService.stateLabel(state), now(), taskId);
             magnetNotice("⚠️ 下载失败：" + seriesTitle, describeRow(row) + "状态：" + QBittorrentService.stateLabel(state),
-                    string(row.get("save_path")), "config");
+                    string(row.get("save_path")), noticeStatus("qb", "failed"));
             return;
         }
         if ("added".equals(string(row.get("status")))) {
@@ -842,6 +842,17 @@ public class MovieSubscriptionService {
 
     private static String toolLabel(String tool) {
         return "xunlei".equals(tool) ? "迅雷" : "qBittorrent";
+    }
+
+    /**
+     * 会话通知的状态语义：config 只表示「该下载器确实没有配置」，前端据此弹配置引导。
+     * 已配置时的提交失败 / 下载失败一律用 failed 表达，避免前端把失败误判成「未配置」。
+     */
+    private String noticeStatus(String tool, String taskStatus) {
+        if (!downloaderConfigured(tool)) {
+            return "config";
+        }
+        return "failed".equals(taskStatus) ? "failed" : "ready";
     }
 
     private void magnetNotice(String tool, String headline, String detail, String savePath, String status) {

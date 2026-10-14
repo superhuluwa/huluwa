@@ -72,11 +72,20 @@ public class MovieSearchService {
             Pattern.CASE_INSENSITIVE);
     /** 剧集里的清晰度标识：2160P / 4K / 1080P / 720P / 480P（含 1080i 等写法） */
     private static final Pattern QUALITY = Pattern.compile("(?i)(2160P|4K|1080[PI]|720[PI]|480[PI]|360[PI])");
-    /** 剧集号：第 5 季 212 / S05E12 / 212-213 / EP212 等写法统一抽出数字段 */
-    private static final Pattern EPISODE_DIGITS = Pattern.compile("\\d+");
     /** 分辨率字样（抽集号前先剔除，避免把「1080P / 4K / 720P」当集号） */
     private static final Pattern QUALITY_TOKEN = Pattern.compile(
             "(?i)\\b(?:2160P|1080[PI]|720[PI]|480[PI]|360[PI]|4K)\\b");
+    /** 媒体扩展名（抽集号前先剔除，避免把「.mp4 / .mkv」里的数字当集号） */
+    private static final Pattern MEDIA_EXTENSION = Pattern.compile(
+            "(?i)\\.(?:mp4|m4v|mkv|avi|rmvb|rm|ts|m2ts|mts|mov|flv|wmv|webm|mpg|mpeg|iso|3gp|vob|asf|f4v|ogv)\\s*$");
+    /**
+     * 独立数字段：左右不能紧贴字母数字（避免「x264 / 10bit」），前后也不能构成「数字.数字」
+     * （避免把「5.1 / 7.1」声道记号当集号）。裸数字集号（212 / 04）与合并集号（208-209）走这里。
+     */
+    private static final Pattern STANDALONE_DIGITS = Pattern.compile(
+            "(?<![0-9A-Za-z])(?<!\\d\\.)(\\d{1,4})(?![0-9A-Za-z])(?!\\.\\d)");
+    /** 年份不是集号（如「某电影.2024.1080p.mkv」没有集号） */
+    private static final Pattern RELEASE_YEAR = Pattern.compile("^(?:19|20)\\d{2}$");
     /** SxxExx 写法（英美剧） */
     private static final Pattern SXXEXX = Pattern.compile("(?i)S\\d{1,2}E(\\d{1,4})");
     /** 「第 xx 集」显式集号写法（必须带「集」，避免与「第 N 季」混淆） */
@@ -328,8 +337,11 @@ public class MovieSearchService {
     /**
      * 抽取剧集键（集号）：优先「第 N 季」之后的数字段，其次 SxxExx / EPxx / 独立数字段。
      * 一集一个键，便于跨清晰度去重（同一集的 1080P / 2160P 视为同一更新）。
+     *
+     * <p>识别不出集号时返回 null：整季打包（「第一季全集打包.1080p.mp4」）、
+     * 正片 / 剧场版（「某电影.2024.1080p.mkv」）都属此类，不会把扩展名或年份当成集号。</p>
      */
-    static String episodeOf(String title) {
+    public static String episodeOf(String title) {
         if (title == null || title.isBlank()) {
             return null;
         }
@@ -347,16 +359,24 @@ public class MovieSearchService {
         if (en.find()) {
             return normalizeEpisode(en.group(1));
         }
-        // 3) 「第 N 季」之后的第一个数字段（电影港剧集页最常见的写法）
+        // 3) 「第 N 季」之后的第一个独立数字段（电影港剧集页最常见的写法）
         Matcher season = SEASON.matcher(title);
         String tail = title;
         if (season.find()) {
             tail = title.substring(season.end());
         }
-        // 分辨率不是集号（如「第一季全集打包.1080p.mp4」没有集号，不能把它当第 1080 集）
+        // 扩展名、分辨率、年份都不是集号：如「第一季全集打包.1080p.mp4」「某电影.2024.mkv」
+        // 没有集号时不能把 mp4 里的 4 / 1080 / 2024 当成集号。
+        tail = MEDIA_EXTENSION.matcher(tail).replaceAll(" ");
         tail = QUALITY_TOKEN.matcher(tail).replaceAll(" ");
-        Matcher digits = EPISODE_DIGITS.matcher(tail);
-        return digits.find() ? normalizeEpisode(digits.group()) : null;
+        Matcher digits = STANDALONE_DIGITS.matcher(tail);
+        while (digits.find()) {
+            String found = digits.group(1);
+            if (!RELEASE_YEAR.matcher(found).matches()) {
+                return normalizeEpisode(found);
+            }
+        }
+        return null;
     }
 
     /** 去掉集号的前导零（01 → 1），同一集的不同写法归并成一个键 */

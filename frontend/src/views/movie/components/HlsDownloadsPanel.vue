@@ -13,6 +13,7 @@
                 <article v-for="row in rows" :key="row.id" class="task-card">
                     <div class="task-head">
                         <span class="task-title">{{ row.seriesTitle || '未知剧集' }}</span>
+                        <n-button size="tiny" @click="showLog(row)">日志</n-button>
                         <span class="pill" :class="statusTone(row)">
                             <span class="dot"></span>{{ statusText(row) }}
                         </span>
@@ -48,9 +49,9 @@
                             <span class="field-value">{{ row.message }}</span>
                         </div>
                     </div>
-                    <div class="task-actions">
-                        <n-button size="tiny" @click="showLog(row)">日志</n-button>
-                        <n-button v-if="['failed', 'skipped'].includes(row.status)" size="tiny" type="primary"
+                    <!-- 重试 / 补下载：仅失败与跳过的任务需要 -->
+                    <div v-if="['failed', 'skipped'].includes(row.status)" class="task-actions">
+                        <n-button size="tiny" type="primary"
                             :disabled="!!row.paused" :loading="retrying === row.id" @click="retry(row)">
                             {{ row.status === 'skipped' ? '补下载' : '重试' }}
                         </n-button>
@@ -183,6 +184,8 @@ export default {
 .task-card { border: 1px solid var(--line); border-radius: 10px; background: rgba(20, 28, 46, .5); padding: 12px; }
 .task-head { display: flex; align-items: flex-start; gap: 8px; }
 .task-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+/* 日志按钮固定在状态左侧，不被长剧名挤压 */
+.task-head .n-button { flex: none; }
 .task-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag { padding: 2px 8px; border-radius: 999px; font-size: 11px; background: rgba(148, 163, 184, .12); color: var(--text-2); }
 .task-progress { margin-top: 10px; }

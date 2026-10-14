@@ -24,13 +24,17 @@
 import { NButton, NSpin } from 'naive-ui'
 import { CheckHlsSubscription, EnableHlsSubscription, GetHlsSubscriptions } from '@/api/hls'
 import HlsResourceDialog from '@/views/message/components/HlsResourceDialog.vue'
+import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
 export default {
     components: { NButton, NSpin, HlsResourceDialog },
+    setup() { return { hlsSubscriptions: useHlsSubscriptionsStore() } },
     data() { return { rows: [], loading: false, checking: 0, dialog: false, selected: null } },
     mounted() { this.load() },
     methods: {
         async load() {
             this.loading = true
+            // 暂停 / 恢复追更、改设置都会走这里：让消息中心卡片的实时订阅集合过期
+            this.hlsSubscriptions.invalidate()
             try { this.rows = await GetHlsSubscriptions() } catch (error) { /* 拦截器已提示 */ }
             finally { this.loading = false }
         },

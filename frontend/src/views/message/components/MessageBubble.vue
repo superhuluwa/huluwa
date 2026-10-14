@@ -17,12 +17,28 @@
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
         <div class="bubble"
-            :class="{ 'is-cover': isImage, 'is-cover-wide': isImage && hasCoverCaption, 'is-video': isVideo, 'is-error': isError, 'hold-open': holdOpen }"
+            :class="{ 'is-cover': isImage, 'is-cover-wide': isImage && hasCoverCaption, 'is-video': isVideo, 'is-error': isError, 'has-corner-action': (isMovie || isDytt) && isImage, 'hold-open': holdOpen }"
             :title="fullTime" @touchstart.passive="onHoldStart" @touchend="endHold" @touchcancel="endHold"
             @touchmove.passive="endHold">
             <div class="bubble-tools">
                 <span class="tool" title="复制" @click="copy"><i class="fa-regular fa-copy"></i></span>
             </div>
+            <!-- 电影港卡片：订阅按钮固定在卡片右上角（浮在封面之上，不占操作条位置） -->
+            <button v-if="isMovie && isImage" class="subscribe-corner" type="button"
+                :class="{ subscribed, busy }" :disabled="subscribed || busy"
+                :title="subscribed ? '已订阅' : '订阅该剧'"
+                @click.stop="onSubscribe">
+                <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                <span>{{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}</span>
+            </button>
+            <!-- 电影天堂卡片：订阅按钮同样固定在卡片右上角（浮在封面之上） -->
+            <button v-if="isDytt && isImage" class="subscribe-corner" type="button"
+                :class="{ subscribed, busy }" :disabled="subscribed || busy"
+                :title="subscribed ? '已订阅' : '订阅该剧，新剧集自动下载'"
+                @click.stop="onHlsSubscribe">
+                <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
+                <span>{{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}</span>
+            </button>
             <div class="bubble-content">
                 <!-- 图片气泡（影视封面 / 图片消息）：封面 + 配文，点击封面看大图 -->
                 <template v-if="isImage">
@@ -33,13 +49,8 @@
                     <img v-else class="cover" :src="message.content" alt="封面" @error="loadError = true"
                         @click="openCover" />
                     <RichText class="cover-caption" :text="message.contentText" :support-fold="false" />
-                    <!-- 电影港卡片：订阅 + 磁力 + 订阅设置 -->
+                    <!-- 电影港卡片：订阅按钮在卡片右上角，操作条只留资源列表 / 订阅设置 -->
                     <div v-if="isMovie" class="movie-actions">
-                        <button class="subscribe-btn" type="button" :class="{ subscribed: subscribed, busy }"
-                            :disabled="subscribed || busy" @click="onSubscribe">
-                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
-                            {{ subscribed ? '已订阅' : (busy ? '订阅中…' : '订阅') }}
-                        </button>
                         <button class="magnet-btn" type="button" :disabled="magnetsLoading" @click="openMagnets">
                             <i :class="magnetsLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-magnet'"></i>
                             资源列表
@@ -47,7 +58,6 @@
                         <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
                             <i class="fa-solid fa-sliders"></i>订阅设置
                         </button>
-                        <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                     <!-- 电影天堂卡片：在线播放线路（点击查看完整资源列表 / 复制直链） -->
                     <div v-else-if="isDytt" class="movie-actions">
@@ -59,12 +69,6 @@
                             rel="noopener">
                             <i class="fa-solid fa-up-right-from-square"></i>详情页
                         </a>
-                        <button class="subscribe-btn" type="button" :class="{ subscribed, busy }"
-                            :disabled="subscribed || busy" @click="onHlsSubscribe">
-                            <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
-                            {{ subscribed ? '已订阅' : busy ? '订阅中…' : '订阅' }}
-                        </button>
-                        <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
                 </template>
                 <!-- 视频气泡（视频解析会话）：封面 + 内联播放，点按在气泡内播放 -->
@@ -86,7 +90,6 @@
                         <button class="magnet-btn" type="button" @click="subscriptionDialog = true">
                             <i class="fa-solid fa-sliders"></i>订阅设置
                         </button>
-                        <span class="subscribe-tip">{{ subscribed ? '每小时巡检更新' : '监听新增剧集并自动下载' }}</span>
                     </div>
                     <!-- 电影天堂卡片：在线播放线路（点击查看完整资源列表 / 复制直链） -->
                     <div v-else-if="isDytt" class="movie-actions">
@@ -103,7 +106,6 @@
                             <i :class="subscribed ? 'fa-solid fa-bell' : 'fa-regular fa-bell'"></i>
                             {{ subscribed ? '已订阅' : busy ? '订阅中…' : '订阅' }}
                         </button>
-                        <span class="subscribe-tip">新剧集自动下载，供飞牛影视播放</span>
                     </div>
                 </template>
             </div>
@@ -144,10 +146,14 @@ import PlaySourceDialog from './PlaySourceDialog.vue'
 import MovieSearchWatchAction from './MovieSearchWatchAction.vue'
 import { PreviewMagnets } from '@/api/chat'
 import { QuickSubscribeHls } from '@/api/hls'
+import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
 import { formatFullTime } from '@/utils/chatFormat'
 
 export default {
     name: 'MessageBubble',
+    setup() {
+        return { hlsSubscriptions: useHlsSubscriptionsStore() }
+    },
     components: { RichText, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
     props: {
         message: {
@@ -250,8 +256,17 @@ export default {
             }
             return sources.reduce((sum, s) => sum + ((s && s.items) ? s.items.length : 0), 0)
         },
-        /** 订阅状态：本地操作优先，其次是服务端下发的标记 */
+        /**
+         * 订阅状态：电影天堂卡片以实时订阅集合为准（在「我的订阅」里删除 / 恢复后立即一致），
+         * 集合尚未加载或不是电影天堂卡片时，退回本地乐观值 / 载荷快照。
+         */
         subscribed() {
+            if (this.isDytt && this.hlsSubscriptions.loaded) {
+                const resId = String(this.parsedPayload.id || '')
+                if (resId) {
+                    return this.hlsSubscriptions.has(resId)
+                }
+            }
             if (this.subscribedLocal !== null) {
                 return this.subscribedLocal
             }
@@ -310,6 +325,13 @@ export default {
         },
         'message.payload'() {
             this.subscribedLocal = null
+        }
+    },
+    mounted() {
+        // 电影天堂卡片的订阅状态以实时集合为准：这样在「我的订阅」里删除 / 恢复后，
+        // 历史搜索卡片不会再停留在「已订阅」。请求失败只留空集合，退回载荷快照。
+        if (this.isDytt) {
+            this.hlsSubscriptions.ensureLoaded().catch(() => {})
         }
     },
     methods: {
@@ -398,6 +420,10 @@ export default {
         },
         onSubscriptionSaved(result) {
             this.subscribedLocal = !!result.subscription?.enabled
+            // 同步实时集合：同一会话里同作品的其它卡片立即跟随，无需等下次进入会话
+            if (this.isDytt) {
+                this.hlsSubscriptions.mark(this.parsedPayload.id, !!result.subscription?.enabled)
+            }
             this.$emit('subscribed', { url: this.parsedPayload.url, subscription: result.subscription })
         }
     }
@@ -718,9 +744,53 @@ export default {
     opacity: .75;
 }
 
-.subscribe-tip {
-    font-size: 11.5px;
-    color: var(--text-3);
+
+/* 电影港 / 电影天堂卡片：订阅按钮固定在卡片右上角（浮在封面之上），半透明底避免浅色封面吞字 */
+.subscribe-corner {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(99, 102, 241, .6);
+    background: rgba(15, 23, 42, .74);
+    color: #C7D2FE;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .38);
+    transition: background .15s, border-color .15s, color .15s;
+}
+
+.subscribe-corner:hover:not(:disabled) {
+    background: rgba(30, 41, 59, .92);
+    border-color: rgba(129, 140, 248, .85);
+    color: #E0E7FF;
+}
+
+.subscribe-corner.subscribed,
+.subscribe-corner:disabled {
+    cursor: default;
+    border-color: rgba(74, 222, 128, .5);
+    background: rgba(6, 78, 59, .78);
+    color: #86EFAC;
+}
+
+.subscribe-corner.busy {
+    opacity: .8;
+}
+
+/* 卡片右上角有订阅按钮时，「复制」工具条让位到左上角，避免两个操作挤在一起 */
+.bubble.has-corner-action .bubble-tools {
+    right: auto;
+    left: 8px;
 }
 
 /* ==========================================================================
@@ -779,6 +849,13 @@ export default {
 
     .subscribe-btn {
         padding: 7px 14px;
+        font-size: 13px;
+    }
+
+    .subscribe-corner {
+        top: 12px;
+        right: 12px;
+        padding: 8px 14px;
         font-size: 13px;
     }
 }

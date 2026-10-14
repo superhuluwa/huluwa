@@ -45,10 +45,14 @@ class HlsSubscriptionServiceTest {
     void close() { subscriptions.shutdown(); downloads.shutdown(); dataSource.destroy(); }
 
     private DyttSearchService.DyttItem detail(int count, String signature) {
+        return detail(count, signature, "https://img.example/cover.jpg");
+    }
+
+    private DyttSearchService.DyttItem detail(int count, String signature, String cover) {
         List<DyttSearchService.PlayItem> plays = IntStream.rangeClosed(1, count)
                 .mapToObj(episode -> new DyttSearchService.PlayItem("第" + episode + "集", "https://cdn.example/" + episode + ".m3u8?token=" + signature))
                 .toList();
-        return new DyttSearchService.DyttItem("42", "剧名", "2026", "", "", "", "", "", "",
+        return new DyttSearchService.DyttItem("42", "剧名", "2026", "", "", cover, "", "", "",
                 List.of(new DyttSearchService.PlaySource("m3u8", count, plays)));
     }
 
@@ -238,6 +242,52 @@ class HlsSubscriptionServiceTest {
         assertEquals(1, downloads.list().size());
         // 同一集不会因为重复提交而多出第二条记录
         assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM hls_download_task", Integer.class));
+    }
+
+    /** 「我的订阅」左侧封面：订阅时落库，列表接口随订阅一起返回。 */
+    @Test
+    void subscriptionKeepsTheCoverForTheSubscriptionsPage() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(2, "old", "https://img.example/poster.jpg"));
+        long id = subscribe(true, 1);
+        assertEquals("https://img.example/poster.jpg", db.queryForObject(
+                "SELECT cover FROM hls_subscription WHERE id = ?", String.class, id));
+        assertEquals("https://img.example/poster.jpg", subscriptions.list().getFirst().get("cover"));
+    }
+
+    /** 旧订阅没有封面时，列表加载会异步补图，不阻塞本次返回。 */
+    @Test
+    void missingCoverIsBackfilledForLegacySubscriptions() throws Exception {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(2, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_subscription SET cover = NULL WHERE id = ?", id);
+
+        assertNull(subscriptions.list().getFirst().get("cover"));
+
+        // 回填在异步线程执行：等待它写库后再次读取
+        String cover = null;
+        for (int i = 0; i < 100 && cover == null; i++) {
+            Thread.sleep(30);
+            cover = db.queryForObject("SELECT cover FROM hls_subscription WHERE id = ?", String.class, id);
+        }
+        assertEquals("https://img.example/cover.jpg", cover);
+        assertEquals("https://img.example/cover.jpg", subscriptions.list().getFirst().get("cover"));
+    }
+
+    /** 详情接口按作品回填封面，多季订阅共用同一张海报。 */
+    @Test
+    void detailBackfillsCoverForExistingSubscription() {
+        when(source.detail(anyString(), anyString())).thenReturn(detail(2, "old"));
+        long id = subscribe(true, 1);
+        db.update("UPDATE hls_subscription SET cover = NULL WHERE id = ?", id);
+
+        subscriptions.refreshCover("https://dyttzyw.com/api.php/provide/vod/", "42", "https://img.example/new.jpg");
+
+        assertEquals("https://img.example/new.jpg", db.queryForObject(
+                "SELECT cover FROM hls_subscription WHERE id = ?", String.class, id));
+        // 空封面不会把已有海报覆盖掉
+        subscriptions.refreshCover("https://dyttzyw.com/api.php/provide/vod/", "42", "");
+        assertEquals("https://img.example/new.jpg", db.queryForObject(
+                "SELECT cover FROM hls_subscription WHERE id = ?", String.class, id));
     }
 
     /** 取消订阅即删除：订阅行与下载任务一并清除，本地已归档文件不受影响。 */

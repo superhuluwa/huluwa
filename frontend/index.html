@@ -2,6 +2,9 @@
 <html lang="zh-CN">
     <head>
         <meta charset="UTF-8" />
+        <!-- 抖音等 CDN 会对携带站外 Referer 的直链请求返回 403（媒体元素不支持 referrerpolicy 属性），
+             这里用文档级策略：同源请求照常带 Referer，跨域视频/图片请求不带 Referer，避免被防盗链拦截 -->
+        <meta name="referrer" content="same-origin" />
         <!-- viewport-fit=cover：让全屏聊天布局延伸到 iPhone 刘海/圆角区域，安全区由 CSS env() 处理 -->
         <meta name="viewport"
             content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />

@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS hls_subscription (
     res_id TEXT NOT NULL,
     title TEXT NOT NULL,
     year TEXT,
+    cover TEXT,                                  -- 海报地址，用于「我的订阅」左侧封面
     season INTEGER NOT NULL,
     source_name TEXT NOT NULL,
     interval_minutes INTEGER NOT NULL DEFAULT 60,

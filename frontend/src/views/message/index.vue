@@ -23,8 +23,9 @@
                 @load-earlier="loadEarlier" @open-cover="onOpenCover" @delete="onDeleteNotify"
                 @resend="onResend" />
 
-            <ChatComposer :disabled="!currentKey" :sending="sending" :kind="currentKind" :hint="composerHint"
-                :mobile="isMobile" @send="onSend" />
+            <!-- 系统通知为只读会话：不渲染底部输入条，消息流直接贴底 -->
+            <ChatComposer v-if="currentKind !== 'system'" :disabled="!currentKey" :sending="sending" :kind="currentKind"
+                :hint="composerHint" :mobile="isMobile" @send="onSend" />
         </section>
 
         <MovieSubscriptionDialog v-model:show="movieDialog" />
@@ -59,7 +60,7 @@
  *  - 内置「qBittorrent 下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
  *  - 内置「迅雷下载」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
- *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读。
+ *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读且不渲染底部输入条。
  *
  * 手机端（触屏 + 窄视口）的页面形态：
  *  - 复用公共控制台顶栏，内容区铺满剩余空间；点击会话进入二级聊天页，返回键回到列表；
@@ -67,9 +68,11 @@
  */
 import { mapActions, mapState } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
 import http from '@/libs/http'
 import { isMobileDevice } from '@/composables/useIsMobile'
 import { useFullscreenPage } from '@/composables/useFullscreenPage'
+import { configPromptKind } from '@/utils/configPrompt'
 import ConversationList from './components/ConversationList.vue'
 import ChatHeader from './components/ChatHeader.vue'
 import MessageList from './components/MessageList.vue'
@@ -99,7 +102,7 @@ export default {
     setup() {
         // 手机端会话内容铺满公共顶栏下的剩余空间；桌面端恒为 false
         const fullscreen = useFullscreenPage()
-        return { fullscreen }
+        return { fullscreen, hlsSubscriptions: useHlsSubscriptionsStore() }
     },
     data() {
         return {
@@ -120,7 +123,15 @@ export default {
             /** 首次提交迅雷磁力且尚未配置时自动弹出的配置表单 */
             xunleiDialog: false,
             /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
-            xunleiPrompted: false
+            xunleiPrompted: false,
+            /**
+             * 配置引导的触发基线：会话进入 / 刷新时先把最后一条已加载机器人消息记进基线，
+             * 只有基线之后新到达（id 更大）的机器人消息才允许弹出配置表单，
+             * 避免历史回放（每次进会话 / 刷新页面）都重复弹出已配置过的连接设置。
+             */
+            configPromptBaseline: {},
+            /** 是否允许配置引导：消息整页加载期间先关闭，加载完成后重新武装 */
+            configPromptArmed: false
         }
     },
     computed: {
@@ -249,30 +260,36 @@ export default {
         }
     },
     watch: {
-        /** 配置引导（自动弹配置表单）：机器人回复经 WebSocket 异步到达，在这里监听最后一条 bot 消息 */
+        /**
+         * 配置引导（自动弹配置表单）：机器人回复经 WebSocket 异步到达，在这里监听最后一条 bot 消息。
+         *
+         * 只有在「当前会话新到达的消息」上才允许弹窗：
+         *  - 会话打开 / 刷新期间的整页回放不弹（configPromptArmed=false）；
+         *  - 消息 id 不大于进入会话时的基线（历史消息）不弹；
+         *  - 载荷里服务端声明配置仍然有效（settings.configured=true）时不弹，
+         *    例如「下载失败」通知也带 config 状态，但此时连接配置是好的，不该再让用户重填。
+         */
         lastBotMessage(next) {
-            if (!next || !next.payload) {
+            if (!next || !this.configPromptArmed) {
                 return
             }
-            try {
-                const payload = JSON.parse(next.payload)
-                if (payload.status !== 'config') {
-                    return
-                }
-                if (payload.kind === 'magnet' && this.isMagnet && !this.qbPrompted) {
-                    this.qbPrompted = true
-                    this.qbDialog = true
-                }
-                if (payload.kind === 'video' && this.isVideoSession && !this.videoPrompted) {
-                    this.videoPrompted = true
-                    this.videoDialog = true
-                }
-                if (payload.kind === 'xunlei' && this.isXunleiSession && !this.xunleiPrompted) {
-                    this.xunleiPrompted = true
-                    this.xunleiDialog = true
-                }
-            } catch (e) {
-                // 损坏的载荷按无引导处理
+            const baseline = this.configPromptBaseline[this.currentKey] || 0
+            const kind = configPromptKind(next, { baseline, armed: true })
+            // 基线随最新消息前移，同一条消息只参与一次判定
+            if (typeof next.id === 'number' && next.id > baseline) {
+                this.configPromptBaseline = { ...this.configPromptBaseline, [this.currentKey]: next.id }
+            }
+            if (kind === 'magnet' && this.isMagnet && !this.qbPrompted) {
+                this.qbPrompted = true
+                this.qbDialog = true
+            }
+            if (kind === 'video' && this.isVideoSession && !this.videoPrompted) {
+                this.videoPrompted = true
+                this.videoDialog = true
+            }
+            if (kind === 'xunlei' && this.isXunleiSession && !this.xunleiPrompted) {
+                this.xunleiPrompted = true
+                this.xunleiDialog = true
             }
         },
         '$route.query.session'(next) {
@@ -318,7 +335,7 @@ export default {
         const requested = this.$route.query.session || (this.isMobile ? '' : PREFERRED_SESSION)
         const exists = store.sessions.some((item) => item.id === requested)
         this.narrowShowRoom = this.isMobile ? !!requested : true
-        await store.openSession(exists ? requested : (store.sessions[0]?.id || ''))
+        await this.openSessionQuietly(exists ? requested : (store.sessions[0]?.id || ''))
         // 手机端直接带 session 进来（分享链接 / 刷新聊天页）时把地址栏补全；列表页则保持干净
         if (this.isMobile && requested) {
             this.syncQuery(store.currentKey)
@@ -333,6 +350,9 @@ export default {
         store.refreshSessions()
         store.startPolling()
         store.initRealtime()
+        // 从「我的订阅」返回时重新拉取电影天堂订阅集合：卡片已按 keep-alive 缓存，
+        // 不会重新挂载，必须在页面恢复时主动同步一次（否则取消订阅后仍显示「已订阅」）
+        this.hlsSubscriptions.ensureLoaded().catch(() => {})
         // 从左侧菜单的会话子项进入时 URL 带 ?session=<id>：以它为准切换会话，
         // 否则（页签返回等无 query 的场景）保持当前会话，手机端停在会话列表。
         const target = this.$route.query.session
@@ -380,7 +400,7 @@ export default {
                 this.narrowShowRoom = true
                 return
             }
-            await this.openSession(sessionId)
+            await this.openSessionQuietly(sessionId)
             // 先切换视图再同步 query：手机端由此把 session 写进地址栏（进入二级页）
             this.narrowShowRoom = true
             this.syncQuery(sessionId)
@@ -392,7 +412,14 @@ export default {
         },
         async refresh() {
             await this.refreshSessions()
-            await useChatStore().reloadSession(this.currentKey)
+            // 顶栏刷新同时同步电影天堂订阅集合：删除 / 恢复订阅后卡片状态立即校正
+            await this.hlsSubscriptions.refresh().catch(() => {})
+            this.configPromptArmed = false
+            try {
+                await useChatStore().reloadSession(this.currentKey)
+            } finally {
+                this.markConfigPromptBaseline()
+            }
         },
         /** 发送：乐观渲染 + WS/HTTP 双通道（见 store.send）；失败转 failed 气泡，用户点击重发 */
         async onSend(text) {
@@ -401,6 +428,27 @@ export default {
         /** failed 气泡点击重发：换新 requestId 重新发送 */
         async onResend(bubble) {
             await useChatStore().resend(bubble)
+        },
+        /** 打开会话并安静地完成历史加载：加载期间关闭配置引导，避免历史卡片触发弹窗 */
+        async openSessionQuietly(sessionId) {
+            this.configPromptArmed = false
+            try {
+                await this.openSession(sessionId)
+            } finally {
+                this.markConfigPromptBaseline()
+            }
+        },
+        /** 把当前会话最后一条机器人消息记为基线并重新武装配置引导（只对新消息弹窗） */
+        markConfigPromptBaseline() {
+            this.configPromptArmed = true
+            const last = this.lastBotMessage
+            if (!last || typeof last.id !== 'number') {
+                return
+            }
+            const current = this.configPromptBaseline[this.currentKey] || 0
+            if (last.id > current) {
+                this.configPromptBaseline = { ...this.configPromptBaseline, [this.currentKey]: last.id }
+            }
         },
         /** 打开 qBittorrent 连接配置表单（顶栏「更多 → qBittorrent 设置」与配置引导共用） */
         openQbDialog() {

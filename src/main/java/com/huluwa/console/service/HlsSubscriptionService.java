@@ -33,6 +33,8 @@ public class HlsSubscriptionService {
         Thread thread = new Thread(r, "hls-subscriptions"); thread.setDaemon(true); return thread;
     });
     private final AtomicBoolean busy = new AtomicBoolean();
+    /** 本进程内已尝试补过封面的订阅 id：失败不反复重试，重启后再试一次 */
+    private final java.util.Set<Long> coverBackfilled = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile boolean stopping;
 
     public HlsSubscriptionService(JdbcTemplate db, DyttSearchService source, HlsDownloadService downloads,
@@ -42,13 +44,42 @@ public class HlsSubscriptionService {
     }
 
     public List<Map<String, Object>> list() {
-        return db.queryForList("SELECT * FROM hls_subscription ORDER BY id DESC").stream().map(this::view).toList();
+        List<Map<String, Object>> rows = db.queryForList("SELECT * FROM hls_subscription ORDER BY id DESC");
+        backfillCovers(rows);
+        return rows.stream().map(this::view).toList();
+    }
+
+    /**
+     * 旧版订阅没有海报字段。列表加载时对这些订阅异步补一次封面，
+     * 不阻塞本次返回（前端刷新后即可看到图片）；抓取失败只记录日志，等下次重启再试。
+     */
+    private void backfillCovers(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> missing = rows.stream()
+                .filter(row -> HlsSupport.text(row.get("cover")).isBlank())
+                .filter(row -> coverBackfilled.add(HlsSupport.number(row.get("id"))))
+                .toList();
+        if (missing.isEmpty() || stopping) return;
+        checks.submit(() -> {
+            for (Map<String, Object> row : missing) {
+                if (stopping) return;
+                try {
+                    DyttSearchService.DyttItem item = source.detail(HlsSupport.text(row.get("api_url")), HlsSupport.text(row.get("res_id")));
+                    if (!HlsSupport.text(item.cover()).isBlank()) {
+                        db.update("UPDATE hls_subscription SET cover = ?, updated_at = ? WHERE id = ?",
+                                item.cover(), HlsSupport.now(), row.get("id"));
+                    }
+                } catch (Exception e) {
+                    log.debug("HLS 订阅封面补全失败（id={}）：{}", row.get("id"), HlsSupport.error(e));
+                }
+            }
+        });
     }
 
     private Map<String, Object> view(Map<String, Object> row) {
         Map<String, Object> result = new LinkedHashMap<>();
         String[][] fields = {{"id", "id"}, {"apiUrl", "api_url"}, {"resId", "res_id"}, {"title", "title"},
-                {"year", "year"}, {"season", "season"}, {"sourceName", "source_name"}, {"intervalMinutes", "interval_minutes"},
+                {"year", "year"}, {"cover", "cover"}, {"season", "season"}, {"sourceName", "source_name"},
+                {"intervalMinutes", "interval_minutes"},
                 {"fromEpisode", "from_episode"}, {"lastCheckAt", "last_check_at"}, {"nextCheckAt", "next_check_at"},
                 {"lastError", "last_error"}, {"createdAt", "created_at"}};
         for (String[] field : fields) result.put(field[0], row.get(field[1]));
@@ -114,14 +145,16 @@ public class HlsSubscriptionService {
         boolean downloadExisting = !Boolean.FALSE.equals(body.downloadExisting());
         long id = transaction.execute(status -> {
             db.update("""
-                    INSERT INTO hls_subscription(series_key, api_url, res_id, title, year, season, source_name,
+                    INSERT INTO hls_subscription(series_key, api_url, res_id, title, year, cover, season, source_name,
                         interval_minutes, from_episode, headers, created_at, updated_at, next_check_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(series_key, season) DO UPDATE SET title = excluded.title, year = excluded.year,
+                        cover = COALESCE(NULLIF(excluded.cover, ''), hls_subscription.cover),
                         source_name = excluded.source_name, interval_minutes = excluded.interval_minutes,
                         from_episode = excluded.from_episode, headers = excluded.headers, enabled = 1,
                         updated_at = excluded.updated_at
-                    """, key, api, resId, title, year, season, selected.name(), interval, from, headers, now, now, now);
+                    """, key, api, resId, title, year, HlsSupport.text(detail.cover()),
+                    season, selected.name(), interval, from, headers, now, now, now);
             long subscription = db.queryForObject("SELECT id FROM hls_subscription WHERE series_key = ? AND season = ?", Long.class, key, season);
             Map<String, Object> row = row(subscription);
             boolean initial = HlsSupport.number(row.get("initialized")) == 0;
@@ -177,8 +210,9 @@ public class HlsSubscriptionService {
                 int count = recordEpisodes(row, items, false);
                 db.update("""
                         UPDATE hls_subscription SET last_check_at = ?, next_check_at = ?, last_error = NULL,
-                               initialized = 1, updated_at = ? WHERE id = ?
-                        """, HlsSupport.now(), HlsSupport.afterMinutes(HlsSupport.number(row.get("interval_minutes"))), HlsSupport.now(), id);
+                               initialized = 1, cover = COALESCE(NULLIF(?, ''), cover), updated_at = ? WHERE id = ?
+                        """, HlsSupport.now(), HlsSupport.afterMinutes(HlsSupport.number(row.get("interval_minutes"))),
+                        HlsSupport.text(detail.cover()), HlsSupport.now(), id);
                 return count;
             });
             if (added > 0) notices.publish("订阅剧集更新", row.get("title") + " 发现 " + added + " 集更新，已加入下载队列", false);
@@ -198,6 +232,25 @@ public class HlsSubscriptionService {
         db.update("UPDATE hls_subscription SET enabled = ?, next_check_at = ?, updated_at = ? WHERE id = ?",
                 enabled ? 1 : 0, HlsSupport.now(), HlsSupport.now(), id);
         downloads.kick(); return view(row(id));
+    }
+
+    /**
+     * 详情接口顺带回填订阅封面：旧订阅没有海报字段，或站点换了海报时无需等巡检。
+     *
+     * <p>按规范化后的采集接口 + 作品 ID 匹配该作品的全部订阅行（多季共用一张海报）。</p>
+     */
+    public void refreshCover(String apiUrl, String resId, String cover) {
+        String value = HlsSupport.text(cover);
+        if (value.isBlank()) return;
+        try {
+            db.update("""
+                    UPDATE hls_subscription SET cover = ?, updated_at = ?
+                     WHERE api_url = ? AND res_id = ? AND COALESCE(cover, '') <> ?
+                    """, value, HlsSupport.now(), HlsSupport.providerUrl(apiUrl), HlsSupport.resourceId(resId), value);
+        } catch (Exception e) {
+            // 封面是展示信息，回填失败不影响详情返回
+            log.debug("HLS 订阅封面回填失败：{}", e.getMessage());
+        }
     }
 
     /**

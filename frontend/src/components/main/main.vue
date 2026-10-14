@@ -1,7 +1,10 @@
 <template>
     <div class="main-console"
         :class="{ 'is-mobile': isMobile, 'drawer-open': isMobile && mobileDrawerOpen, 'is-immersive': shellHidden }">
-        <aside v-if="shellVisible" class="sider" :class="{ collapsed: siderCollapsed }">
+        <!-- 侧栏常驻 DOM：手机端会话页（沉浸态）也保留整棵侧栏，默认停在屏幕外，
+             靠 .drawer-open 切换 transform 滑入滑出。若改回 v-if 动态挂载，浏览器会在
+             同一帧直接以终态插入元素，transition 不触发，抽屉就会「瞬间出现」。 -->
+        <aside class="sider" :class="{ collapsed: siderCollapsed }">
             <div class="logo">
                 <img class="logo-mark" src="/huluwa-logo.svg" alt="葫芦娃 Logo" width="36" height="36" />
                 <div v-show="!siderCollapsed" class="logo-text">
@@ -18,8 +21,9 @@
             </div>
         </aside>
 
-        <!-- 移动端抽屉遮罩：点击关闭侧栏（桌面端不渲染） -->
-        <div v-if="shellVisible && isMobile && mobileDrawerOpen" class="sider-mask" @click="closeDrawer"></div>
+        <!-- 移动端抽屉遮罩：常驻 + 淡入淡出，与抽屉滑入滑出同步（桌面端由 CSS 隐藏） -->
+        <div class="sider-mask" :class="{ show: isMobile && mobileDrawerOpen }" aria-hidden="true"
+            @click="closeDrawer"></div>
 
         <div class="main-body">
             <header-bar :collapsed="headerCollapsed" :mobile="isMobile"
@@ -78,13 +82,6 @@ export default {
         }
     },
     computed: {
-        /**
-         * 侧栏是否渲染：手机端会话页默认隐藏侧栏，公共顶栏始终显示，
-         * 点击顶栏菜单后再渲染抽屉，所有页面共用同一个导航入口。
-         */
-        shellVisible() {
-            return !this.shellHidden || this.mobileDrawerOpen
-        },
         /** 桌面端：沿用 store 的持久化折叠态（行为不变） */
         collapsed() {
             return this.appStore.collapsed
@@ -333,6 +330,11 @@ export default {
     background: var(--bg);
 }
 
+/* 遮罩只在移动端抽屉形态下工作，桌面端不参与布局 */
+.sider-mask {
+    display: none;
+}
+
 .sider {
     /* 宽度含左右 padding 与描边：折叠 64px 才是视觉总宽（否则 64+20+1=85px） */
     box-sizing: border-box;
@@ -472,12 +474,17 @@ export default {
         z-index: 130;
         width: 236px;
         transform: translateX(-100%);
-        transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+        /* 收起时先滑出、滑完再隐藏（visibility 延迟 0.25s），否则关闭动画会被立即截断；
+           展开时无延迟，配合 transform 播放与桌面端侧栏一致的滑入效果 */
+        visibility: hidden;
+        transition: transform .25s cubic-bezier(.4, 0, .2, 1), visibility 0s .25s;
         box-shadow: 0 0 40px rgba(0, 0, 0, .55);
     }
 
     .main-console.drawer-open .sider {
         transform: translateX(0);
+        visibility: visible;
+        transition: transform .25s cubic-bezier(.4, 0, .2, 1), visibility 0s;
     }
 
     .sider.collapsed {
@@ -485,11 +492,23 @@ export default {
     }
 
     .sider-mask {
+        display: block;
         position: fixed;
         inset: 0;
         z-index: 120;
         background: rgba(0, 0, 0, .5);
         backdrop-filter: blur(2px);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity .25s cubic-bezier(.4, 0, .2, 1), visibility 0s .25s;
+    }
+
+    .sider-mask.show {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transition: opacity .25s cubic-bezier(.4, 0, .2, 1), visibility 0s;
     }
 
     .content-wrapper {

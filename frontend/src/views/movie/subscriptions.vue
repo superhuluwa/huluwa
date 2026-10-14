@@ -59,7 +59,11 @@
                         <template #icon><i class="fa-solid fa-bolt"></i></template>
                         立即检查
                     </n-button>
-                    <n-button v-if="!isHls(item)" size="tiny" @click="toggleMagnets(item)">
+                    <n-button v-if="isHls(item)" size="tiny" @click="openPlays(item)">
+                        <template #icon><i class="fa-solid fa-circle-play"></i></template>
+                        资源列表
+                    </n-button>
+                    <n-button v-else size="tiny" @click="toggleMagnets(item)">
                         <template #icon><i class="fa-solid fa-list"></i></template>
                         {{ magnetsOpen === item.subscriptionKey ? '收起列表' : '资源列表' }}
                     </n-button>
@@ -93,6 +97,7 @@
         <MovieSubscriptionDialog v-model:show="settingsDialog" :movie="settingsMovie"
             :resubscribe="settingsResubscribe" @saved="reload" />
         <HlsResourceDialog v-model:show="hlsDialog" :movie="hlsMovie" @saved="reload" />
+        <PlaySourceDialog v-model:show="playDialog" :movie="playMovie" :title="playMovie ? playMovie.title : ''" />
     </div>
 </template>
 
@@ -108,14 +113,17 @@ import {
 } from '@/api/chat'
 import MovieSubscriptionDialog from '@/views/message/components/MovieSubscriptionDialog.vue'
 import HlsResourceDialog from '@/views/message/components/HlsResourceDialog.vue'
+import PlaySourceDialog from '@/views/message/components/PlaySourceDialog.vue'
 import { CheckHlsSubscription, DeleteHlsSubscription, EnableHlsSubscription, GetHlsSubscriptions } from '@/api/hls'
 import { mergeSubscriptions } from '@/utils/subscriptionList'
+import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
 
 export default {
     name: 'MovieSubscriptions',
     components: {
         HlsResourceDialog,
         MovieSubscriptionDialog,
+        PlaySourceDialog,
         NButton,
         NSpin
     },
@@ -129,6 +137,8 @@ export default {
             settingsResubscribe: false,
             hlsDialog: false,
             hlsMovie: null,
+            playDialog: false,
+            playMovie: null,
             rows: [],
             magnetsOpen: '',
             magnets: [],
@@ -136,6 +146,9 @@ export default {
             downloading: 0,
             deleting: ''
         }
+    },
+    setup() {
+        return { hlsSubscriptions: useHlsSubscriptionsStore() }
     },
     async mounted() {
         await this.reload()
@@ -151,6 +164,9 @@ export default {
         isHls(item) { return item.source === 'dytt' },
         async reload() {
             this.loading = true
+            // 本页任何增删改都会重新拉取清单：顺手让会话页的实时订阅集合过期，
+            // 这样回到「电影天堂」时卡片会按最新订阅状态重画（删除 / 恢复都不再残留）
+            this.hlsSubscriptions.invalidate()
             try {
                 const [movie, hls] = await Promise.allSettled([GetSubscriptions(true), GetHlsSubscriptions()])
                 const movieRows = movie.status === 'fulfilled' ? movie.value : this.rows.filter(item => !this.isHls(item))
@@ -242,6 +258,18 @@ export default {
                     }
                 }
             })
+        },
+        /** 电影天堂「资源列表」：播放线路弹窗按作品身份拉完整线路并支持离线下载 */
+        openPlays(item) {
+            this.playMovie = {
+                id: item.resId,
+                resId: item.resId,
+                apiUrl: item.apiUrl,
+                title: item.title,
+                year: item.year,
+                season: item.season
+            }
+            this.playDialog = true
         },
         openSettings(item = null, resubscribe = false) {
             if (item && this.isHls(item)) {

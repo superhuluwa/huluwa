@@ -1,6 +1,9 @@
 package com.huluwa.console.service;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -68,9 +71,16 @@ class MovieSubscriptionServiceTest {
         assertEquals("214", sorted.get(0).episode(), "最新一集必须排在第一行");
 
         int previous = Integer.MAX_VALUE;
+        boolean sawUnknown = false;
         for (MovieSearchService.MagnetItem item : sorted) {
-            int current = Integer.parseInt(item.episode());
-            assertTrue(current <= previous, "集数必须按倒序排列，异常位置：" + item.episode());
+            String episode = item.episode();
+            if (episode == null || episode.isBlank()) {
+                sawUnknown = true;
+                continue;
+            }
+            assertFalse(sawUnknown, "识别不出集号的条目必须排在最后，异常位置：" + item.title());
+            int current = Integer.parseInt(episode);
+            assertTrue(current <= previous, "集数必须按倒序排列，异常位置：" + episode);
             previous = current;
         }
 
@@ -121,6 +131,84 @@ class MovieSubscriptionServiceTest {
         assertEquals("2", MovieSearchService.episodeOf("某剧 第02集 1080P"));
         assertEquals("2", MovieSearchService.episodeOf("剧名 第5季02.1080p.mp4"));
         assertEquals(null, MovieSearchService.episodeOf("全集打包 1080P"));
+    }
+
+    /**
+     * 发布标记不是集号：扩展名（.mp4→4）、分辨率（1080p / 4k）、年份（2024）都不能被抽成集号，
+     * 否则整季打包与电影正片会被误判成「第 4 集」。用真实详情页快照里的标题锁定。
+     */
+    @Test
+    void episodeOfIgnoresReleaseTagsFromRealTitles() throws Exception {
+        // 整季打包 / 合集：没有集号，不能因 .mp4 里的 4 判成第 4 集
+        assertEquals(null, MovieSearchService.episodeOf("斗破苍穹 缘起.全集.1080p.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("斗破苍穹 缘起.全集.4k.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("三年之约全集.1080p.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("第四季全集打包.1080p.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("第一季全集打包.1080p.HD国语中字无水印.mp4"));
+        // 电影正片（特殊篇 / 剧场版）：同样没有集号
+        assertEquals(null, MovieSearchService.episodeOf("虚天战纪.导演剪辑版.2160p.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("凡人修仙传：星海飞驰篇.1080p.HD国语中字无水印.mp4"));
+        assertEquals(null, MovieSearchService.episodeOf("吞噬星空 决战原始星.2160p.HD国语中字无水印.mp4"));
+        // 真实年份也不是集号
+        assertEquals(null, MovieSearchService.episodeOf("某电影.2024.1080p.BluRay.x264.mkv"));
+        // 但真正的裸集号不受影响（站点常见写法）
+        assertEquals("212", MovieSearchService.episodeOf("斗破苍穹 第5季212.2160p.HD国语中字无水印.mp4"));
+        assertEquals("177", MovieSearchService.episodeOf("177-178.1080p.HD国语中字无水印.mkv"));
+        assertEquals("4", MovieSearchService.episodeOf("重返天南04.2160p.HD国语中字无水印.mp4"));
+
+        // 快照整页复核：整季打包与电影条目必须是「无集号」，且不再出现被误判的 4
+        List<MovieSearchService.MagnetItem> magnets = MovieSearchService.parseMagnets(detailFixture());
+        // 快照里的第 4 集只有真实的「第5季04」，全集 / 打包 / 电影条目不能再落进 4
+        List<String> episodeFour = magnets.stream()
+                .filter(item -> "4".equals(item.episode()))
+                .map(MovieSearchService.MagnetItem::title)
+                .toList();
+        assertFalse(episodeFour.isEmpty(), "真实第 4 集仍应被识别");
+        assertTrue(episodeFour.stream().allMatch(title -> title.contains("第5季04")),
+                "第 4 集只能来自真实集号，实际：" + episodeFour);
+        assertTrue(magnets.stream()
+                        .filter(item -> item.title().contains("全集") || item.title().contains("打包"))
+                        .allMatch(item -> item.episode() == null || item.episode().isBlank()),
+                "整季打包条目必须识别不出集号");
+        assertTrue(magnets.stream()
+                        .filter(item -> item.title().contains("缘起") || item.title().contains("三年之约"))
+                        .allMatch(item -> item.episode() == null || item.episode().isBlank()),
+                "电影 / 特别篇条目必须识别不出集号");
+    }
+
+    /** 历史基线里的错误集号要能在启动时按新规则修正（不清记录、不重置基线）。 */
+    @Test
+    void refreshMovieMagnetEpisodesFixesHistoricalMisjudgement() throws Exception {
+        SingleConnectionDataSource dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
+        new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                new ClassPathResource("schema.sql")).execute(dataSource);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.update("""
+                INSERT INTO movie_subscription
+                    (id, res_id, title, detail_url, enabled, baseline_at, downloader, created_at, updated_at)
+                VALUES (1, '48089', '斗破苍穹 第5季', 'https://www.dygangs.net/dmq/20211031/48089.htm',
+                        1, '2026-10-01 00:00:00', 'qb', '2026-10-01 00:00:00', '2026-10-01 00:00:00')
+                """);
+        jdbc.update("""
+                INSERT INTO movie_subscription_magnet
+                    (subscription_id, title, magnet, magnet_key, quality, episode, baseline, first_seen_at)
+                VALUES (1, '斗破苍穹 缘起.全集.1080p.HD国语中字无水印.mp4', 'magnet:?xt=urn:btih:%s', 'a', '1080P', '4', 1, '2026-10-01 00:00:00'),
+                       (1, '斗破苍穹 第5季212.2160p.HD国语中字无水印.mp4', 'magnet:?xt=urn:btih:%s', 'b', '2160P', '212', 1, '2026-10-01 00:00:00')
+                """.formatted("a".repeat(40), "b".repeat(40)));
+        try {
+            new com.huluwa.console.config.DatabaseInitializer(jdbc).run(null);
+            assertEquals(null, jdbc.queryForObject(
+                    "SELECT episode FROM movie_subscription_magnet WHERE magnet_key = 'a'", String.class),
+                    "整季打包的错误集号应被清空");
+            assertEquals("212", jdbc.queryForObject(
+                    "SELECT episode FROM movie_subscription_magnet WHERE magnet_key = 'b'", String.class),
+                    "正确集号必须保持不变");
+            assertEquals("2026-10-01 00:00:00", jdbc.queryForObject(
+                    "SELECT baseline_at FROM movie_subscription WHERE id = 1", String.class),
+                    "修正集号不能重置基线时间");
+        } finally {
+            dataSource.destroy();
+        }
     }
 
     /** 同一集同时给出 1080P / 2160P 时，只提交最高的那条 */

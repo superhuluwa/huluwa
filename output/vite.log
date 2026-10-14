@@ -1,0 +1,17 @@
+
+> huluwa-console-web@1.0.0 dev
+> vite
+
+
+  VITE v7.3.7  ready in 578 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+07:38:16 [vite] (client) hmr update /src/views/message/index.vue
+07:40:15 [vite] (client) hmr update /src/components/main/main.vue, /src/components/main/main.vue?vue&type=style&index=0&scoped=0f437ec6&lang.css
+07:41:45 [vite] (client) hmr update /src/components/main/main.vue, /src/components/main/main.vue?vue&type=style&index=0&scoped=0f437ec6&lang.css
+07:43:40 [vite] (client) hmr update /src/views/message/index.vue
+07:44:27 [vite] (client) hmr update /src/views/message/index.vue
+07:44:34 [vite] (client) hmr update /src/components/main/main.vue
+07:44:48 [vite] (client) hmr update /src/views/message/index.vue
