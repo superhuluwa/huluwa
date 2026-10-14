@@ -90,7 +90,7 @@ deploy_fnos.bat
 | 应用目录 | `/vol1/@appdata/huluwa` |
 | 源码目录 | `/vol1/@appdata/huluwa/src` |
 | 数据目录 | `/vol1/@appdata/huluwa/data` |
-| Frp 目录 | `/vol1/@appdata/huluwa/frp` |
+| Frp 配置目录 | `/vol1/1000/docker/frpc`（与 frpc 容器共用，保存后热加载即时生效） |
 | 监听端口 | `8000` |
 
 首次运行会自动生成部署密钥、安装公钥到 `/home/<账号>/.ssh/authorized_keys`，并需要认证一次；之后全程免密。

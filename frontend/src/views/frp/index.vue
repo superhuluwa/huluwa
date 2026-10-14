@@ -37,6 +37,15 @@
             <span>{{ runtime.message }}</span>
         </div>
 
+        <div v-if="runtime.configSharedWithFrpc === false" class="glass-card notice notice-danger">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span>
+                管理页读取的 frpc.ini 与 frpc 容器实际加载的不是同一份：
+                保存与热加载都不会影响线上隧道。请让两边的挂载指向同一目录
+                （宿主机 {{ runtime.hostPath }}），并确保该目录归 uid 10001 所有。
+            </span>
+        </div>
+
         <div class="glass-card table-wrap">
             <div class="toolbar">
                 <span class="toolbar-title">
@@ -180,7 +189,8 @@ export default {
                 containerRunning: false,
                 containerStatus: '',
                 configPath: '/etc/frp/frpc.ini',
-                hostPath: '/root/frp/frpc.ini',
+                hostPath: '',
+                configSharedWithFrpc: null,
                 message: ''
             },
             typeOptions: [
@@ -517,6 +527,11 @@ export default {
     margin-bottom: 14px;
     font-size: 13px;
     color: var(--warn);
+}
+
+.notice-danger {
+    color: var(--danger);
+    border-color: var(--danger);
 }
 
 .cell-stack {

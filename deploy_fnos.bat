@@ -11,7 +11,8 @@ set USER=397383523
 set APP_DIR=/vol1/@appdata/huluwa
 set REMOTE_DIR=%APP_DIR%/src
 set DATA_DIR=%APP_DIR%/data
-set FRP_DIR=%APP_DIR%/frp
+REM frpc 容器的实际配置目录（frpc compose 的挂载源），葫芦娃与 frpc 共用，改完即时生效
+set FRP_DIR=/vol1/1000/docker/frpc
 set CONTAINER=huluwa-console
 set IMAGE=huluwa-console:latest
 set HOST_PORT=8000

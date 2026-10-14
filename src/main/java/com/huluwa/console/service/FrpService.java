@@ -83,7 +83,7 @@ public class FrpService {
         data.put("container", dockerService.frpContainer());
         data.put("configPath", dockerService.frpConfigPath());
         data.put("containerConfigPath", dockerService.frpContainerConfigPath());
-        data.put("hostPath", dockerService.frpHostPath());
+        data.put("hostPath", dockerService.frpMountSource());
         data.put("total", 0);
         data.put("enabled", 0);
         data.put("disabled", 0);
@@ -146,7 +146,8 @@ public class FrpService {
         data.put("container", dockerService.frpContainer());
         data.put("configPath", dockerService.frpConfigPath());
         data.put("containerConfigPath", dockerService.frpContainerConfigPath());
-        data.put("hostPath", dockerService.frpHostPath());
+        data.put("hostPath", dockerService.frpMountSource());
+        data.put("configSharedWithFrpc", dockerService.frpConfigSharedWithFrpc());
         data.put("backupPath", dockerService.frpConfigPath() + ".bak");
         data.put("containerRunning", false);
         data.put("configAvailable", false);
@@ -270,8 +271,33 @@ public class FrpService {
         return dockerService.readFrpConfig();
     }
 
+    /** 写入配置，随后立即热加载 frpc。 */
     private void writeConfig(String content, String action) {
         dockerService.writeFrpConfig(content, action);
+        applyReload(action);
+    }
+
+    /**
+     * 写入后立即热加载，让端口改动即时生效。
+     *
+     * <p>配置文件由宿主机挂载目录直通 frpc 容器，所以宿主机上落盘即等价于 frpc 容器的
+     * {@code /etc/frp/frpc.ini} 更新。热加载失败时配置已写入且语法一定合法（写入前已 verify），
+     * 因此这里明确告知用户「已保存但未生效」，而不是假装成功。</p>
+     */
+    private void applyReload(String action) {
+        Map<String, Object> reload;
+        try {
+            reload = dockerService.reloadFrpc();
+        } catch (RuntimeException ex) {
+            throw new BusinessException(500, (action == null ? "配置" : action)
+                    + "已保存，但热加载失败：" + ex.getMessage() + "；请点击「重启 frpc」应用新配置");
+        }
+        if (!Boolean.TRUE.equals(reload.get("success"))) {
+            throw new BusinessException(500, (action == null ? "配置" : action)
+                    + "已保存，但热加载失败：" + value0(reload.get("output"))
+                    + "；请点击「重启 frpc」应用新配置");
+        }
+        log.info("{}已写入并热加载 frpc", action);
     }
 
     // ------------------------------------------------------------------

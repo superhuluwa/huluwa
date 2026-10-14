@@ -199,18 +199,22 @@ log "下载目录：${DOWNLOAD_DIR}（容器内同一路径，与迅雷、qBitto
 log "旧媒体目录：${MEDIA_DIR}（容器内 /media，只读保留历史文件和日志）"
 
 # ---------- 4. Frp 配置目录 ----------
+# FRP_DIR 是 frpc 容器 compose 所在的目录，葫芦娃容器把同一目录挂到 /app/frp，
+# 因此这里写的 frpc.ini 就是 frpc 实际加载的文件（改完热加载即时生效）。
 mkdir -p "${FRP_DIR}"
 if [ -f "${FRP_DIR}/frpc.ini" ]; then
-  # 容器内进程以 10001 运行，需要该目录可写才能原子替换 frpc.ini。
-  # 飞牛自带 setfacl，优先用 ACL（不动属主）。
-  if command -v setfacl >/dev/null 2>&1; then
-    setfacl -m u:10001:rwx "${FRP_DIR}" 2>/dev/null || true
-    setfacl -m u:10001:rw  "${FRP_DIR}/frpc.ini" 2>/dev/null || true
-  fi
-  chown 10001:10001 "${FRP_DIR}/frpc.ini" 2>/dev/null || true
-  log "Frp 配置：${FRP_DIR}/frpc.ini（已授予 uid 10001 读写）"
+  # 目录与文件归 10001:1001（葫芦娃容器以 uid 10001 运行，需要写权限做原子替换；
+  # 组 1001 = 飞牛 Users，保留管理员在宿主机上的维护能力）。
+  # 注意：飞牛 btrfs 上 POSIX ACL 对容器内不生效，必须用 chown 而不是 setfacl。
+  # 2775 = 775 + setgid：容器内新建文件会自动继承维护组（Users），
+  # 与 DockerService.writeFrpConfig 写入时固定的 664 配合，避免多次保存后权限漂移。
+  chown 10001:1001 "${FRP_DIR}" 2>/dev/null || true
+  chmod 2775 "${FRP_DIR}" 2>/dev/null || true
+  chown 10001:1001 "${FRP_DIR}/frpc.ini" 2>/dev/null || true
+  chmod 664 "${FRP_DIR}/frpc.ini" 2>/dev/null || true
+  log "Frp 配置：${FRP_DIR}/frpc.ini（属主 10001:1001，葫芦娃与 frpc 共用）"
 else
-  chown 10001:10001 "${FRP_DIR}"
+  chown 10001:1001 "${FRP_DIR}" 2>/dev/null || true
   warn "未找到 ${FRP_DIR}/frpc.ini，Frp 管理页将无法读写配置"
 fi
 

@@ -44,6 +44,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -1193,9 +1194,64 @@ public class DockerService {
         return text(properties.getFrp().getContainerConfigPath(), "/etc/frp/frpc.ini");
     }
 
-    /** 宿主机真实路径，仅用于界面展示。 */
+    /** 宿主机真实路径，仅用于界面展示；实际以 frpc 容器的挂载来源为准（见 {@link #frpMountSource()}）。 */
     public String frpHostPath() {
         return text(properties.getFrp().getHostPath(), "/root/frp/frpc.ini");
+    }
+
+    /**
+     * 从 frpc 容器读取它真正挂载的配置来源，返回宿主机路径。
+     *
+     * <p>历史上界面显示的路径来自静态配置，和 frpc 实际加载的文件可能不一致，
+     * 导致「改了管理页却不生效」。这里直接问 Docker 要真实挂载，界面据此展示，
+     * 并在与葫芦娃自身挂载不同源时给出告警。</p>
+     *
+     * @return 宿主机上的 frpc.ini 路径；读不到挂载时回退为配置里的展示路径
+     */
+    public String frpMountSource() {
+        try {
+            Map<String, Object> info = inspectContainer(frpContainer());
+            Object raw = info.get("Mounts");
+            if (!(raw instanceof List<?> mounts)) {
+                return frpHostPath();
+            }
+            String containerPath = frpContainerConfigPath();
+            for (Object item : mounts) {
+                if (!(item instanceof Map<?, ?> mount)) {
+                    continue;
+                }
+                String destination = String.valueOf(mount.get("Destination"));
+                String source = String.valueOf(mount.get("Source"));
+                if (containerPath.equals(destination)) {
+                    return source;
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.debug("读取 frpc 挂载来源失败：{}", ex.getMessage());
+        }
+        return frpHostPath();
+    }
+
+    /**
+     * 判断葫芦娃容器里的 frpc.ini 与 frpc 容器加载的是否为同一份内容。
+     *
+     * <p>两者不同源时，管理页的保存与热加载都不会影响线上 frpc，属于必须暴露的配置错误。
+     * 两个容器里路径字符串不同（容器内路径 vs 宿主机路径），所以直接比对文件内容。</p>
+     */
+    public boolean frpConfigSharedWithFrpc() {
+        try {
+            String local = readFrpConfig();
+            Map<String, Object> result = execContainer(frpContainer(),
+                    List.of("cat", frpContainerConfigPath()));
+            Integer exitCode = result.get("exitCode") instanceof Integer code ? code : null;
+            if (exitCode == null || exitCode != 0) {
+                return false;
+            }
+            return local.strip().equals(text(result.get("output"), "").strip());
+        } catch (RuntimeException ex) {
+            log.debug("校验 frpc 配置是否同源失败：{}", ex.getMessage());
+            return false;
+        }
     }
 
     /** frpc 可执行文件路径（在 frpc 容器内执行）。 */
@@ -1223,6 +1279,14 @@ public class DockerService {
         Path temp = Paths.get(target + ".new");
         try {
             Files.writeString(temp, content, StandardCharsets.UTF_8);
+            // 原子替换会带来新 inode，权限需显式重建：目录设置了 setgid，
+            // 属组会自动继承为维护组（飞牛上的 Users），这里只补回 664 的读写位，
+            // 避免多次保存后权限逐渐漂移（曾出现过 705 / 604）。
+            try {
+                Files.setPosixFilePermissions(temp, PosixFilePermissions.fromString("rw-rw-r--"));
+            } catch (UnsupportedOperationException | IOException ignored) {
+                // 非 POSIX 文件系统（或权限受限）时退化为默认权限，不影响写入本身。
+            }
             if (Files.exists(target)) {
                 Files.copy(target, Paths.get(target + ".bak"),
                         StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
