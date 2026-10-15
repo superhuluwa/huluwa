@@ -8,7 +8,7 @@ const { default: Dashboard } = await import('@/views/dashboard/index.vue')
 
 /**
  * 不挂载组件，只取首页的展示方法与计算属性：验证「后端没给数值时显示占位符而不是 0」，
- * 以及占用条的配色阈值。0% 会被误读成机器很空闲，是本次要守住的边界。
+ * 以及圆环的占用比例边界。缺失数据仍须与真实的 0% 区分。
  */
 function page(server) {
     const vm = { ...Dashboard.methods }
@@ -17,14 +17,14 @@ function page(server) {
         cpuPercentText: Dashboard.computed.cpuPercentText,
         cpuFoot: Dashboard.computed.cpuFoot,
         memoryUsedText: Dashboard.computed.memoryUsedText,
+        memoryReading: Dashboard.computed.memoryReading,
         memoryFoot: Dashboard.computed.memoryFoot
     }
     Object.entries(computed).forEach(([key, getter]) => {
         Object.defineProperty(vm, key, { get: getter.bind(vm) })
     })
     vm.number = Dashboard.methods.number.bind(vm)
-    vm.meterClass = Dashboard.methods.meterClass.bind(vm)
-    vm.meterStyle = Dashboard.methods.meterStyle.bind(vm)
+    vm.ringOffset = Dashboard.methods.ringOffset.bind(vm)
     return vm
 }
 
@@ -39,6 +39,9 @@ describe('首页 CPU / 内存卡片', () => {
         expect(vm.cpuPercentText).toBe('23.4%')
         expect(vm.cpuFoot).toBe('8 核 · 负载 0.42')
         expect(vm.memoryUsedText).toBe('3.56 GiB / 5.67 GiB')
+        expect(vm.memoryReading).toEqual({ value: '3.6', unit: 'GiB' })
+        expect(vm.ringOffset(23.4)).toBeCloseTo(76.6)
+        expect(vm.ringOffset(62.7)).toBeCloseTo(37.3)
         expect(vm.memoryFoot).toBe('已用 63% · 可用 2.11 GiB')
     })
 
@@ -48,9 +51,8 @@ describe('首页 CPU / 内存卡片', () => {
         expect(vm.memoryUsedText).toBe('-')
         expect(vm.cpuFoot).toBe('等待采样')
         expect(vm.memoryFoot).toBe('等待采样')
-        // 宽度归零但配色是灰色的「无数据」，不是低负载的蓝色
-        expect(vm.meterStyle(undefined).width).toBe('0%')
-        expect(vm.meterClass(undefined)).toBe('meter-fill off')
+        expect(vm.memoryReading).toEqual({ value: '-', unit: '' })
+        expect(vm.ringOffset(undefined)).toBe(100)
     })
 
     it('采样失败时说明不可用，不冒充 0 占用', () => {
@@ -60,14 +62,15 @@ describe('首页 CPU / 内存卡片', () => {
         expect(vm.memoryFoot).toBe('暂不可用')
     })
 
-    it('占用越高配色越醒目，且宽度不会溢出卡片', () => {
+    it('圆环将占用比例限制在 0 到 100 之间，无效数据不绘制进度', () => {
         const vm = page({})
-        expect(vm.meterClass(30)).toBe('meter-fill')
-        expect(vm.meterClass(50)).toBe('meter-fill')
-        expect(vm.meterClass(50.1)).toBe('meter-fill warn')
-        expect(vm.meterClass(80)).toBe('meter-fill warn')
-        expect(vm.meterClass(80.1)).toBe('meter-fill danger')
-        expect(vm.meterStyle(120).width).toBe('100%')
+        expect(vm.ringOffset(0)).toBe(100)
+        expect(vm.ringOffset(50)).toBe(50)
+        expect(vm.ringOffset(100)).toBe(0)
+        expect(vm.ringOffset(120)).toBe(0)
+        expect(vm.ringOffset(-10)).toBe(100)
+        expect(vm.ringOffset(null)).toBe(100)
+        expect(vm.ringOffset(Number.NaN)).toBe(100)
     })
 
     it('CPU 使用率 null（两次采样间隔内没有时间推进）同样显示占位符', () => {

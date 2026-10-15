@@ -7,28 +7,46 @@
         </h3>
 
         <div class="stat-grid">
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-solid fa-microchip" style="color: var(--accent)"></i>
-                    CPU 使用率
+            <div class="stat-card resource-card">
+                <div class="resource-metric">
+                    <div class="resource-gauge" role="img" :aria-label="'CPU 使用率 ' + cpuPercentText">
+                        <svg class="resource-ring" viewBox="0 0 144 144" aria-hidden="true">
+                            <circle class="resource-ring-track" cx="72" cy="72" r="60" />
+                            <circle
+                                v-if="number(server.cpu && server.cpu.percent) > 0"
+                                class="resource-ring-progress"
+                                cx="72" cy="72" r="60" pathLength="100"
+                                :stroke-dashoffset="ringOffset(server.cpu && server.cpu.percent)"
+                            />
+                        </svg>
+                        <div class="resource-reading">
+                            <span class="resource-value">{{ cpuPercentText }}</span>
+                        </div>
+                    </div>
+                    <div class="resource-label">CPU</div>
+                    <div class="resource-foot">{{ cpuFoot }}</div>
                 </div>
-                <div class="stat-value">{{ cpuPercentText }}</div>
-                <div class="meter">
-                    <span :class="meterClass(server.cpu && server.cpu.percent)" :style="meterStyle(server.cpu && server.cpu.percent)"></span>
-                </div>
-                <div class="stat-foot">{{ cpuFoot }}</div>
-            </div>
 
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-solid fa-memory" style="color: var(--accent-2)"></i>
-                    内存使用
+                <div class="resource-metric">
+                    <div class="resource-gauge" role="img" :aria-label="'内存使用 ' + memoryUsedText + '，' + memoryFoot">
+                        <svg class="resource-ring" viewBox="0 0 144 144" aria-hidden="true">
+                            <circle class="resource-ring-track" cx="72" cy="72" r="60" />
+                            <circle
+                                v-if="number(server.memory && server.memory.percent) > 0"
+                                class="resource-ring-progress"
+                                cx="72" cy="72" r="60" pathLength="100"
+                                :stroke-dashoffset="ringOffset(server.memory && server.memory.percent)"
+                            />
+                        </svg>
+                        <div class="resource-reading">
+                            <span class="resource-value">{{ memoryReading.value }}</span>
+                            <span v-if="memoryReading.unit" class="resource-unit">{{ memoryReading.unit }}</span>
+                        </div>
+                    </div>
+                    <div class="resource-label">内存</div>
+                    <div class="resource-foot">{{ memoryUsedText }}</div>
+                    <div class="resource-foot">{{ memoryFoot }}</div>
                 </div>
-                <div class="stat-value">{{ memoryUsedText }}</div>
-                <div class="meter">
-                    <span :class="meterClass(server.memory && server.memory.percent)" :style="meterStyle(server.memory && server.memory.percent)"></span>
-                </div>
-                <div class="stat-foot">{{ memoryFoot }}</div>
             </div>
 
             <div class="stat-card">
@@ -146,6 +164,15 @@ export default {
             const total = this.number(this.server.memory && this.server.memory.total)
             return used === null || !total ? '-' : formatBytes(used) + ' / ' + formatBytes(total)
         },
+        memoryReading() {
+            const used = this.number(this.server.memory && this.server.memory.used)
+            const total = this.number(this.server.memory && this.server.memory.total)
+            if (used === null || used < 0 || total === null || total <= 0) {
+                return { value: '-', unit: '' }
+            }
+            const [value, unit] = formatBytes(used).split(' ')
+            return { value: Number(value).toFixed(1), unit }
+        },
         memoryFoot() {
             const memory = this.server.memory || {}
             const percent = this.number(memory.percent)
@@ -161,17 +188,10 @@ export default {
             const parsed = Number(value)
             return value === null || value === undefined || !Number.isFinite(parsed) ? null : parsed
         },
-        /** 占用越高越醒目：>80% 危险色、>50% 警告色，其余维持强调色 */
-        meterClass(percent) {
+        /** SVG 圆环以 100 为完整周长，缺失数据和越界数值均收敛到有效范围。 */
+        ringOffset(percent) {
             const value = this.number(percent)
-            if (value === null) return 'meter-fill off'
-            if (value > 80) return 'meter-fill danger'
-            if (value > 50) return 'meter-fill warn'
-            return 'meter-fill'
-        },
-        meterStyle(percent) {
-            const value = this.number(percent)
-            return { width: Math.min(100, Math.max(0, value === null ? 0 : value)) + '%' }
+            return 100 - Math.min(100, Math.max(0, value === null ? 0 : value))
         },
         async load() {
             this.loading = true
@@ -189,33 +209,119 @@ export default {
 </script>
 
 <style scoped>
-/* 占用条与 .stat-value 一起构成「数值 + 直观比例」，避免只能靠百分比数字判断轻重 */
-.meter {
-    height: 6px;
-    margin-top: 10px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, .14);
-    overflow: hidden;
+.dashboard {
+    container-type: inline-size;
 }
 
-.meter-fill {
+.stat-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+}
+
+.resource-card {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    padding: 28px 24px 24px;
+    border-radius: 24px;
+}
+
+.resource-metric {
+    min-width: 0;
+    text-align: center;
+}
+
+.resource-gauge {
+    position: relative;
+    width: min(100%, 156px);
+    aspect-ratio: 1;
+    margin: 0 auto;
+}
+
+.resource-ring {
     display: block;
+    width: 100%;
     height: 100%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    transition: width .4s ease;
+    fill: none;
+    stroke-width: 14;
+    transform: rotate(-90deg);
 }
 
-.meter-fill.warn {
-    background: linear-gradient(90deg, var(--warn), #FBBF24);
+.resource-ring-track {
+    stroke: rgba(148, 163, 184, .18);
 }
 
-.meter-fill.danger {
-    background: linear-gradient(90deg, var(--danger), #FB7185);
+.resource-ring-progress {
+    stroke: #086BFF;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    transition: stroke-dashoffset .4s ease;
 }
 
-.meter-fill.off {
-    background: rgba(148, 163, 184, .45);
+.resource-reading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+}
+
+.resource-value {
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+.resource-unit {
+    font-size: 17px;
+    line-height: 1.3;
+}
+
+.resource-label {
+    margin-top: 10px;
+    color: var(--text-2);
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.resource-foot {
+    margin-top: 6px;
+    color: var(--text-2);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+@container (max-width: 495px) {
+    .resource-card {
+        grid-column: 1 / -1;
+        gap: 16px;
+        padding: 24px 16px 20px;
+    }
+}
+
+@container (max-width: 340px) {
+    .resource-card {
+        gap: 12px;
+        padding-inline: 12px;
+    }
+
+    .resource-value {
+        font-size: 21px;
+    }
+
+    .resource-unit {
+        font-size: 15px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .resource-ring-progress {
+        transition: none;
+    }
 }
 
 .panel {
