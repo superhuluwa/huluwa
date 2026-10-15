@@ -1,0 +1,1 @@
+function o(e){const t=Number(e);if(!Number.isFinite(t)||t<0)return"-";if(!t)return"0 B";const i=["B","KiB","MiB","GiB","TiB"],n=Math.min(Math.floor(Math.log(t)/Math.log(1024)),i.length-1);return(t/1024**n).toFixed(2)+" "+i[n]}export{o as f};

@@ -15,14 +15,8 @@ export function resourceSnapshot(stats = {}, previousCpu) {
     }
 }
 
-export function formatBytes(bytes) {
-    const value = Number(bytes)
-    if (!Number.isFinite(value) || value < 0) return '-'
-    if (!value) return '0 B'
-    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-    const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-    return (value / 1024 ** index).toFixed(2) + ' ' + units[index]
-}
+// 字节格式化与首页内存卡片共用同一实现，避免两处单位口径漂移
+export { formatBytes } from '@/utils/format'
 
 export function memoryClass(bytes) {
     return bytes > 5 * 1024 ** 3 ? 'high-usage' : bytes > 1024 ** 3 ? 'medium-usage' : 'low-usage'
