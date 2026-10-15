@@ -48,47 +48,6 @@
                     <div class="resource-foot">{{ memoryFoot }}</div>
                 </div>
             </div>
-
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-solid fa-bell" style="color: var(--accent)"></i>
-                    消息中心
-                </div>
-                <div class="stat-value">{{ overview.message.unread }}</div>
-                <div class="stat-foot">未读 / 共 {{ overview.message.total }} 条</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-solid fa-network-wired" style="color: var(--accent-2)"></i>
-                    Frp 隧道
-                </div>
-                <div class="stat-value">{{ overview.frp.enabled }}</div>
-                <div class="stat-foot">已启用 / 共 {{ overview.frp.total }} 个</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-solid fa-paper-plane" style="color: var(--ok)"></i>
-                    推送渠道
-                </div>
-                <div class="stat-value">{{ overview.push.enabled }}</div>
-                <div class="stat-foot">已启用 / 共 {{ overview.push.total }} 个</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-label">
-                    <i class="fa-brands fa-docker" style="color: #2496ED"></i>
-                    Docker 容器
-                </div>
-                <div class="stat-value">{{ overview.docker.running }}</div>
-                <div class="stat-foot">
-                    运行中 / 共 {{ overview.docker.total }} 个
-                    <span v-if="!overview.docker.available" class="pill warn" style="margin-left: 8px">
-                        <span class="dot"></span>不可用
-                    </span>
-                </div>
-            </div>
         </div>
 
         <div class="panel glass-card">
@@ -141,10 +100,7 @@ export default {
                 application: '',
                 serverTime: '',
                 server: {},
-                message: { total: 0, unread: 0 },
-                frp: { total: 0, enabled: 0 },
-                push: { total: 0, enabled: 0 },
-                docker: { running: 0, total: 0, available: false }
+                docker: { available: false }
             }
         }
     },
@@ -280,11 +236,11 @@ export default {
 }
 
 .stat-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .resource-card {
-    grid-column: span 2;
+    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 24px;
@@ -363,7 +319,6 @@ export default {
 
 @container (max-width: 495px) {
     .resource-card {
-        grid-column: 1 / -1;
         gap: 16px;
         padding: 24px 16px 20px;
     }
