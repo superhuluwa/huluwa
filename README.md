@@ -1,0 +1,141 @@
+# 葫芦娃助手（huluwa-console）
+
+自托管的家庭服务器 / NAS 一站式控制台：以**聊天式消息中心**为核心，聚合影视搜索订阅、磁力 / HLS 下载、Docker 管理、Frp 内网穿透管理与消息推送，前后端打包为**单个容器**即可运行。
+
+![技术栈](https://img.shields.io/badge/Java-21-orange) ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green) ![Vue](https://img.shields.io/badge/Vue-3-brightgreen) ![SQLite](https://img.shields.io/badge/数据库-SQLite-blue) ![License](https://img.shields.io/badge/部署-单容器-9cf)
+
+## 功能特性
+
+### 💬 消息中心（WebSocket 实时推送）
+类 IM 的会话式界面，发送即受理、结果以机器人气泡实时推送：
+
+| 会话 | 说明 |
+| --- | --- |
+| 电影港 / 电影天堂 | 发送剧名即搜索，结果按「封面 + 配文」气泡逐条展示，可一键订阅 |
+| 磁力下载 | 提交磁力链接到 qBittorrent，`帮助` / `状态` / `路径 xxx` 等指令管理任务 |
+| 视频解析 | 解析抖音等分享口令，视频 / 图文作品按气泡逐条推送 |
+| 迅雷下载 | 对接 Docker 版迅雷的离线下载 |
+| 系统通知 | Frp / Docker / 推送等系统事件的统一通知流 |
+
+### 📺 影视订阅与下载
+- **剧集订阅 + 定时巡检**：订阅后后台定期巡检详情页，新资源自动推送通知，并有独立的巡检记录页
+- **搜索监听**：暂无资源时挂起监听，命中后自动通知并结束
+- **HLS（m3u8）订阅下载**：内置 `N_m3u8DL-RE` + FFmpeg，支持离线订阅与单集下载，完成文件归档到 `下载根目录/剧名/剧名 S01E01.mp4`，可直接被飞牛影视等媒体库识别
+
+### 🐳 Docker 管理
+通过 docker-java SDK 直连宿主机 Docker 守护进程（unix socket / tcp），管理宿主机上的**容器 / 镜像 / 网络 / 卷**，并提供资源占用图表。
+
+### 🌐 Frp 管理
+与 frpc 容器共用 `frpc.ini`，网页编辑配置，保存后热加载即时生效，支持状态查询与容器重启。
+
+### 🔔 推送设置
+系统事件（订阅命中、下载完成、巡检异常等）的推送渠道配置。
+
+## 架构与 tech stack
+
+```
+┌─────────────────────────────────────────────┐
+│           huluwa-console 容器 (:8000)        │
+│  Vue 3 + Vite + Naive UI（打包进 JAR 托管）   │
+│  Spring Boot 3.5（REST + WebSocket）          │
+│  SQLite（WAL） │ JWT 认证 │ docker-java SDK   │
+└──────┬──────────────┬───────────────────────┘
+       │ unix socket  │ 绑定挂载
+       ▼              ▼
+  Docker 守护进程    /vol1/1000/downloads（与 qB / 迅雷共用下载目录）
+```
+
+- **后端**：Java 21、Spring Boot 3.5（Web / WebSocket / JDBC / Validation）、SQLite、jjwt、docker-java
+- **前端**：Vue 3、Vite 7、Naive UI、Pinia、Vue Router、ECharts、Axios
+- **零外部依赖**：无需 Nginx、无需外部数据库，单个容器同时提供页面与 API
+
+## 快速部署
+
+### 前置条件
+- Docker Engine 19.03+ 与 Docker Compose v2
+- 构建机器需能访问 Docker Hub / npm registry / Maven Central（服务器本身无需安装 Java、Node）
+- 可选：qBittorrent、迅雷、frpc 容器
+
+### 一键部署（CentOS）
+
+```shell
+cd /path/to/huluwa
+cp .env.example .env   # 按需修改配置
+bash deploy-centos.sh
+```
+
+Windows 用 `deploy.bat`，飞牛 fnOS 用 `deploy_fnos.bat`（自动处理 TrimACL 目录授权）。详细说明见 [DOCKER.md](DOCKER.md)。
+
+### 手动 compose 部署
+
+```shell
+cp .env.example .env
+# 获取 docker.sock 的组 ID 填入 DOCKER_GID：stat -c '%g' /var/run/docker.sock
+docker compose up -d --build
+```
+
+### 关键配置（.env）
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `HULUWA_BIND_ADDRESS` | `127.0.0.1` | 监听地址；**完成管理员初始化前保持 127.0.0.1**，之后再改 `0.0.0.0` |
+| `HULUWA_PORT` | `8000` | 监听端口 |
+| `HULUWA_DATA_DIR` | `./data` | 数据目录（SQLite、令牌密钥、配置），需归 UID 10001 所有 |
+| `DOCKER_GID` | `999` | 宿主机 `/var/run/docker.sock` 的组 ID，不填则 Docker 管理页无法连接 |
+| `HULUWA_FRP_DIR` | `/root/frp` | frpc 配置目录（飞牛：`/vol1/1000/docker/frpc`） |
+| `HULUWA_MEDIA_DIR` | `./data/media` | 旧版本媒体目录，只读挂载保留历史文件 |
+
+### 首次启动
+
+1. 浏览器访问 `http://127.0.0.1:8000`，完成管理员账号初始化
+2. 修改 `.env` 将 `HULUWA_BIND_ADDRESS` 改为 `0.0.0.0` 后 `docker compose up -d` 重建
+3. 在各会话内配置 qBittorrent / 迅雷 / 视频解析服务等接入信息
+
+## 本地开发
+
+```shell
+# 后端（默认 8000 端口，数据落在 ./data）
+./mvnw spring-boot:run
+
+# 前端（默认 5173 端口，/api 与 /ws 已代理到后端）
+cd frontend && npm install && npm run dev
+```
+
+测试与联编：
+
+```shell
+./mvnw test                  # 后端测试
+cd frontend && npm test      # 前端 vitest
+./mvnw -Pfrontend clean package   # 前后端一起构建，产物 target/huluwa-console.jar
+```
+
+## 目录结构
+
+```
+huluwa/
+├── src/main/java/com/huluwa/console
+│   ├── web/        # REST 控制器（Auth / Chat / Hls / Docker / Frp / Push ...）
+│   ├── ws/         # 聊天 WebSocket 通道与推送
+│   ├── service/    # 业务服务（搜索、订阅、HLS 下载、qB / 迅雷、Docker、Frp ...）
+│   └── security/   # JWT 令牌与认证拦截
+├── src/main/resources
+│   ├── application.yml   # 全部可调参数（HLS 工具路径、巡检间隔、Docker 连接 ...）
+│   ├── schema.sql        # SQLite 表结构
+│   └── static/           # 前端构建产物（由 Vite 生成）
+├── frontend/             # Vue 3 前端源码（views / components / stores ...）
+├── scripts/              # HLS 工具安装、下载目录授权等辅助脚本
+├── docs/                 # 飞牛影视 m3u8 订阅适配方案
+├── Dockerfile / compose.yaml / deploy-centos.sh / deploy.bat / deploy_fnos.bat
+└── DOCKER.md             # Docker 部署详细文档
+```
+
+## 安全说明
+
+- 默认只监听 `127.0.0.1`，完成管理员初始化后才对外开放
+- 容器以非 root 用户 `10001:10001` 运行，不使用 `--privileged`，通过 socket 组权限访问 Docker
+- 登录基于 JWT（默认 72 小时过期），令牌密钥首次启动自动生成并持久化
+
+## 相关文档
+
+- [DOCKER.md](DOCKER.md) — Docker 部署完整文档（CentOS / 飞牛）
+- [docs/飞牛影视-m3u8-订阅适配方案.md](docs/飞牛影视-m3u8-订阅适配方案.md) — m3u8 订阅下载与飞牛影视适配细节
