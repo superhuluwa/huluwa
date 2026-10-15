@@ -63,16 +63,23 @@ log()  { printf '\033[36m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*"; }
 warn() { printf '\033[33m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*" >&2; }
 fail() { printf '\033[31m[ERROR] %s\033[0m\n' "$*" >&2; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || fail "需要 root 权限运行（请通过 sudo 调用）"
+# 飞牛的 TrimACL 让管理员账号无需 root 即可完成目录授权与属主调整，
+# 因此不再强制 root；后续每个特权步骤各自探测，做不到时降级并提示。
+ROOT=0
+[ "$(id -u)" -eq 0 ] && ROOT=1
 
 # ---------- 1. 环境检查 ----------
 command -v docker >/dev/null 2>&1 || fail "未检测到 docker"
 docker compose version >/dev/null 2>&1 || fail "未检测到 docker compose v2"
 
 if ! docker info >/dev/null 2>&1; then
-  warn "Docker 守护进程未运行，尝试启动 docker.service"
-  systemctl start docker 2>/dev/null || true
-  sleep 3
+  if [ "${ROOT}" -eq 1 ]; then
+    warn "Docker 守护进程未运行，尝试启动 docker.service"
+    systemctl start docker 2>/dev/null || true
+    sleep 3
+  else
+    fail "Docker 守护进程不可用且当前非 root，无法自动启动。请在飞牛执行：sudo systemctl start docker"
+  fi
 fi
 docker info >/dev/null 2>&1 || fail "Docker 守护进程不可用，请检查：systemctl status docker"
 [ -S /var/run/docker.sock ] || fail "/var/run/docker.sock 不存在，请确认飞牛 Docker 服务已启动"
@@ -191,8 +198,15 @@ fi
 
 # ---------- 3. 数据目录 ----------
 mkdir -p "${DATA_DIR}" "${MEDIA_DIR}" "${DOWNLOAD_DIR}"
-chown -R 10001:10001 "${DATA_DIR}"
-log "数据目录：${DATA_DIR}（属主 10001:10001 -> 容器内 /app/data）"
+# 数据目录必须归容器内的 10001。飞牛的 TrimACL 允许管理员直接 chown；
+# 标准 Linux 上非 root 做不到，此时若属主已正确就不必改，否则明确报错。
+if chown -R 10001:10001 "${DATA_DIR}" 2>/dev/null; then
+  log "数据目录：${DATA_DIR}（属主 10001:10001 -> 容器内 /app/data）"
+elif [ "$(find "${DATA_DIR}" -maxdepth 0 -printf '%u' 2>/dev/null)" = "10001" ]; then
+  log "数据目录：${DATA_DIR}（属主已是 10001，跳过 chown）"
+else
+  fail "无法将 ${DATA_DIR} 的属主改为 10001，请手工执行：sudo chown -R 10001:10001 ${DATA_DIR}"
+fi
 # 授权失败立即停止，避免容器看似部署成功而订阅下载不可用。
 bash scripts/hls-download-dir.sh prepare || fail "共享下载目录准备失败（线上容器未被改动）"
 log "下载目录：${DOWNLOAD_DIR}（容器内同一路径，与迅雷、qBittorrent 共用，文件直接放在剧名目录）"

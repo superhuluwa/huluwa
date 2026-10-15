@@ -23,12 +23,14 @@ grant_uid_10001() {
   fi
   command -v setfacl >/dev/null 2>&1 \
     || fail "未找到 trimacl 或 setfacl，无法授予 UID 10001 下载目录权限"
+  # setfacl 需要 root 或目录属主；失败时提示 sudo，而不是让调用方猜。
   setfacl -m u:10001:rwx,d:u:10001:rwx "${dir}" \
-    || fail "POSIX ACL 授权失败：${dir}"
+    || fail "POSIX ACL 授权失败：${dir}（非 root 请改用 sudo 运行本脚本）"
 }
 
 prepare_directory() {
-  [ "$(id -u)" -eq 0 ] || fail "目录授权需要 root 权限，请通过 sudo 运行"
+  # 不强制 root：飞牛的 trimacl 允许管理员账号直接授权，标准 Linux 上 setfacl 需要 root。
+  # 这里让授权动作本身成为判据——做不到时由 grant_uid_10001 报错，并提示改用 sudo。
   [ ! -L "${DOWNLOAD_DIR}" ] || fail "下载根目录不能是符号链接：${DOWNLOAD_DIR}"
   mkdir -p "${DOWNLOAD_DIR}" || fail "无法创建下载目录：${DOWNLOAD_DIR}"
   [ -d "${DOWNLOAD_DIR}" ] || fail "下载路径不是目录：${DOWNLOAD_DIR}"
