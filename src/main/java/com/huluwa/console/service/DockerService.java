@@ -3,6 +3,7 @@ package com.huluwa.console.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.CreateContainerResponse;
@@ -16,6 +17,7 @@ import com.github.dockerjava.api.exception.NotModifiedException;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Container;
+import com.github.dockerjava.api.model.ContainerConfig;
 import com.github.dockerjava.api.model.Image;
 import com.github.dockerjava.api.model.Network;
 import com.github.dockerjava.api.model.PortBinding;
@@ -129,7 +131,8 @@ public class DockerService {
     public DockerService(JdbcTemplate jdbcTemplate, AppProperties properties, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.properties = properties;
-        this.objectMapper = objectMapper;
+        // Docker SDK 用空对象表示 ExposedPorts、Volumes 中的 {}，仅在本服务内兼容。
+        this.objectMapper = objectMapper.copy().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
     }
 
     // ------------------------------------------------------------------
@@ -684,26 +687,15 @@ public class DockerService {
         if (!stdout && !stderr) {
             return "";
         }
-        boolean tty = isTty(inspectContainer(id));
+        // 日志解帧只依赖 TTY 标记，无需将整份容器详情转换为 Map。
+        ContainerConfig config = invoke("获取容器详情", () -> client().inspectContainerCmd(id).exec().getConfig());
+        boolean tty = config != null && Boolean.TRUE.equals(config.getTty());
         Map<String, String> query = new LinkedHashMap<>();
         query.put("stdout", stdout ? "1" : "0");
         query.put("stderr", stderr ? "1" : "0");
         query.put("follow", follow ? "1" : "0");
         query.put("tail", tailValue);
         return demuxLogs(readBytes("/containers/" + encodePath(id) + "/logs", query, follow), tty);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static boolean isTty(Map<String, Object> inspect) {
-        Object config = inspect.get("Config") != null ? inspect.get("Config") : inspect.get("config");
-        if (!(config instanceof Map<?, ?> map)) {
-            return false;
-        }
-        Object tty = map.get("Tty") != null ? map.get("Tty") : map.get("tty");
-        if (tty instanceof Boolean value) {
-            return value;
-        }
-        return tty != null && Boolean.parseBoolean(String.valueOf(tty));
     }
 
     /** 非 TTY 容器按 Docker 复用协议解帧：1 字节流类型 + 3 字节保留 + 4 字节大端长度。 */
