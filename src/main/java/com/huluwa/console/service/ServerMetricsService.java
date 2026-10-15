@@ -33,7 +33,7 @@ public class ServerMetricsService {
 
     private static final Logger log = LoggerFactory.getLogger(ServerMetricsService.class);
 
-    /** 后台采样间隔（秒）：短于首页轮询间隔，保证任意时刻都有一份几秒内的快照 */
+    /** 后台采样间隔（秒）：与首页资源轮询周期一致，接口读取最近一帧快照 */
     private static final long SAMPLE_SECONDS = 2L;
     /** 首帧建立 CPU 基线的等待时长（毫秒） */
     private static final long FIRST_BASELINE_MILLIS = 200L;

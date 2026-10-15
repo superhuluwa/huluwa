@@ -47,6 +47,12 @@ public class DashboardController {
         this.serverMetricsService = serverMetricsService;
     }
 
+    /** 资源轮询只读取缓存快照，避免每次刷新都查询 Docker 等模块。 */
+    @GetMapping("/server")
+    public ApiResult<Map<String, Object>> server() {
+        return ApiResult.ok(serverMetricsService.snapshot());
+    }
+
     @GetMapping("/overview")
     public ApiResult<Map<String, Object>> overview() {
         Map<String, Object> data = new LinkedHashMap<>();

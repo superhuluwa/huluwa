@@ -121,6 +121,8 @@ import http from '@/libs/http'
 import { formatBytes } from '@/utils/format'
 import { useIsMobile } from '@/composables/useIsMobile'
 
+const METRICS_REFRESH_INTERVAL = 2000
+
 export default {
     components: { NButton, NDescriptions, NDescriptionsItem },
     name: 'DashboardPage',
@@ -131,6 +133,10 @@ export default {
     data() {
         return {
             loading: false,
+            metricsActive: false,
+            metricsTimer: null,
+            metricsRequest: null,
+            serverSnapshot: null,
             overview: {
                 application: '',
                 serverTime: '',
@@ -144,7 +150,7 @@ export default {
     },
     computed: {
         server() {
-            return this.overview.server || {}
+            return this.serverSnapshot || this.overview.server || {}
         },
         /** 后台采样到位前显示占位符，不显示 0%——那会被误读成机器很空闲 */
         cpuPercentText() {
@@ -180,8 +186,17 @@ export default {
             return '已用 ' + percent.toFixed(0) + '% · 可用 ' + formatBytes(memory.available)
         }
     },
-    mounted() {
+    // 首页由 KeepAlive 缓存，每次进入时恢复刷新，离开时释放轮询与请求。
+    activated() {
+        this.metricsActive = true
+        document.addEventListener('visibilitychange', this.handleVisibilityChange)
         this.load()
+    },
+    deactivated() {
+        this.stopMetricsPolling()
+    },
+    beforeUnmount() {
+        this.stopMetricsPolling()
     },
     methods: {
         number(value) {
@@ -193,7 +208,58 @@ export default {
             const value = this.number(percent)
             return 100 - Math.min(100, Math.max(0, value === null ? 0 : value))
         },
+        pauseMetricsPolling() {
+            clearTimeout(this.metricsTimer)
+            this.metricsTimer = null
+            if (this.metricsRequest) {
+                this.metricsRequest.abort()
+                this.metricsRequest = null
+            }
+        },
+        stopMetricsPolling() {
+            this.metricsActive = false
+            document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+            this.pauseMetricsPolling()
+        },
+        handleVisibilityChange() {
+            if (document.hidden) {
+                this.pauseMetricsPolling()
+            } else {
+                this.refreshMetrics()
+            }
+        },
+        async refreshMetrics() {
+            if (!this.metricsActive || document.hidden || this.metricsRequest) return
+            clearTimeout(this.metricsTimer)
+            this.metricsTimer = null
+            const request = new AbortController()
+            this.metricsRequest = request
+            try {
+                const data = await http.get('/dashboard/server', undefined, {
+                    silent: true,
+                    signal: request.signal
+                })
+                if (!request.signal.aborted && this.metricsActive && !document.hidden) {
+                    this.serverSnapshot = data
+                }
+            } catch (error) {
+                // 自动刷新失败保留上次快照，下一轮重试，避免反复弹出错误提示。
+            } finally {
+                if (this.metricsRequest === request) {
+                    this.metricsRequest = null
+                    if (this.metricsActive && !document.hidden) {
+                        // 请求结束后再安排下一轮，防止慢请求重叠或乱序覆盖。
+                        this.metricsTimer = setTimeout(() => {
+                            this.metricsTimer = null
+                            this.refreshMetrics()
+                        }, METRICS_REFRESH_INTERVAL)
+                    }
+                }
+            }
+        },
         async load() {
+            this.refreshMetrics()
+            if (this.loading) return
             this.loading = true
             try {
                 const data = await http.get('/dashboard/overview')
