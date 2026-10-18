@@ -64,7 +64,7 @@
             </div>
             <n-data-table v-else :columns="columns" :data="rows" :row-key="row => row.id" :bordered="false" :max-height="560" :scroll-x="1430" size="small" />
         </n-spin>
-        <p class="tip">页面显示期间每 3 秒更新进度；下载后还需合并、检查和归档，完成后显示 100%。</p>
+        <p class="tip">页面显示期间每秒更新进度；下载后还需合并、检查和归档，完成后显示 100%。</p>
         <HlsSettingsDialog v-model:show="settings" />
         <n-modal v-model:show="logDialog" preset="card" title="下载日志" style="width: 760px; max-width: calc(100vw - 32px)">
             <n-spin :show="logLoading"><pre class="log">{{ logContent }}</pre></n-spin>
@@ -145,7 +145,7 @@ export default {
             try { this.logContent = (await GetHlsDownloadLog(row.id)).content }
             catch (error) { /* 拦截器已提示 */ } finally { this.logLoading = false }
         },
-        start() { if (!this.timer) this.timer = setInterval(() => this.load(true), 3000) },
+        start() { if (!this.timer) this.timer = setInterval(() => this.load(true), 1000) },
         stop() { clearInterval(this.timer); this.timer = null },
         async load(quiet = false) {
             if (this.fetching) return

@@ -15,7 +15,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -598,26 +597,12 @@ public class HlsDownloadService implements ApplicationRunner {
         process.getOutputStream().close();
         long startedAt = System.nanoTime();
         Thread reader = Thread.ofVirtual().start(() -> {
-            try (var input = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            try (var input = new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8)) {
                 java.io.BufferedWriter output = null;
                 try { output = Files.newBufferedWriter(taskLog, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE); }
                 catch (IOException e) { log.warn("HLS 日志文件创建失败：{}", HlsSupport.error(e)); }
-                String line;
-                long logged = 0;
                 try {
-                    while ((line = input.readLine()) != null) {
-                        progress.accept(line);
-                        // 日志无法写入或达到上限后仍消费管道，防止下载进程阻塞。
-                        if (output == null || logged > 4_000_000) continue;
-                        for (String secret : secrets.values()) if (secret.length() >= 4) line = line.replace(secret, "[已隐藏]");
-                        line = HlsSupport.redact(line);
-                        try { output.write(line); output.newLine(); output.flush(); logged += line.length(); }
-                        catch (IOException e) {
-                            log.warn("HLS 日志文件写入失败：{}", HlsSupport.error(e));
-                            try { output.close(); } catch (IOException ignored) { }
-                            output = null;
-                        }
-                    }
+                    readProcessOutput(input, progress, output, secrets);
                 } finally { if (output != null) output.close(); }
             } catch (IOException e) { log.warn("HLS 任务日志读取失败：{}", HlsSupport.error(e)); }
         });
@@ -633,6 +618,58 @@ public class HlsDownloadService implements ApplicationRunner {
             reader.join(5000);
             activeProcess = null;
         }
+    }
+
+    /** 按读取块即时更新进度；日志单独按行脱敏，写入失败或达到上限后仍消费进程管道。 */
+    private static void readProcessOutput(java.io.Reader input, HlsDownloadProgress progress,
+                                          java.io.BufferedWriter output, Map<String, String> secrets) throws IOException {
+        char[] buffer = new char[1024];
+        StringBuilder line = new StringBuilder();
+        long logged = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            progress.accept(new String(buffer, 0, read));
+            if (output == null || logged >= 4_000_000) continue;
+            try {
+                for (int i = 0; i < read; i++) {
+                    char value = buffer[i];
+                    if (value == '\n' || value == '\r') {
+                        if (line.length() > 0) {
+                            logged += emitOutputLine(line.toString(), output, secrets);
+                            line.setLength(0);
+                            if (logged >= 4_000_000) break;
+                        }
+                    } else {
+                        line.append(value);
+                        // 无换行输出也有内存上限；不截断日志中的 URL 或凭据后再写入。
+                        if (logged + line.length() >= 4_000_000) {
+                            line.setLength(0);
+                            logged = 4_000_000;
+                            break;
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                log.warn("HLS 日志文件写入失败：{}", HlsSupport.error(e));
+                try { output.close(); } catch (IOException ignored) { }
+                output = null;
+                line.setLength(0);
+            }
+        }
+        if (output != null && logged < 4_000_000 && line.length() > 0) {
+            try { emitOutputLine(line.toString(), output, secrets); }
+            catch (IOException e) { log.warn("HLS 日志文件写入失败：{}", HlsSupport.error(e)); }
+        }
+    }
+
+    private static int emitOutputLine(String line, java.io.BufferedWriter output,
+                                      Map<String, String> secrets) throws IOException {
+        for (String secret : secrets.values()) if (secret.length() >= 4) line = line.replace(secret, "[已隐藏]");
+        line = HlsSupport.redact(line);
+        output.write(line);
+        output.newLine();
+        output.flush();
+        return line.length();
     }
 
     private void verify(Path file) throws Exception {

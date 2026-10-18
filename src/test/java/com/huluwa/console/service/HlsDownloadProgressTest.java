@@ -18,6 +18,51 @@ class HlsDownloadProgressTest {
     }
 
     @Test
+    void readsBackToBackUpdatesWithoutNewlinesAndUsesLatestValue() {
+        HlsDownloadProgress progress = new HlsDownloadProgress();
+        progress.accept("Vid 1920x1080 | 800 Kbps ━━━━━ 10/814 1.23% 10.00MB/703.50MB 2.00MBps 00:30"
+                + "Vid 1920x1080 | 800 Kbps ━━━━━ 20/814 2.46% 20.00MB/703.50MB 3.00MBps 00:29");
+        assertEquals(2.4d, progress.snapshot().percent());
+        assertEquals("3.0 MB/s", progress.snapshot().speed());
+    }
+
+    @Test
+    void derivesPercentFromByteCountersWhenSamplerOmitsPercent() {
+        HlsDownloadProgress progress = new HlsDownloadProgress();
+        progress.accept("Vid 1920x1080 | 800 Kbps 351.75MB/703.50MB 2.50MBps 00:20");
+        assertEquals(50d, progress.snapshot().percent());
+        assertEquals("2.5 MB/s", progress.snapshot().speed());
+    }
+
+    @Test
+    void publishesProgressWithoutNewlinesAndPreservesSplitConsoleOutput() {
+        HlsDownloadProgress progress = new HlsDownloadProgress();
+        progress.accept("\u001b[3");
+        progress.accept("2mVi");
+        assertNull(progress.snapshot().percent());
+        progress.accept("d 1920x1080 ━━━ 12/100 12.");
+        assertNull(progress.snapshot().percent());
+        progress.accept("00% 6.00MiB/50.00MiB 1.50MiB/s\u001b[0m");
+        assertEquals(12d, progress.snapshot().percent());
+        assertEquals("1.5 MB/s", progress.snapshot().speed());
+        progress.accept("Vid 1920x1080 ━━━━━ 25/100 25.00% 12.50MiB/50.00MiB 2.00MiB/s");
+        assertEquals(25d, progress.snapshot().percent());
+        assertEquals("2.0 MB/s", progress.snapshot().speed());
+    }
+
+    @Test
+    void separatesTracksWithMixedProgressFormatsAndDifferentByteUnits() {
+        HlsDownloadProgress progress = new HlsDownloadProgress();
+        progress.accept("Vid 1920x1080 ━━━ 50/100 50.00% 500MB/1GB 4.00MBps"
+                + "Aud 128 Kbps 256.00MiB/1.00GiB 512.00KiB/s");
+        assertEquals(37.5d, progress.snapshot().percent());
+        assertEquals("4.5 MB/s", progress.snapshot().speed());
+        progress.accept("\r\n下载地址 https://cdn.example/a.m3u8?token=secret\n");
+        assertEquals(37.5d, progress.snapshot().percent());
+        assertFalse(progress.snapshot().toString().contains("secret"));
+    }
+
+    @Test
     void averagesTracksAndDoesNotReportArchiveCompletionFromSegments() {
         HlsDownloadProgress progress = new HlsDownloadProgress();
         progress.accept("Vid 1920x1080 ━━━━━━━ 100/100 100.00% 48.00MB - 00:00");

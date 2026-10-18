@@ -5,27 +5,69 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** 解析固定版本下载器的进度行；只保留数字，不向接口暴露原始输出。 */
+/** 解析固定版本下载器的进度输出；只保留数字，不向接口暴露原始输出。 */
 final class HlsDownloadProgress {
     private static final Pattern ANSI = Pattern.compile("\\x1B\\[[0-?]*[ -/]*[@-~]");
+    private static final Pattern BOUNDARY = Pattern.compile("(?:Vid|Aud|Sub)\\b|[\\r\\n]");
     private static final Pattern ROW = Pattern.compile(
-            "^\\s*((?:Vid|Aud|Sub)\\b.*?)\\s+(\\d+(?:[.,]\\d+)?)/(\\d+(?:[.,]\\d+)?)\\s+(\\d+(?:[.,]\\d+)?)%\\s*(.*)$");
+            "^(.*?)\\s+(\\d+(?:[.,]\\d+)?)\\s*/\\s*(\\d+(?:[.,]\\d+)?)\\s+(\\d+(?:[.,]\\d+)?)\\s*%\\s*(.*)$",
+            Pattern.DOTALL);
+    /** 部分输出只有已完成量/总量，百分比由字节大小推导。 */
+    private static final Pattern BYTES_ROW = Pattern.compile(
+            "^(.*?)\\s+(\\d+(?:[.,]\\d+)?)\\s*((?:[KMGT]i?)?B)\\s*/\\s*(\\d+(?:[.,]\\d+)?)\\s*((?:[KMGT]i?)?B)(?:\\s+(.*))?$",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern SPEED = Pattern.compile("(?i)(\\d+(?:[.,]\\d+)?)\\s*([KMGT]?)(?:i?B)(?:ps|/s)");
+    private static final int MAX_PENDING_CHARS = 8192;
     private final Map<String, Track> tracks = new LinkedHashMap<>();
+    private final StringBuilder pending = new StringBuilder();
     private String phase = "parsing";
     private record Track(double percent, double bytesPerSecond, long seenAt) { }
     record Snapshot(Double percent, String speed, String phase) { }
 
     synchronized void accept(String output) {
-        String line = ANSI.matcher(output).replaceAll("").trim();
+        // 重定向输出可能没有换行；保留最后一条状态，兼容轨道名、数字和 ANSI 序列跨读取块。
+        String text = ANSI.matcher(pending.append(output)).replaceAll("");
+        var boundary = BOUNDARY.matcher(text);
+        int rowStart = -1;
+        int tailStart = 0;
+        while (boundary.find()) {
+            if (rowStart >= 0) acceptRow(text.substring(rowStart, boundary.start()));
+            rowStart = boundary.group().length() == 3 ? boundary.start() : -1;
+            tailStart = rowStart >= 0 ? rowStart : boundary.end();
+        }
+        // 当前状态只要已有百分比就立即发布，不等下一次换行或下一条轨道状态。
+        if (rowStart >= 0) acceptRow(text.substring(rowStart));
+        pending.setLength(0);
+        pending.append(text, Math.max(tailStart, text.length() - MAX_PENDING_CHARS), text.length());
+        if (!tracks.isEmpty()) {
+            phase = tracks.values().stream().allMatch(value -> value.percent() >= 100) ? "merging" : "downloading";
+        }
+    }
+
+    private void acceptRow(String line) {
         var row = ROW.matcher(line);
-        if (!row.matches()) return;
-        // 进度条形状会随下载变化，只用稳定的轨道描述作为键。
-        String track = row.group(1).replaceAll("[\\u2500-\\u259F].*$", "").trim();
-        double total = decimal(row.group(3));
-        double percent = decimal(row.group(4));
+        String description;
+        String remainder;
+        double total;
+        double percent;
+        if (row.matches()) {
+            description = row.group(1);
+            total = decimal(row.group(3));
+            percent = decimal(row.group(4));
+            remainder = row.group(5);
+        } else {
+            var bytes = BYTES_ROW.matcher(line);
+            if (!bytes.matches()) return;
+            description = bytes.group(1);
+            total = bytes(bytes.group(4), bytes.group(5));
+            double completed = bytes(bytes.group(2), bytes.group(3));
+            percent = total > 0 ? completed / total * 100 : -1;
+            remainder = bytes.group(6) == null ? "" : bytes.group(6);
+        }
         if (total <= 0 || !Double.isFinite(total) || percent < 0 || percent > 100 || !Double.isFinite(percent)) return;
-        var speed = SPEED.matcher(row.group(5));
+        // 进度条形状会随下载变化，只用稳定的轨道描述作为键。
+        String track = description.replaceAll("[\\u2500-\\u259F].*$", "").replaceAll("\\s+", " ").trim();
+        var speed = SPEED.matcher(remainder);
         double bytesPerSecond = 0;
         if (speed.find()) {
             int unit = "KMGT".indexOf(speed.group(2).toUpperCase(Locale.ROOT)) + 1;
@@ -34,7 +76,11 @@ final class HlsDownloadProgress {
             if (!Double.isFinite(bytesPerSecond)) bytesPerSecond = 0;
         }
         tracks.put(track, new Track(percent, percent >= 100 ? 0 : bytesPerSecond, System.nanoTime()));
-        phase = tracks.values().stream().allMatch(value -> value.percent() >= 100) ? "merging" : "downloading";
+    }
+
+    private static double bytes(String value, String unit) {
+        int power = "KMGT".indexOf(Character.toUpperCase(unit.charAt(0))) + 1;
+        return decimal(value) * Math.pow(1024, power);
     }
 
     synchronized Snapshot snapshot() {
