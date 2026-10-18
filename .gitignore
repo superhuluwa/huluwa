@@ -25,3 +25,10 @@ codex-launcher-check-*/
 
 # 本地性能测量、隔离测试数据库与验证构建
 output/performance-audit/
+
+# 本地部署配置与备份（必须保留在宿主机，不能提交）
+.env
+backups/
+.deploy-state
+.compose.yaml.fnos-backup
+.compose.fnos.override.yaml
