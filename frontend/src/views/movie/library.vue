@@ -47,17 +47,6 @@
                         <template #prefix><i class="fa-solid fa-magnifying-glass"></i></template>
                     </n-input>
                     <n-select v-model:value="seasonFilter" :options="seasonOptions" clearable placeholder="全部季度" />
-                    <n-checkbox :checked="allSelected" :indeterminate="indeterminate" :disabled="!visibleEntries.length"
-                        @update:checked="toggleAll">
-                        全选当前结果
-                    </n-checkbox>
-                </div>
-                <div class="toolbar-actions">
-                    <span class="selection-text">已选 {{ selected.length }} 项 · {{ formatBytes(selectedBytes) }}</span>
-                    <n-button type="error" :disabled="!selected.length" :loading="deleting" @click="confirmDelete">
-                        <template #icon><i class="fa-solid fa-trash-can"></i></template>
-                        批量删除
-                    </n-button>
                 </div>
             </div>
 
@@ -71,35 +60,47 @@
                     <strong>没有匹配的剧集</strong>
                     <span>试试清空搜索词或季度筛选。</span>
                 </div>
-                <template v-else>
-                    <!-- 手机端按剧集分组呈现，避免宽表格横向滚动 -->
-                    <div v-if="isMobile" class="mobile-groups">
-                        <article v-for="group in groupedEntries" :key="group.key" class="series-card">
-                            <div class="series-head">
-                                <n-checkbox :checked="groupChecked(group)" :indeterminate="groupIndeterminate(group)"
-                                    @update:checked="checked => toggleGroup(group, checked)" />
-                                <div class="series-title">
-                                    <strong>{{ group.title }}</strong>
-                                    <span>{{ group.entries.length }} 集 · {{ formatBytes(group.bytes) }}</span>
-                                </div>
+                <div v-else class="series-groups">
+                    <article v-for="group in groupedEntries" :key="group.key" class="series-card"
+                        :class="{ expanded: expandedGroups.includes(group.key) }">
+                        <div class="series-head">
+                            <button type="button" class="expand-button" :aria-expanded="expandedGroups.includes(group.key)"
+                                :aria-label="expandedGroups.includes(group.key) ? '收起剧集' : '展开剧集'"
+                                @click="toggleExpanded(group)">
+                                <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                            <div class="series-title" @click="toggleExpanded(group)">
+                                <strong>{{ group.title }}</strong>
+                                <span>{{ group.seasonLabel }} · {{ group.entries.length }} 集 · {{ formatBytes(group.bytes) }}</span>
                             </div>
+                            <div class="series-actions">
+                                <n-button v-if="!expandedGroups.includes(group.key)" size="small" type="error" ghost
+                                    :loading="deletingGroup === group.key" @click="confirmDelete(group.entries, group)">
+                                    <template #icon><i class="fa-solid fa-trash-can"></i></template>
+                                    删除全部
+                                </n-button>
+                                <n-button v-else size="small" quaternary @click="toggleExpanded(group)">
+                                    <template #icon><i class="fa-solid fa-chevron-up"></i></template>
+                                    收起
+                                </n-button>
+                            </div>
+                        </div>
+                        <div v-if="expandedGroups.includes(group.key)" class="episode-list">
                             <div v-for="entry in group.entries" :key="entry.id" class="episode-row">
-                                <n-checkbox :checked="selected.includes(entry.id)"
-                                    @update:checked="checked => toggleEntry(entry.id, checked)" />
                                 <div class="episode-main">
                                     <div class="episode-title">{{ episodeLabel(entry) }}</div>
                                     <div class="episode-file">{{ entry.fileName }}</div>
                                     <div class="episode-meta">{{ formatBytes(entry.size) }} · {{ entry.modifiedAt }}</div>
                                 </div>
-                                <n-button size="tiny" quaternary type="error" title="删除此集" @click.prevent="confirmDelete([entry])">
-                                    <i class="fa-solid fa-trash-can"></i>
+                                <n-button size="tiny" quaternary type="error" title="删除此集"
+                                    @click="confirmDelete([entry])">
+                                    <template #icon><i class="fa-solid fa-trash-can"></i></template>
+                                    删除
                                 </n-button>
                             </div>
-                        </article>
-                    </div>
-                    <n-data-table v-else :columns="columns" :data="visibleEntries" :row-key="row => row.id"
-                        :bordered="false" :max-height="600" size="small" />
-                </template>
+                        </div>
+                    </article>
+                </div>
             </n-spin>
         </section>
         <p v-if="scan?.scannedAt" class="scan-time">上次扫描：{{ scan.scannedAt }}</p>
@@ -107,69 +108,26 @@
 </template>
 
 <script>
-import { h } from 'vue'
-import { NAlert, NButton, NCheckbox, NDataTable, NInput, NSelect, NSpin } from 'naive-ui'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { NAlert, NButton, NInput, NSelect, NSpin } from 'naive-ui'
 import { DeleteEpisodeLibrary, ScanEpisodeLibrary } from '@/api/library'
 import { formatBytes } from '@/utils/format'
 
 export default {
     name: 'EpisodeLibrary',
-    components: { NAlert, NButton, NCheckbox, NDataTable, NInput, NSelect, NSpin },
-    setup() {
-        return { isMobile: useIsMobile() }
-    },
+    components: { NAlert, NButton, NInput, NSelect, NSpin },
     data() {
         return {
             loading: false,
             deleting: false,
             scan: null,
             entries: [],
-            selected: [],
+            expandedGroups: [],
+            deletingGroup: '',
             keyword: '',
-            seasonFilter: null,
-            columns: [
-                {
-                    title: '',
-                    key: 'selected',
-                    width: 42,
-                    render: row => h(NCheckbox, {
-                        checked: this.selected.includes(row.id),
-                        onUpdateChecked: checked => this.toggleEntry(row.id, checked)
-                    })
-                },
-                { title: '剧名', key: 'seriesTitle', minWidth: 180, ellipsis: { tooltip: true } },
-                {
-                    title: '季度 / 集数',
-                    key: 'episode',
-                    width: 118,
-                    render: row => this.seasonEpisode(row)
-                },
-                { title: '文件', key: 'fileName', minWidth: 260, ellipsis: { tooltip: true } },
-                {
-                    title: '大小',
-                    key: 'size',
-                    width: 112,
-                    render: row => formatBytes(row.size)
-                },
-                { title: '下载时间', key: 'modifiedAt', width: 168 },
-                {
-                    title: '操作',
-                    key: 'actions',
-                    width: 82,
-                    render: row => h(NButton, {
-                        size: 'tiny', quaternary: true, type: 'error', title: '删除此集',
-                        onClick: () => this.confirmDelete([row])
-                    }, { icon: () => h('i', { class: 'fa-solid fa-trash-can' }) })
-                }
-            ]
+            seasonFilter: null
         }
     },
     computed: {
-        selectedBytes() {
-            return this.entries.filter(entry => this.selected.includes(entry.id))
-                .reduce((sum, entry) => sum + entry.size, 0)
-        },
         visibleEntries() {
             const keyword = this.keyword.trim().toLowerCase()
             return this.entries.filter(entry => {
@@ -193,19 +151,15 @@ export default {
         totalBytes() {
             return Number(this.scan?.totalBytes || 0)
         },
-        allSelected() {
-            return this.visibleEntries.length > 0 && this.visibleEntries.every(entry => this.selected.includes(entry.id))
-        },
-        indeterminate() {
-            const count = this.visibleEntries.filter(entry => this.selected.includes(entry.id)).length
-            return count > 0 && count < this.visibleEntries.length
-        },
         groupedEntries() {
             const groups = new Map()
             for (const entry of this.visibleEntries) {
                 const key = `${entry.seriesTitle}|${entry.season}`
                 if (!groups.has(key)) {
-                    groups.set(key, { key, title: entry.seriesTitle, season: entry.season, entries: [], bytes: 0 })
+                    groups.set(key, {
+                        key, title: entry.seriesTitle, season: entry.season,
+                        seasonLabel: `第 ${entry.season} 季`, entries: [], bytes: 0
+                    })
                 }
                 const group = groups.get(key)
                 group.entries.push(entry)
@@ -216,9 +170,9 @@ export default {
     },
     watch: {
         visibleEntries() {
-            // 过滤条件变化后只保留仍可见的选中项，避免误删被隐藏文件。
-            const visible = new Set(this.visibleEntries.map(entry => entry.id))
-            this.selected = this.selected.filter(id => visible.has(id))
+            // 过滤后不保留已不可见分组的展开态，重新显示时仍然默认折叠。
+            const visible = new Set(this.groupedEntries.map(group => group.key))
+            this.expandedGroups = this.expandedGroups.filter(key => visible.has(key))
         }
     },
     mounted() {
@@ -232,46 +186,25 @@ export default {
                 const result = await ScanEpisodeLibrary()
                 this.scan = result
                 this.entries = Array.isArray(result?.entries) ? result.entries : []
-                this.selected = []
+                this.expandedGroups = []
             } catch (error) {
                 // 拦截器已提示
             } finally {
                 this.loading = false
             }
         },
-        seasonEpisode(row) {
-            return `第 ${row.season} 季 · ${row.episode ? `第 ${row.episode} 集` : '集数待识别'}`
-        },
         episodeLabel(entry) {
             return entry.episode ? `第 ${entry.episode} 集` : '集数待识别'
         },
-        toggleEntry(id, checked) {
-            if (checked) {
-                if (!this.selected.includes(id)) this.selected = [...this.selected, id]
+        toggleExpanded(group) {
+            if (this.expandedGroups.includes(group.key)) {
+                this.expandedGroups = this.expandedGroups.filter(key => key !== group.key)
             } else {
-                this.selected = this.selected.filter(value => value !== id)
+                this.expandedGroups = [...this.expandedGroups, group.key]
             }
         },
-        toggleAll(checked) {
-            this.selected = checked ? this.visibleEntries.map(entry => entry.id) : []
-        },
-        groupChecked(group) {
-            return group.entries.length > 0 && group.entries.every(entry => this.selected.includes(entry.id))
-        },
-        groupIndeterminate(group) {
-            const count = group.entries.filter(entry => this.selected.includes(entry.id)).length
-            return count > 0 && count < group.entries.length
-        },
-        toggleGroup(group, checked) {
-            const ids = new Set(group.entries.map(entry => entry.id))
-            if (checked) {
-                this.selected = [...new Set([...this.selected, ...ids])]
-            } else {
-                this.selected = this.selected.filter(id => !ids.has(id))
-            }
-        },
-        confirmDelete(rows) {
-            const targets = rows ? rows.filter(row => row?.id) : this.entries.filter(entry => this.selected.includes(entry.id))
+        confirmDelete(rows, group = null) {
+            const targets = (rows || []).filter(row => row?.id)
             if (!targets.length) return
             const bytes = targets.reduce((sum, entry) => sum + entry.size, 0)
             const preview = targets.slice(0, 6).map(entry => `${entry.seriesTitle} ${entry.episode ? `第 ${entry.episode} 集` : entry.fileName}`)
@@ -282,18 +215,21 @@ export default {
                 positiveText: '确认删除',
                 negativeText: '取消',
                 onPositiveClick: async () => {
-                    await this.remove(targets.map(entry => entry.id), bytes)
+                    await this.remove(targets.map(entry => entry.id), bytes, group)
                 }
             })
         },
-        async remove(ids, expectedBytes) {
+        async remove(ids, expectedBytes, group = null) {
             this.deleting = true
+            this.deletingGroup = group?.key || ''
             try {
                 const result = await DeleteEpisodeLibrary(ids)
                 const freed = Number(result?.freedBytes ?? expectedBytes)
                 const removed = new Set(result?.deletedIds || [])
                 this.entries = this.entries.filter(entry => !removed.has(entry.id))
-                this.selected = this.selected.filter(id => !removed.has(id))
+                if (group && result?.deleted) {
+                    this.expandedGroups = this.expandedGroups.filter(key => key !== group.key)
+                }
                 if (result?.failed) {
                     this.$message.warning(`${result.message}，释放 ${formatBytes(freed)}`)
                     if (result.failures?.length) {
@@ -310,6 +246,7 @@ export default {
                 // 拦截器已提示
             } finally {
                 this.deleting = false
+                this.deletingGroup = ''
             }
         }
     }
@@ -339,24 +276,32 @@ export default {
 .stat-foot.danger { color: var(--danger); }
 .scan-alert { margin: 0; }
 .library-card { padding: 16px; }
-.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .toolbar-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .toolbar-main .n-input { width: 270px; }
 .toolbar-main .n-select { width: 140px; }
-.toolbar-actions { display: flex; align-items: center; gap: 12px; flex: none; }
-.selection-text { color: var(--text-3); font-size: 12px; white-space: nowrap; }
 .empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--text-3); text-align: center; }
 .empty i { font-size: 28px; margin-bottom: 4px; }
 .empty strong { color: var(--text-2); font-size: 14px; }
 .empty span { max-width: 480px; font-size: 12px; }
 .empty.compact { min-height: 120px; }
-.mobile-groups { display: flex; flex-direction: column; gap: 10px; }
+.series-groups { display: flex; flex-direction: column; gap: 10px; }
 .series-card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: rgba(20, 28, 46, .45); }
 .series-head { display: flex; align-items: center; gap: 10px; padding: 12px; background: rgba(24, 34, 56, .75); }
-.series-title { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.expand-button {
+    display: grid; place-items: center; width: 28px; height: 28px; flex: none;
+    border: 0; border-radius: 7px; background: transparent; color: var(--text-3); cursor: pointer;
+    transition: background .18s ease, color .18s ease, transform .18s ease;
+}
+.expand-button:hover { color: var(--accent-2); background: var(--accent-weak); }
+.series-card.expanded .expand-button i { transform: rotate(90deg); }
+.series-title { display: flex; flex-direction: column; min-width: 0; gap: 3px; flex: 1; cursor: pointer; }
 .series-title strong { color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
 .series-title span { color: var(--text-3); font-size: 11px; }
-.episode-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.series-actions { flex: none; }
+.episode-list { border-top: 1px solid var(--line); }
+.episode-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px 11px 48px; border-top: 1px solid var(--line); }
+.episode-row:first-child { border-top: 0; }
 .episode-main { flex: 1; min-width: 0; }
 .episode-title { color: var(--text); font-size: 13px; font-weight: 600; }
 .episode-file, .episode-meta { margin-top: 3px; color: var(--text-3); font-size: 11.5px; overflow-wrap: anywhere; }
@@ -375,6 +320,8 @@ export default {
     .toolbar-main { flex-wrap: wrap; }
     .toolbar-main .n-input { flex: 1 1 100%; width: auto; }
     .toolbar-main .n-select { flex: 1 1 120px; width: auto; }
-    .toolbar-actions { justify-content: space-between; }
+    .series-head { padding: 10px; }
+    .episode-row { align-items: flex-start; padding: 10px; }
+    .episode-row .n-button { flex: none; }
 }
 </style>
