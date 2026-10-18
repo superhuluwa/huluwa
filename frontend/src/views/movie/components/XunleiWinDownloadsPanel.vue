@@ -2,8 +2,13 @@
     <div class="xunlei-win-downloads">
         <div class="head">
             <h3>迅雷【Win】下载任务<span>最近 500 条</span></h3>
+            <n-button size="small" type="error" ghost :loading="clearing" :disabled="!rows.length || fetching"
+                @click="clearRecords">
+                <template #icon><i class="fa-solid fa-trash-can"></i></template>
+                清空下载记录
+            </n-button>
             <n-button size="small" @click="settings = true">连接设置</n-button>
-            <n-button size="small" :loading="loading" :disabled="fetching" @click="load()">
+            <n-button size="small" :loading="loading" :disabled="fetching || clearing" @click="load()">
                 <template #icon><i class="fa-solid fa-rotate"></i></template>
                 刷新
             </n-button>
@@ -55,7 +60,7 @@
             <n-data-table v-else :columns="columns" :data="rows" :row-key="row => row.id" :bordered="false"
                 :max-height="560" :scroll-x="1650" size="small" />
         </n-spin>
-        <p class="tip">每 5 秒更新下载状态与进度，已完成和失败的记录会保留。</p>
+        <p class="tip">每 1 秒更新下载状态与进度，已完成和失败的记录会保留。</p>
         <XunleiWinSettingsDialog v-model:show="settings" @saved="load()" />
     </div>
 </template>
@@ -63,7 +68,7 @@
 <script>
 import { h } from 'vue'
 import { NAlert, NButton, NDataTable, NProgress, NSpin } from 'naive-ui'
-import { GetXunleiWinDownloads } from '@/api/xunlei-win'
+import { ClearXunleiWinDownloads, GetXunleiWinDownloads } from '@/api/xunlei-win'
 import { useIsMobile } from '@/composables/useIsMobile'
 import XunleiWinSettingsDialog from '@/views/message/components/XunleiWinSettingsDialog.vue'
 
@@ -83,7 +88,7 @@ export default {
         return { isMobile: useIsMobile() }
     },
     data() {
-        return { rows: [], loading: false, fetching: false, settings: false, timer: null, loadError: '' }
+        return { rows: [], loading: false, fetching: false, clearing: false, settings: false, timer: null, loadError: '' }
     },
     computed: {
         columns() {
@@ -135,11 +140,22 @@ export default {
         start() {
             if (this.timer) return
             this.load()
-            this.timer = setInterval(() => this.load(true), 5000)
+            this.timer = setInterval(() => this.load(true), 1000)
         },
         stop() { clearInterval(this.timer); this.timer = null },
+        async clearRecords() {
+            if (this.clearing || this.fetching || !this.rows.length) return
+            this.clearing = true
+            try {
+                const result = await ClearXunleiWinDownloads()
+                this.rows = []
+                this.loadError = ''
+                window.$message?.success(result?.message || '已清空下载记录')
+            } catch (error) { /* 拦截器已提示 */ }
+            finally { this.clearing = false }
+        },
         async load(quiet = false) {
-            if (this.fetching) return
+            if (this.fetching || this.clearing) return
             this.fetching = true
             if (!quiet) this.loading = true
             try {

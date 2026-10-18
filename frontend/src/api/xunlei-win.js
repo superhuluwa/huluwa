@@ -20,3 +20,8 @@ export function TestXunleiWinConnection(payload) {
 export function GetXunleiWinDownloads(quiet = false) {
     return http.get('/xunlei-win/downloads', {}, { silent: quiet })
 }
+
+/** 清空迅雷【Win】全部下载记录。 */
+export function ClearXunleiWinDownloads() {
+    return http.delete('/xunlei-win/downloads')
+}

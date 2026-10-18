@@ -338,6 +338,7 @@ CREATE TABLE IF NOT EXISTS xunlei_win_download_task (
     total_bytes     INTEGER,
     message         TEXT,
     query_error     TEXT,                         -- 查询错误与下载失败分开保存，保留上次进度
+    hidden_at       TEXT,                         -- 清空后隐藏，保留流水号避免启动时重复补录
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     checked_at      TEXT,

@@ -110,6 +110,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     private void migrateDownloadHistory() {
         addColumnIfMissing("hls_download_task", "hidden_at", "TEXT");
         addColumnIfMissing("movie_download_task", "hidden_at", "TEXT");
+        addColumnIfMissing("xunlei_win_download_task", "hidden_at", "TEXT");
         // 「我的下载」进度列：迅雷【Win】与 qBittorrent 跟踪时回填，历史行保持空
         addColumnIfMissing("movie_download_task", "progress", "INTEGER");
     }

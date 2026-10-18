@@ -262,8 +262,20 @@ public class XunleiWinService {
                        received_bytes AS receivedBytes, total_bytes AS totalBytes,
                        message, query_error AS queryError, created_at AS createdAt,
                        updated_at AS updatedAt, checked_at AS checkedAt, completed_at AS completedAt
-                  FROM xunlei_win_download_task ORDER BY id DESC LIMIT 500
+                  FROM xunlei_win_download_task
+                 WHERE hidden_at IS NULL ORDER BY id DESC LIMIT 500
                 """);
+    }
+
+    /** 清空全部记录；保留流水号以防止启动迁移再次补入已清空的历史任务。 */
+    public Map<String, Object> clearDownloads() {
+        int hidden = jdbcTemplate.update("""
+                UPDATE xunlei_win_download_task SET hidden_at = ? WHERE hidden_at IS NULL
+                """, HlsSupport.now());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("hidden", hidden);
+        result.put("message", hidden > 0 ? "已清空 " + hidden + " 条下载记录" : "暂无下载记录");
+        return result;
     }
 
     /** 所有入口提交成功后统一落库；同一服务的同一流水号只保留一条记录。 */
@@ -296,11 +308,11 @@ public class XunleiWinService {
     }
 
     /** 每轮最多并发查询 20 条，优先查询最久未更新的记录，完成和失败的历史状态保留。 */
-    @Scheduled(initialDelay = 20_000L, fixedDelay = 5_000L)
+    @Scheduled(initialDelay = 20_000L, fixedDelay = 1_000L)
     public void refreshDownloadRecords() {
         var rows = jdbcTemplate.queryForList("""
                 SELECT id, api_url, serial FROM xunlei_win_download_task
-                 WHERE serial IS NOT NULL AND status NOT IN ('success', 'failed', 'untracked')
+                 WHERE hidden_at IS NULL AND serial IS NOT NULL AND status NOT IN ('success', 'failed', 'untracked')
                  ORDER BY checked_at, id LIMIT 20
                 """);
         if (rows.isEmpty()) {
