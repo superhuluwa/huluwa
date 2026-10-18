@@ -89,7 +89,8 @@
                             <div v-for="entry in group.entries" :key="entry.id" class="episode-row">
                                 <div class="episode-main">
                                     <div class="episode-title">{{ episodeLabel(entry) }}</div>
-                                    <div class="episode-file">{{ entry.fileName }}</div>
+                                    <div v-if="!entry.episodeRecognized" class="episode-file">集数待识别 · {{ entry.fileName }}</div>
+                                    <div v-else class="episode-file">{{ entry.fileName }}</div>
                                     <div class="episode-meta">{{ formatBytes(entry.size) }} · {{ entry.modifiedAt }}</div>
                                 </div>
                                 <n-button size="tiny" quaternary type="error" title="删除此集"
@@ -194,7 +195,10 @@ export default {
             }
         },
         episodeLabel(entry) {
-            return entry.episode ? `第 ${entry.episode} 集` : '集数待识别'
+            if (entry.episodeRecognized && entry.episode) return `第 ${entry.episode} 集`
+            // 未识别出序号时显示文件名主标题，避免整行只剩“集数待识别”。
+            const name = String(entry.fileName || '').replace(/\.[^.]+$/, '')
+            return name.length > 64 ? `${name.slice(0, 64)}…` : name || '集数待识别'
         },
         toggleExpanded(group) {
             if (this.expandedGroups.includes(group.key)) {

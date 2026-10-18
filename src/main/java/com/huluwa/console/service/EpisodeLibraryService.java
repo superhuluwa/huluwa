@@ -51,6 +51,14 @@ public class EpisodeLibraryService {
     private static final Pattern EXPLICIT_EPISODE = Pattern.compile(
             "(?i)(?:^|[^a-z0-9])(?:EP?|E)(\\d{1,4})(?!\\d)");
     private static final Pattern TRAILING_EPISODE = Pattern.compile("(?<!\\d)(\\d{1,4})(?!\\d)\\s*$");
+    private static final Pattern BRACKETED_EPISODE = Pattern.compile(
+            "(?i)(?:\\[|【)\\s*(?:EP?|第)?\\s*(\\d{1,4})\\s*(?:集|话|期)?\\s*(?:\\]|】)");
+    private static final Pattern DOTTED_SEASON_EPISODE = Pattern.compile(
+            "(?:^|[\\s._-])S(\\d{1,3})[ ._-]?(\\d{1,4})(?!\\d)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SEPARATED_EPISODE = Pattern.compile(
+            "(?i)(?:^|[\\s._-])(?:EP?[ ._-]?)?(\\d{1,4})(?!\\d)");
+    private static final Pattern QUALITY_BEFORE_EPISODE = Pattern.compile(
+            "(?i)(?:2160p|1080p|720p|480p|4k|8k|web-?dl|bluray|bdrip|hdtv)[\\s._-]*(\\d{1,4})(?!\\d)");
     private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?:^|[^a-z0-9])S(\\d{1,3})(?!\\d)");
     private static final Pattern SEASON_WORD = Pattern.compile("(?i)Season\\s*(\\d{1,3})");
     private static final Pattern RELEASE_NOISE = Pattern.compile(
@@ -73,7 +81,8 @@ public class EpisodeLibraryService {
     private record ScanToken(Path file, long size, FileTime modified, long createdAt) { }
 
     public record Entry(String id, String seriesTitle, String seriesKey, int season, int episode,
-                        String fileName, String relativePath, String extension, long size, String modifiedAt) { }
+                        String fileName, String relativePath, String extension, long size, String modifiedAt,
+                        boolean episodeRecognized) { }
 
     public record ScanResult(String mediaRoot, boolean writable, List<Entry> entries, long totalBytes,
                              int scannedFiles, int skippedFiles, int seriesCount, String scannedAt, String warning) { }
@@ -256,15 +265,55 @@ public class EpisodeLibraryService {
             }
         }
         if (episode == null) {
+            Matcher dotted = DOTTED_SEASON_EPISODE.matcher(baseName);
+            if (dotted.find()) {
+                season = positive(dotted.group(1));
+                episode = positive(dotted.group(2));
+                title = baseName.substring(0, dotted.start()).trim();
+            }
+        }
+        if (episode == null) {
+            Matcher bracketed = BRACKETED_EPISODE.matcher(baseName);
+            if (bracketed.find() && plausibleTrailingEpisode(bracketed.group(1))) {
+                episode = positive(bracketed.group(1));
+                title = baseName.substring(0, bracketed.start()).trim();
+            }
+        }
+        if (episode == null) {
+            Matcher quality = QUALITY_BEFORE_EPISODE.matcher(baseName);
+            if (quality.find() && plausibleTrailingEpisode(quality.group(1))) {
+                episode = positive(quality.group(1));
+                title = baseName.substring(0, quality.start()).trim();
+            }
+        }
+        if (episode == null) {
+            // 常见发布名：剧名.01.1080p、剧名 01-02、剧名[03]。只取紧邻标题的普通数字，
+            // 年份、分辨率、编码等数字在候选筛选阶段排除。
+            Matcher separated = SEPARATED_EPISODE.matcher(baseName);
+            while (separated.find()) {
+                int start = separated.start();
+                String before = baseName.substring(0, start);
+                char separator = start == 0 ? ' ' : baseName.charAt(start - 1);
+                boolean parenthesized = before.matches(".*[\\[【]");
+                if (" \t._-".indexOf(separator) < 0 && !parenthesized) continue;
+                if (!plausibleSeriesEpisode(separated.group(1), before)) continue;
+                episode = positive(separated.group(1));
+                title = before.trim();
+                break;
+            }
+        }
+        if (episode == null) {
             Matcher trailing = TRAILING_EPISODE.matcher(baseName);
-            if (trailing.find() && plausibleTrailingEpisode(trailing.group(1))) {
+            if (trailing.find() && plausibleSeriesEpisode(trailing.group(1),
+                    baseName.substring(0, trailing.start()))) {
                 episode = positive(trailing.group(1));
                 title = baseName.substring(0, trailing.start()).trim();
             }
         }
         if (season == null) season = seasonOf(baseName);
         String clean = cleanTitle(title);
-        if (clean.isBlank() || GENERIC_EPISODE_TITLE.matcher(clean).matches()) {
+        if (clean.isBlank() || GENERIC_EPISODE_TITLE.matcher(clean).matches()
+                || episode == null && clean.matches("[\\s._-]*\\d{1,4}[\\s._-]*")) {
             clean = fallbackSeriesTitle(root, file);
         }
         if (clean.isBlank()) clean = baseName;
@@ -274,7 +323,8 @@ public class EpisodeLibraryService {
         String seriesKey = normalizedTitle + "|" + resolvedSeason;
         String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toUpperCase(Locale.ROOT);
         return new Entry(UUID.randomUUID().toString(), clean, seriesKey, resolvedSeason, resolvedEpisode,
-                fileName, relative, extension, attributes.size(), TIME.format(attributes.lastModifiedTime().toInstant()));
+                fileName, relative, extension, attributes.size(), TIME.format(attributes.lastModifiedTime().toInstant()),
+                episode != null && episode > 0);
     }
 
     /** 文件名只含集号时，用父目录补剧名；Season/第一季等目录继续向上找。 */
@@ -356,6 +406,17 @@ public class EpisodeLibraryService {
         } catch (NumberFormatException e) {
             return false;
         }
+    }
+
+    /** 普通数字只有在标题之后、且不像分辨率/编码时，才作为候选集号。 */
+    private static boolean plausibleSeriesEpisode(String value, String before) {
+        if (!plausibleTrailingEpisode(value)) return false;
+        String preceding = HlsSupport.text(before).toLowerCase(Locale.ROOT);
+        if (preceding.matches(".*(?:2160p|1080p|720p|480p|4k|8k|h264|h265|x264|x265|hevc|aac|ddp?).*")) {
+            return false;
+        }
+        String tail = preceding.length() > 8 ? preceding.substring(preceding.length() - 8) : preceding;
+        return !tail.matches(".*(?:^|[\\s._-])(?:19|20)\\d{2}\\s*$");
     }
 
     private static Integer positive(String value) {
