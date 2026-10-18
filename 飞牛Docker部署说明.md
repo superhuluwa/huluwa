@@ -73,7 +73,7 @@ volumes:
 
 ## 3. 首次部署
 
-以下命令在飞牛终端中执行。需要是具备 Docker 权限的账号；属主调整需要使用 `sudo` 或飞牛管理员权限。
+以下命令在飞牛终端中执行。账号需要能访问 Docker socket；无需 `sudo`，目录属主由临时 root 容器处理。
 
 ### 3.1 检查目录和基础环境
 
@@ -122,7 +122,7 @@ chmod 600 .env
 
 ```bash
 cd /vol1/1000/docker/terminal-buddy/workspace/huluwa
-sudo bash deploy-fnos.sh
+bash deploy-fnos.sh
 ```
 
 脚本会自动完成：
@@ -142,19 +142,19 @@ sudo bash deploy-fnos.sh
 只做预检、不构建、不重建：
 
 ```bash
-sudo bash deploy-fnos.sh --check
+bash deploy-fnos.sh --check
 ```
 
 跳过数据快照、直接部署（不建议）：
 
 ```bash
-sudo bash deploy-fnos.sh --no-backup
+bash deploy-fnos.sh --no-backup
 ```
 
 部署前先拉取 Git 代码：
 
 ```bash
-sudo bash deploy-fnos.sh --git-pull
+bash deploy-fnos.sh --git-pull
 ```
 
 默认不执行 `git pull`，只部署当前工作区源码，避免本地改动被自动覆盖。
@@ -167,7 +167,7 @@ HULUWA_MEDIA_DIR=/vol1/1000/docker/terminal-buddy/workspace/huluwa/data/media
 HULUWA_DOWNLOAD_DIR=/vol1/1000/downloads
 HULUWA_FRP_DIR=/vol1/1000/docker/frpc
 HULUWA_BACKUP_ROOT=/vol1/1000/docker/huluwa-backups
-sudo -E bash deploy-fnos.sh
+bash deploy-fnos.sh
 ```
 
 脚本会根据这些值同步写入 `.env` 并校验 Compose 的实际解析结果。部署成功后还会生成 `.deploy-state`，记录本次镜像 ID、容器名和实际目录。
@@ -544,7 +544,7 @@ docker exec --user 10001:10001 huluwa-console \
 - Docker 管理页提示无法连接守护进程：检查 `/var/run/docker.sock` 的实际 GID、`.env` 的 `DOCKER_GID` 以及容器 `GroupAdd`。
 - 媒体文件只能读不能改：`/media` 是刻意设置的只读兼容挂载，这是预期行为。
 
-飞牛没有 `sudo` 时，用第 3.5.1 节的一次性 root 容器命令。
+如果当前账号可以访问 Docker socket，不需要 `sudo`；脚本会自动使用临时 root 容器处理属主。
 
 ## 10. 日常维护命令
 

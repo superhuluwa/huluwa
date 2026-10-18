@@ -2,7 +2,7 @@
 # 葫芦娃助手 · 飞牛 fnOS 本机一键部署
 #
 # 在飞牛上的项目根目录直接执行：
-#   sudo bash deploy-fnos.sh
+#   bash deploy-fnos.sh
 #
 # 脚本会完成：
 #   - 校验 Docker / Compose / socket

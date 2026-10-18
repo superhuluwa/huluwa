@@ -2,7 +2,7 @@
 # 葫芦娃助手 · 飞牛 fnOS 本机部署核心
 #
 # 在飞牛本机项目根目录执行：
-#   sudo bash deploy-fnos.sh
+#   bash deploy-fnos.sh
 #
 # 本脚本只处理当前工作区源码，不执行 SSH、scp，也不会默认 git pull。
 #
@@ -84,6 +84,7 @@ OLD_IMAGE_ID=""
 NEW_IMAGE_ID=""
 OLD_CONTAINER_WAS_RUNNING=0
 DEPLOY_SUCCEEDED=0
+ROOT_HELPER_IMAGE=""
 
 log()  { printf '\033[36m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*"; }
 warn() { printf '\033[33m[%s] %s\033[0m\n' "$(date '+%H:%M:%S')" "$*" >&2; }
@@ -225,61 +226,81 @@ check_environment() {
   if [ "$(uname -s)" != "Linux" ]; then fail "本脚本只能在飞牛 fnOS / Linux 上运行"; fi
   if [ -z "${CONTAINER}" ] || [ -z "${IMAGE}" ]; then fail "HULUWA_CONTAINER / HULUWA_IMAGE 不能为空"; fi
   if ! is_root; then
-    fail "本机部署需要 root 权限处理飞牛目录属主和 TrimACL。请执行：sudo bash deploy-fnos.sh"
+    log "当前用户通过 Docker socket 执行部署；目录属主由临时 root 容器处理"
   fi
 }
 
 prepare_directories() {
   log "准备持久化目录"
-  mkdir -p "${DATA_DIR}" "${MEDIA_DIR}" || fail "无法创建数据目录：${DATA_DIR} / ${MEDIA_DIR}，请使用 sudo"
-  mkdir -p "${DOWNLOAD_DIR}" || fail "无法创建下载目录：${DOWNLOAD_DIR}，请使用 sudo"
-  mkdir -p "${FRP_DIR}" || fail "无法创建 frpc 目录：${FRP_DIR}，请使用 sudo"
-  mkdir -p "${BACKUP_ROOT}" || fail "无法创建备份目录：${BACKUP_ROOT}，请使用 sudo"
+  # 数据/媒体位于项目内，可先创建；备份目录可能属于 Docker 存储视图，
+  # 留到构建后用 root 辅助容器准备。
+  mkdir -p "${DATA_DIR}" "${MEDIA_DIR}" \
+    || fail "无法创建数据/媒体目录：${DATA_DIR} / ${MEDIA_DIR}"
   [ ! -L "${DATA_DIR}" ] || fail "数据目录不能是符号链接：${DATA_DIR}"
   [ ! -L "${DOWNLOAD_DIR}" ] || fail "下载目录不能是符号链接：${DOWNLOAD_DIR}"
   [ ! -L "${FRP_DIR}" ] || fail "frpc 目录不能是符号链接：${FRP_DIR}"
-  [ -d "${DATA_DIR}" ] && [ -d "${DOWNLOAD_DIR}" ] && [ -d "${FRP_DIR}" ] \
-    || fail "持久化目录创建失败"
+}
+
+prepare_external_directories() {
+  log "通过 root 辅助容器准备下载、frpc 和备份目录"
+  [ -n "${ROOT_HELPER_IMAGE}" ] || fail "缺少可用于准备目录的镜像"
+  # 分别绑定目标目录；Docker 会自动创建不存在的宿主目录。
+  docker run --rm --network none --user 0:0 --entrypoint sh \
+    -e "DOWNLOAD_DIR=${DOWNLOAD_DIR}" \
+    -e "FRP_DIR=${FRP_DIR}" \
+    -e "BACKUP_ROOT=${BACKUP_ROOT}" \
+    -v "${DOWNLOAD_DIR}:${DOWNLOAD_DIR}" \
+    -v "${FRP_DIR}:${FRP_DIR}" \
+    -v "${BACKUP_ROOT}:${BACKUP_ROOT}" \
+    "${ROOT_HELPER_IMAGE}" \
+    -c 'mkdir -p "$DOWNLOAD_DIR" "$FRP_DIR" "$BACKUP_ROOT"' \
+    || fail "无法通过 Docker 创建下载、frpc 或备份目录"
+}
+
+run_root_helper() {
+  local script="$1"
+  docker run --rm --network none --user 0:0 --entrypoint sh \
+    -e "DOWNLOAD_DIR=${DOWNLOAD_DIR}" \
+    -v "${DATA_DIR}:/app/data" \
+    -v "${MEDIA_DIR}:/media" \
+    -v "${DOWNLOAD_DIR}:${DOWNLOAD_DIR}" \
+    -v "${FRP_DIR}:/app/frp" \
+    -v "${BACKUP_ROOT}:/backup" \
+    "${ROOT_HELPER_IMAGE}" -c "${script}"
 }
 
 fix_data_permissions() {
-  log "处理数据目录权限：${DATA_DIR}"
-  if ! chown -R 10001:10001 "${DATA_DIR}" 2>/dev/null; then
-    if [ -n "$(docker image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null || true)" ]; then
-      docker run --rm --network none --user 0:0 --entrypoint sh \
-        -v "${DATA_DIR}:/data" "${IMAGE}" \
-        -c 'chown -R 10001:10001 /data && chmod 755 /data && chmod -R u+rwX,g+rwX /data' \
-        || fail "无法修正数据目录属主，请用 sudo 执行 deploy-fnos.sh"
-    else
-      fail "无法修正数据目录属主且本地没有 ${IMAGE}，请安装 sudo 后执行：sudo bash deploy-fnos.sh"
+  log "处理数据、frpc 和备份目录属主"
+  # 下载目录属于飞牛共享存储，必须保留迅雷/qBittorrent 的属主。
+  # 这里只处理数据、frpc 和备份目录；下载目录通过 UID 10001 实际写入测试验证。
+  run_root_helper '
+    set -eu
+    chown -R 10001:10001 /app/data
+    chmod 755 /app/data
+    chmod -R u+rwX,g+rwX /app/data
+    chown 10001:1001 /app/frp 2>/dev/null || chown 10001:10001 /app/frp
+    chmod 2775 /app/frp 2>/dev/null || chmod 775 /app/frp
+    if [ -f /app/frp/frpc.ini ]; then
+      chown 10001:1001 /app/frp/frpc.ini 2>/dev/null || true
+      chmod 664 /app/frp/frpc.ini 2>/dev/null || true
     fi
-  fi
-  chmod 755 "${DATA_DIR}"
-  chmod -R u+rwX,g+rwX "${DATA_DIR}"
-  local owner
-  owner="$(stat -c '%u:%g' "${DATA_DIR}")"
-  [ "${owner}" = "10001:10001" ] || fail "数据目录属主仍为 ${owner}，应为 10001:10001"
-}
+    chown 10001:10001 /backup 2>/dev/null || true
+    chmod 775 /backup
+  ' || fail "root 容器权限处理失败，请检查数据/frpc/备份目录挂载"
 
-fix_frp_permissions() {
-  log "处理 frpc 配置目录权限：${FRP_DIR}"
-  local ini="${FRP_DIR}/frpc.ini"
-  if ! chown 10001:1001 "${FRP_DIR}" 2>/dev/null; then
-    chown 10001:10001 "${FRP_DIR}" 2>/dev/null \
-      || fail "无法修改 frpc 目录属主，请用 sudo 执行 deploy-fnos.sh"
+  # 下载目录保留现有属主。以容器用户 10001 做真实写入、创建和删除测试；
+  # 不调用宿主机 trimacl/setfacl，因为飞牛宿主机可能没有这些工具，且现有 ACL 已生效。
+  if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
+    docker exec --user 10001:10001 "${CONTAINER}" sh -eu -c '
+      d=/vol1/1000/downloads
+      test -d "$d"
+      p="$d/.huluwa-write-check.$$"
+      (umask 077; : > "$p")
+      rm -f "$p"
+      mkdir -p "$d/.huluwa-work"
+      test -w "$d/.huluwa-work"
+    ' || fail "UID 10001 无法写入下载目录或 .huluwa-work，请检查飞牛 TrimACL/共享目录权限"
   fi
-  chmod 2775 "${FRP_DIR}" 2>/dev/null || chmod 775 "${FRP_DIR}"
-  if [ -f "${ini}" ]; then
-    chown 10001:1001 "${ini}" 2>/dev/null || chown 10001:10001 "${ini}" 2>/dev/null || true
-    chmod 664 "${ini}" 2>/dev/null || true
-  else
-    warn "未找到 ${ini}，Frp 管理页暂时无法读写配置；目录权限已准备好"
-  fi
-}
-
-fix_download_permissions() {
-  log "处理共享下载目录权限：${DOWNLOAD_DIR}"
-  bash scripts/hls-download-dir.sh prepare || fail "下载目录 TrimACL / POSIX ACL 授权失败"
 }
 
 ensure_base_images() {
@@ -360,18 +381,20 @@ stop_old_container() {
 backup_data() {
   [ "${BACKUP}" -eq 1 ] || { warn "--no-backup：跳过数据快照"; return 0; }
   log "创建一致性数据快照"
-  mkdir -p "${BACKUP_ROOT}"
-  SNAPSHOT_DIR="${BACKUP_ROOT}/${STARTED_AT}-data"
-  [ ! -e "${SNAPSHOT_DIR}" ] || fail "数据快照目录已存在，拒绝覆盖：${SNAPSHOT_DIR}"
-  if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
-    docker cp -a "${CONTAINER}:/app/data" "${SNAPSHOT_DIR}" \
-      || fail "无法从停止的旧容器导出 /app/data"
-  else
-    mkdir -p "${SNAPSHOT_DIR}"
-    cp -a "${DATA_DIR}/." "${SNAPSHOT_DIR}/" || fail "无法复制数据目录做快照"
-  fi
-  tar -C "${BACKUP_ROOT}" -czf "${SNAPSHOT_DIR}.tar.gz" "$(basename "${SNAPSHOT_DIR}")" 2>/dev/null || true
-  log "数据快照：${SNAPSHOT_DIR}"
+  SNAPSHOT_NAME="${STARTED_AT}-data"
+  # 备份目录可能只在 Docker 挂载视图中可见；在 root 辅助容器内完成打包。
+  run_root_helper "
+    set -eu
+    snapshot=/backup/${SNAPSHOT_NAME}
+    [ ! -e \"\$snapshot\" ] || { echo '快照目录已存在，拒绝覆盖' >&2; exit 1; }
+    mkdir -p \"\$snapshot\"
+    cp -a /app/data/. \"\$snapshot\"/
+    tar -C /backup -czf \"\$snapshot.tar.gz\" \"${SNAPSHOT_NAME}\"
+    chmod 644 \"\$snapshot.tar.gz\"
+    chmod -R u+rwX,g+rX,o+rX \"\$snapshot\"
+  " || fail "数据快照失败，未继续部署"
+  SNAPSHOT_DIR="${BACKUP_ROOT}/${SNAPSHOT_NAME}"
+  log "数据快照：${BACKUP_ROOT}/${SNAPSHOT_NAME}"
 }
 
 recreate_container() {
@@ -401,17 +424,18 @@ wait_health() {
 
 verify_mounts() {
   local spec
-  spec="$(docker inspect "${CONTAINER}" --format '{{range .Mounts}}{{println .Source "|" .Destination "|" .RW}}{{end}}')" \
+  # docker inspect 的输出可能带空格（Source | Destination | RW），统一去掉空格后匹配。
+  spec="$(docker inspect "${CONTAINER}" --format '{{range .Mounts}}{{println .Source "|" .Destination "|" .RW}}{{end}}' | tr -d ' ')" \
     || fail "无法读取新容器挂载"
-  printf '%s\n' "${spec}" | grep -Fq "${DATA_DIR}|/app/data|true" \
+  printf '%s\n' "${spec}" | grep -Fqx "${DATA_DIR}|/app/data|true" \
     || fail "数据目录挂载不正确：期望 ${DATA_DIR} -> /app/data 且可写"
-  printf '%s\n' "${spec}" | grep -Fq "${MEDIA_DIR}|/media|false" \
+  printf '%s\n' "${spec}" | grep -Fqx "${MEDIA_DIR}|/media|false" \
     || fail "旧媒体目录挂载不正确：期望 ${MEDIA_DIR} -> /media 且只读"
-  printf '%s\n' "${spec}" | grep -Fq "${DOWNLOAD_DIR}|${DOWNLOAD_DIR}|true" \
+  printf '%s\n' "${spec}" | grep -Fqx "${DOWNLOAD_DIR}|${DOWNLOAD_DIR}|true" \
     || fail "下载目录挂载不正确：期望 ${DOWNLOAD_DIR} 双向一致且可写"
-  printf '%s\n' "${spec}" | grep -Fq "${FRP_DIR}|/app/frp|true" \
+  printf '%s\n' "${spec}" | grep -Fqx "${FRP_DIR}|/app/frp|true" \
     || fail "frpc 目录挂载不正确：期望 ${FRP_DIR} -> /app/frp 且可写"
-  printf '%s\n' "${spec}" | grep -Fq "${SOCKET_PATH}|/var/run/docker.sock|true" \
+  printf '%s\n' "${spec}" | grep -Fqx "${SOCKET_PATH}|/var/run/docker.sock|true" \
     || fail "Docker socket 挂载不正确：期望 ${SOCKET_PATH} -> /var/run/docker.sock"
   log "容器挂载校验通过"
 }
@@ -461,14 +485,11 @@ main() {
   check_environment
   ensure_env
   prepare_directories
-  fix_data_permissions
-  fix_frp_permissions
-  fix_download_permissions
   prepare_compose_override
   verify_compose_config
 
   if [ "${MODE}" = "check" ]; then
-    log "预检完成：环境、目录、Compose 映射和权限配置正常（未构建、未重建、未拉取镜像）"
+    log "预检完成：环境、目录和 Compose 映射正常（未构建、未重建、未拉取镜像）"
     exit 0
   fi
 
@@ -486,7 +507,9 @@ main() {
     fi
     fail "镜像构建失败，旧容器未被替换；完整日志：${BUILD_LOG}"
   fi
-
+  ROOT_HELPER_IMAGE="${IMAGE}"
+  prepare_external_directories
+  fix_data_permissions
   stop_old_container
   backup_data
   if ! recreate_container; then
