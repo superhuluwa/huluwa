@@ -8,8 +8,12 @@
             <n-tab-pane name="magnet">
                 <template #tab>磁力下载</template>
             </n-tab-pane>
+            <n-tab-pane name="xunlei-win">
+                <template #tab>迅雷【Win】</template>
+            </n-tab-pane>
         </n-tabs>
         <HlsDownloadsPanel v-if="kind === 'hls'" />
+        <XunleiWinDownloadsPanel v-else-if="kind === 'xunlei-win'" />
         <div v-else class="downloads">
             <div class="downloads-head">
                 <h3>下载任务</h3>
@@ -65,6 +69,7 @@
 import { NButton, NDataTable, NSpin, NTabPane, NTabs } from 'naive-ui'
 import { useIsMobile } from '@/composables/useIsMobile'
 import HlsDownloadsPanel from './components/HlsDownloadsPanel.vue'
+import XunleiWinDownloadsPanel from './components/XunleiWinDownloadsPanel.vue'
 /**
  * 我的下载：订阅巡检 / 手动提交触发的下载任务清单。
  * 与「我的订阅」同级，订阅页只保留订阅维护，下载记录独立成页查看。
@@ -94,6 +99,7 @@ export default {
     name: 'MovieDownloads',
     components: {
         HlsDownloadsPanel,
+        XunleiWinDownloadsPanel,
         NTabs,
         NTabPane,
         NButton,

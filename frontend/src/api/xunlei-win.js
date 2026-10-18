@@ -15,3 +15,8 @@ export function SaveXunleiWinSettings(payload) {
 export function TestXunleiWinConnection(payload) {
     return http.post('/xunlei-win/test', payload || {}, { timeout: 30000 })
 }
+
+/** 迅雷【Win】下载记录；自动轮询时静默处理网络错误，由列表显示重试提示。 */
+export function GetXunleiWinDownloads(quiet = false) {
+    return http.get('/xunlei-win/downloads', {}, { silent: quiet })
+}

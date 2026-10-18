@@ -21,7 +21,7 @@ public class DatabaseInitializer implements ApplicationRunner {
     private static final String[] REQUIRED_TABLES = {
             "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
             "chat_session", "chat_message", "chat_request", "movie_search_watch",
-            "hls_subscription", "hls_download_task", "subscription_check_log"
+            "hls_subscription", "hls_download_task", "subscription_check_log", "xunlei_win_download_task"
     };
 
     private final JdbcTemplate jdbcTemplate;
@@ -42,6 +42,7 @@ public class DatabaseInitializer implements ApplicationRunner {
         }
         migrateMovieDownloadTasks();
         migrateDownloadHistory();
+        migrateXunleiWinDownloads();
         refreshMovieMagnetEpisodes();
         // 旧库的 HLS 订阅没有海报字段，补列后由订阅巡检按需回填。
         addColumnIfMissing("hls_subscription", "cover", "TEXT");
@@ -111,6 +112,61 @@ public class DatabaseInitializer implements ApplicationRunner {
         addColumnIfMissing("movie_download_task", "hidden_at", "TEXT");
         // 「我的下载」进度列：迅雷【Win】与 qBittorrent 跟踪时回填，历史行保持空
         addColumnIfMissing("movie_download_task", "progress", "INTEGER");
+    }
+
+    /** 补入升级前已保存的订阅任务及会话流水号，重复启动不覆盖已同步的状态。 */
+    private void migrateXunleiWinDownloads() {
+        var urls = jdbcTemplate.queryForList("SELECT cfg_value FROM sys_config WHERE cfg_key = 'xlwin.url'", String.class);
+        String apiUrl = urls.isEmpty() ? "" : urls.getFirst().trim();
+        if (apiUrl.isBlank()) {
+            return;
+        }
+        jdbcTemplate.update("""
+                INSERT OR IGNORE INTO xunlei_win_download_task
+                    (api_url, serial, name, magnet, save_path, status, progress, message,
+                     created_at, updated_at, completed_at)
+                SELECT ?, external_task_id,
+                       series_title || CASE WHEN episode IS NULL OR episode = '' THEN '' ELSE ' 第 ' || episode || ' 集' END,
+                       magnet, save_path,
+                       CASE status WHEN 'completed' THEN 'success' WHEN 'failed' THEN 'failed'
+                                   WHEN 'downloading' THEN 'downloading' ELSE 'pending' END,
+                       progress, message, created_at, updated_at, completed_at
+                  FROM movie_download_task
+                 WHERE downloader = 'xunlei-win' AND external_task_id IS NOT NULL AND external_task_id <> ''
+                """, apiUrl);
+        var serialPattern = java.util.regex.Pattern.compile("（流水号 ([^）\\r\\n]+)）");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (var row : jdbcTemplate.queryForList("""
+                SELECT content, payload, created_at FROM chat_message
+                 WHERE session_id = 'xunlei-win' AND role = 'bot'
+                   AND content LIKE '✅ 已提交迅雷【Win】下载任务（流水号 %'
+                 ORDER BY id
+                """)) {
+            var matcher = serialPattern.matcher(String.valueOf(row.get("content")));
+            if (!matcher.find()) {
+                continue;
+            }
+            String serial = matcher.group(1).trim();
+            if (serial.isBlank()) {
+                continue;
+            }
+            String url = apiUrl;
+            String savePath = "";
+            try {
+                var settings = json.readTree(String.valueOf(row.get("payload"))).path("settings");
+                if (!settings.path("url").asText("").isBlank()) {
+                    url = settings.path("url").asText();
+                }
+                savePath = settings.path("savePath").asText("");
+            } catch (Exception ignored) {
+                // 旧消息没有结构化配置时使用已保存的服务地址。
+            }
+            jdbcTemplate.update("""
+                    INSERT OR IGNORE INTO xunlei_win_download_task
+                        (api_url, serial, name, save_path, status, message, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'pending', '等待查询迅雷下载状态', ?, ?)
+                    """, url, serial, "迅雷任务 " + serial, savePath, row.get("created_at"), row.get("created_at"));
+        }
     }
 
     private void addColumnIfMissing(String table, String column, String definition) {

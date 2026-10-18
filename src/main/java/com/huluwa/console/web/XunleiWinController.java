@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -23,6 +24,12 @@ public class XunleiWinController {
 
     public XunleiWinController(XunleiWinService xunleiWinService) {
         this.xunleiWinService = xunleiWinService;
+    }
+
+    /** 迅雷【Win】独立下载记录，状态由后台按流水号查询远端 API。 */
+    @GetMapping("/downloads")
+    public ApiResult<List<Map<String, Object>>> downloads() {
+        return ApiResult.ok(xunleiWinService.downloads());
     }
 
     /** 当前配置 */

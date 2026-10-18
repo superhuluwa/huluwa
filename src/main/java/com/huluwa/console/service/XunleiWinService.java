@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,7 +21,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 迅雷 Windows 客户端下载对接（对应 Windows 机器上的 xunlei-win-api 服务）。
@@ -48,14 +55,16 @@ public class XunleiWinService {
     private static final Duration QUERY_TIMEOUT = Duration.ofSeconds(20);
 
     private final ConfigService configService;
+    private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(CONNECT_TIMEOUT)
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
-    public XunleiWinService(ConfigService configService) {
+    public XunleiWinService(ConfigService configService, JdbcTemplate jdbcTemplate) {
         this.configService = configService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     /** 连接配置：服务地址 + Windows 保存根目录 */
@@ -75,6 +84,10 @@ public class XunleiWinService {
     }
 
     private record Response(int status, String body) {
+    }
+
+    private record RemoteTask(String status, String message, Double progress, Long receivedBytes,
+                              Long totalBytes, String name, String savePath) {
     }
 
     // ------------------------------------------------------------------ 配置读写
@@ -212,6 +225,7 @@ public class XunleiWinService {
         }
         log.info("迅雷【Win】任务已受理（磁力 {}…，流水号 {}）",
                 magnet.substring(0, Math.min(24, magnet.length())), serial.isBlank() ? "未返回" : serial);
+        rememberSubmission(url, serial, magnet, savePath);
         return new TaskResult(true, "已提交迅雷【Win】下载", null, 0, 0, serial.isBlank() ? null : serial);
     }
 
@@ -227,9 +241,122 @@ public class XunleiWinService {
         if (!settings.configured() || serial == null || serial.isBlank()) {
             return null;
         }
+        RemoteTask task = queryTask(settings.url(), serial);
+        if (task == null) {
+            return null;
+        }
+        String phase = switch (task.status()) {
+            case "success" -> "PHASE_TYPE_COMPLETE";
+            case "failed" -> "PHASE_TYPE_ERROR";
+            case "downloading" -> "PHASE_TYPE_RUNNING";
+            case "pending", "creating", "created" -> "PHASE_TYPE_PENDING";
+            default -> "";
+        };
+        return new TaskStatus(phase, task.message(), task.progress() == null ? 0 : task.progress());
+    }
+
+    /** 独立标签页的记录快照，网络查询在后台进行，避免列表被慢服务阻塞。 */
+    public List<Map<String, Object>> downloads() {
+        return jdbcTemplate.queryForList("""
+                SELECT id, serial, name, magnet, save_path AS savePath, status, progress,
+                       received_bytes AS receivedBytes, total_bytes AS totalBytes,
+                       message, query_error AS queryError, created_at AS createdAt,
+                       updated_at AS updatedAt, checked_at AS checkedAt, completed_at AS completedAt
+                  FROM xunlei_win_download_task ORDER BY id DESC LIMIT 500
+                """);
+    }
+
+    /** 所有入口提交成功后统一落库；同一服务的同一流水号只保留一条记录。 */
+    private void rememberSubmission(String apiUrl, String serial, String magnet, String savePath) {
+        String name = magnetName(magnet);
+        var movies = jdbcTemplate.queryForList("""
+                SELECT series_title, episode FROM movie_download_task
+                 WHERE downloader = 'xunlei-win' AND magnet = ? LIMIT 1
+                """, magnet);
+        if (!movies.isEmpty()) {
+            var movie = movies.getFirst();
+            name = String.valueOf(movie.get("series_title"));
+            if (movie.get("episode") != null && !movie.get("episode").toString().isBlank()) {
+                name += " 第 " + movie.get("episode") + " 集";
+            }
+        }
+        boolean trackable = serial != null && !serial.isBlank();
+        String stamp = HlsSupport.now();
+        jdbcTemplate.update("""
+                INSERT INTO xunlei_win_download_task
+                    (api_url, serial, name, magnet, save_path, status, message, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(api_url, serial) DO UPDATE SET
+                    name = excluded.name, magnet = excluded.magnet,
+                    save_path = COALESCE(NULLIF(excluded.save_path, ''), xunlei_win_download_task.save_path)
+                """, apiUrl, trackable ? serial : null, name, magnet, savePath,
+                trackable ? "pending" : "untracked",
+                trackable ? "已提交，等待迅雷开始下载" : "已提交，但迅雷服务未返回流水号，无法查询进度",
+                stamp, stamp);
+    }
+
+    /** 每轮最多并发查询 20 条，优先查询最久未更新的记录，完成和失败的历史状态保留。 */
+    @Scheduled(initialDelay = 20_000L, fixedDelay = 5_000L)
+    public void refreshDownloadRecords() {
+        var rows = jdbcTemplate.queryForList("""
+                SELECT id, api_url, serial FROM xunlei_win_download_task
+                 WHERE serial IS NOT NULL AND status NOT IN ('success', 'failed', 'untracked')
+                 ORDER BY checked_at, id LIMIT 20
+                """);
+        if (rows.isEmpty()) {
+            return;
+        }
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = new ArrayList<>();
+            for (var row : rows) {
+                futures.add(workers.submit(() -> refreshDownloadRecord(row)));
+            }
+            for (var future : futures) {
+                try {
+                    future.get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (ExecutionException e) {
+                    log.warn("迅雷【Win】下载记录更新失败", e.getCause());
+                }
+            }
+        }
+    }
+
+    private void refreshDownloadRecord(Map<String, Object> row) {
+        RemoteTask task;
+        try {
+            task = queryTask(String.valueOf(row.get("api_url")), String.valueOf(row.get("serial")));
+            if (task == null) {
+                throw new BusinessException(400, "迅雷服务暂未找到该任务，将继续查询");
+            }
+        } catch (Exception e) {
+            jdbcTemplate.update("""
+                    UPDATE xunlei_win_download_task SET query_error = ?, checked_at = ? WHERE id = ?
+                    """, safeMessage(e), HlsSupport.now(), row.get("id"));
+            return;
+        }
+        String stamp = HlsSupport.now();
+        jdbcTemplate.update("""
+                UPDATE xunlei_win_download_task
+                   SET status = ?, message = ?, progress = COALESCE(?, progress),
+                       received_bytes = COALESCE(?, received_bytes), total_bytes = COALESCE(?, total_bytes),
+                       name = COALESCE(NULLIF(?, ''), name), save_path = COALESCE(NULLIF(?, ''), save_path),
+                       query_error = NULL, checked_at = ?, updated_at = ?,
+                       completed_at = CASE WHEN ? = 'success' THEN COALESCE(completed_at, ?) ELSE completed_at END
+                 WHERE id = ?
+                """, task.status(), task.message(), task.progress(), task.receivedBytes(), task.totalBytes(),
+                task.name(), task.savePath(), stamp, stamp, task.status(), stamp, row.get("id"));
+    }
+
+    private RemoteTask queryTask(String apiUrl, String serial) {
         Response response;
         try {
-            response = send(settings.url(), "/api/tasks/" + encode(serial), null, QUERY_TIMEOUT);
+            response = send(apiUrl, "/api/tasks/" + encode(serial), null, QUERY_TIMEOUT);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(400, "查询迅雷【Win】任务已中断");
         } catch (Exception e) {
             throw new BusinessException(400, "查询迅雷【Win】任务失败：" + safeMessage(e));
         }
@@ -243,27 +370,58 @@ public class XunleiWinService {
         JsonNode root;
         try {
             root = objectMapper.readTree(response.body());
+            if (root == null || !root.isObject() || root.path("status").asText("").isBlank()) {
+                throw new IllegalArgumentException();
+            }
         } catch (Exception e) {
             throw new BusinessException(400, "迅雷【Win】任务状态响应无法解析");
         }
-        String status = root.path("status").asText("");
-        double progress = root.path("progress").asDouble(0);
-        String phase = switch (status) {
-            case "success" -> "PHASE_TYPE_COMPLETE";
-            case "failed" -> "PHASE_TYPE_ERROR";
-            case "downloading" -> "PHASE_TYPE_RUNNING";
-            case "pending", "creating", "created" -> "PHASE_TYPE_PENDING";
-            default -> "";
-        };
+        String status = root.path("status").asText();
+        Long received = root.path("receivedBytes").isNumber() ? Math.max(0, root.path("receivedBytes").asLong()) : null;
+        Long total = root.path("totalBytes").isNumber() ? Math.max(0, root.path("totalBytes").asLong()) : null;
+        Double progress = root.path("progress").isNumber() ? root.path("progress").asDouble() : null;
+        if (progress == null && received != null && total != null && total > 0) {
+            progress = received * 100.0 / total;
+        }
+        if (progress != null) {
+            progress = Double.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : null;
+        }
+        if ("success".equals(status)) {
+            progress = 100.0;
+        }
         String message = switch (status) {
             case "success" -> "下载完成";
             case "failed" -> blankToNull(root.path("error").asText("")) == null
-                    ? "下载失败" : root.path("error").asText("");
-            case "downloading" -> "下载中 " + String.format("%.1f", progress) + "%";
-            case "pending", "creating", "created" -> "等待迅雷开始下载";
+                    ? "下载失败" : root.path("error").asText();
+            case "downloading" -> progress == null ? "下载中" : "下载中 " + String.format(Locale.ROOT, "%.1f", progress) + "%";
+            case "pending" -> "等待创建任务";
+            case "creating" -> "正在创建迅雷任务";
+            case "created" -> "等待迅雷开始下载";
             default -> status;
         };
-        return new TaskStatus(phase, message, progress);
+        return new RemoteTask(status, message, progress, received, total,
+                root.path("name").asText(null), root.path("savePath").asText(null));
+    }
+
+    private static String magnetName(String magnet) {
+        for (String part : magnet.split("[?&]")) {
+            if (part.startsWith("dn=")) {
+                try {
+                    String name = URLDecoder.decode(part.substring(3), StandardCharsets.UTF_8).trim();
+                    if (!name.isEmpty()) {
+                        return name;
+                    }
+                } catch (IllegalArgumentException ignored) {
+                    // 错误的名称编码不影响任务本身的提交与查询。
+                }
+            }
+        }
+        for (String part : magnet.split("[?&]")) {
+            if (part.startsWith("xt=urn:btih:")) {
+                return "磁力任务 " + part.substring("xt=urn:btih:".length());
+            }
+        }
+        return "迅雷下载任务";
     }
 
     // ------------------------------------------------------------------ 工具

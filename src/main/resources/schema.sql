@@ -322,3 +322,28 @@ VALUES (6, datetime('now', 'localtime'));
 -- 保持取消状态，只有用户显式「重试 / 重新下载」才会重新入队。
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (7, datetime('now', 'localtime'));
+
+
+-- v8：迅雷【Win】独立下载记录，所有提交入口按服务地址 + 流水号统一跟踪。
+CREATE TABLE IF NOT EXISTS xunlei_win_download_task (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_url         TEXT NOT NULL,
+    serial          TEXT,                         -- 缺流水号时仍记录提交结果，无法查询进度
+    name            TEXT NOT NULL,
+    magnet          TEXT,
+    save_path       TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending', -- pending|creating|created|downloading|success|failed|untracked
+    progress        REAL,
+    received_bytes  INTEGER,
+    total_bytes     INTEGER,
+    message         TEXT,
+    query_error     TEXT,                         -- 查询错误与下载失败分开保存，保留上次进度
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    checked_at      TEXT,
+    completed_at    TEXT,
+    UNIQUE(api_url, serial)
+);
+CREATE INDEX IF NOT EXISTS idx_xunlei_win_task_status ON xunlei_win_download_task (status, checked_at, id);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (8, datetime('now', 'localtime'));

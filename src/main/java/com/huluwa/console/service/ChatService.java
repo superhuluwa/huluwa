@@ -931,7 +931,7 @@ public class ChatService {
             if (result.ok()) {
                 String headline = "✅ 已提交迅雷【Win】下载任务"
                         + (string(result.taskId()) == null ? "" : "（流水号 " + result.taskId() + "）")
-                        + "\n下载进度在「我的下载 → 磁力下载」查看。";
+                        + "\n下载进度在「我的下载 → 迅雷【Win】」查看。";
                 replies.add(xunleiWinText(sessionId, headline, xunleiWinMeta(true)));
             } else {
                 replies.add(xunleiWinText(sessionId, "⚠️ 提交失败：" + result.message(), xunleiWinMeta(true)));
@@ -987,7 +987,7 @@ public class ChatService {
                 1. 一条消息可放多个磁力链接（空格或换行分隔），逐条在 Windows 迅雷创建下载任务；
                 2. 输入「状态」查看当前配置与 xunlei-win-api 在线状态；
                 3. 输入「路径 D:\\迅雷下载」设置保存根目录，「路径」单独发送则清空（用迅雷默认目录）；
-                4. 电影港订阅 / 资源列表下载时也可选择「迅雷【Win】」工具，进度在「我的下载」查看。""";
+                4. 电影港订阅 / 资源列表下载时也可选择「迅雷【Win】」工具，进度在「我的下载 → 迅雷【Win】」查看。""";
     }
 
     /** 迅雷【Win】会话消息的结构化载荷（前端据此渲染闪电头像与配置入口） */
