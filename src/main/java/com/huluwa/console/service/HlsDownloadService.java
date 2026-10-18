@@ -430,9 +430,10 @@ public class HlsDownloadService implements ApplicationRunner {
                 ensureNotCancelled(id);
                 throw new IOException("任务状态已变化");
             }
+            String format = settings.format();
             List<Path> results;
             try (var files = Files.list(output)) {
-                results = files.filter(file -> file.getFileName().toString().endsWith("." + settings.format()))
+                results = files.filter(file -> file.getFileName().toString().endsWith("." + format))
                         .filter(file -> Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)).toList();
             }
             if (results.size() != 1) throw new IOException("下载未产生唯一的最终媒体文件，请查看任务日志");
@@ -440,7 +441,7 @@ public class HlsDownloadService implements ApplicationRunner {
             ensureNotCancelled(id);
             verify(media);
             ensureNotCancelled(id);
-            Path target = archive.resolve(name + "." + settings.format());
+            Path target = archive.resolve(name + "." + format);
             // 同一个媒体挂载内发布；硬链接原子创建且拒绝覆盖同名文件。
             Files.createLink(target, media);
             Files.delete(media);
