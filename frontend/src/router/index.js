@@ -51,6 +51,13 @@ const routes = [
                 meta: { title: '我的下载', icon: 'fa-solid fa-download', hideInMenu: true },
                 component: createRouteLoader(() => import('@/views/movie/downloads.vue'))
             },
+            // 本地剧集：扫描共享下载目录，按集查看并批量删除已下载文件
+            {
+                path: 'library',
+                name: 'movie-library',
+                meta: { title: '剧集管理', icon: 'fa-solid fa-hard-drive', hideInMenu: true },
+                component: createRouteLoader(() => import('@/views/movie/library.vue'))
+            },
             // 巡检记录：订阅数据的巡检历史（电影港 + 电影天堂），与「我的订阅」「我的下载」平级
             {
                 path: 'check-logs',

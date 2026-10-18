@@ -213,7 +213,7 @@ export default {
         /** 属于「消息中心」分组的页面：会话 / 我的订阅 / 我的下载 / 巡检记录 */
         isMessagesGroup(name) {
             return name === 'messages' || name === 'movie-subscriptions'
-                || name === 'movie-downloads' || name === 'movie-check-logs'
+                || name === 'movie-downloads' || name === 'movie-library' || name === 'movie-check-logs'
         },
         /** 确保「消息中心」分组处于展开态（会话页内部切换会话时不被收起） */
         ensureMessagesExpanded() {
@@ -295,6 +295,12 @@ export default {
                         key: 'movie-downloads',
                         label: () => h('a', this.menuLinkProps('movie-downloads'), '我的下载'),
                         icon: renderIcon('fa-solid fa-download')
+                    },
+                    // 本地剧集：扫描共享下载目录并支持批量删除，与「我的下载」平级
+                    {
+                        key: 'movie-library',
+                        label: () => h('a', this.menuLinkProps('movie-library'), '剧集管理'),
+                        icon: renderIcon('fa-solid fa-hard-drive')
                     },
                     // 巡检记录：订阅数据的巡检历史，与「我的订阅」「我的下载」平级
                     {
