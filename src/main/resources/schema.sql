@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS hls_download_task (
     source_name TEXT,
     url TEXT NOT NULL,
     headers TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending', -- pending|downloading|verifying|completed|failed|skipped
+    status TEXT NOT NULL DEFAULT 'pending', -- pending|downloading|verifying|completed|failed|skipped|cancelled
     attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT,
     save_path TEXT,
@@ -317,3 +317,8 @@ CREATE INDEX IF NOT EXISTS idx_check_log_source ON subscription_check_log (sourc
 
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (6, datetime('now', 'localtime'));
+
+-- v7：离线下载任务支持取消；status 增加 cancelled 终态。取消后的剧集在订阅巡检中
+-- 保持取消状态，只有用户显式「重试 / 重新下载」才会重新入队。
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (7, datetime('now', 'localtime'));

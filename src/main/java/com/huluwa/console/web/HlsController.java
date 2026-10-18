@@ -73,6 +73,9 @@ public class HlsController {
     }
     @PostMapping("/downloads/{id}/retry")
     public ApiResult<Map<String, Object>> retry(@PathVariable long id) { return ApiResult.ok(downloads.retry(id)); }
+    /** 取消等待中或进行中的任务；已下载的归档文件不受影响。 */
+    @PostMapping("/downloads/{id}/cancel")
+    public ApiResult<Map<String, Object>> cancel(@PathVariable long id) { return ApiResult.ok(downloads.cancel(id)); }
     @GetMapping("/downloads/{id}/log")
     public ApiResult<Map<String, String>> log(@PathVariable long id) { return ApiResult.ok(downloads.log(id)); }
 }

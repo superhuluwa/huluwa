@@ -53,6 +53,8 @@ public class HlsDownloadService implements ApplicationRunner {
     private volatile boolean ready;
     private volatile boolean stopping;
     private volatile Process activeProcess;
+    private volatile long activeTaskId;
+    private volatile boolean activeCancelled;
     private record ActiveProgress(long taskId, HlsDownloadProgress progress) { }
     private volatile ActiveProgress activeProgress;
 
@@ -223,7 +225,7 @@ public class HlsDownloadService implements ApplicationRunner {
                     series_title = ?, year = ?, episode_title = ?,
                     hidden_at = CASE WHEN status = 'failed' THEN NULL ELSE hidden_at END, updated_at = ?
                  WHERE series_key = ? AND season = ? AND episode = ?
-                   AND status NOT IN ('downloading', 'verifying', 'completed')
+                   AND status NOT IN ('downloading', 'verifying', 'completed', 'cancelled')
                 """, subscription, api, resId, url, sourceName, headers, title, year, episodeTitle, now, key, season, episode);
         if (subscription != null) db.update("""
                 UPDATE hls_download_task SET subscription_id = ?
@@ -237,28 +239,58 @@ public class HlsDownloadService implements ApplicationRunner {
      * 手动提交某一集时让此前的记录重新排队：用户这次是明确要下载。
      * 已完成的一集也重新入队——download() 会先核对已归档文件，文件仍在就直接确认完成，
      * 只有文件被删除时才真正重新下载；同时重置尝试次数，给失败过的历史行新的重试机会。
-     * 解除 hidden_at，让被「清空下载记录」隐藏过的行重新出现在列表里。
+     * 解除 hidden_at，让被「清空下载记录」隐藏过的行重新出现在列表里。订阅巡检不会自动
+     * 复活已取消任务；但用户再次点击单集下载属于明确意图，会在这里重新入队。
      */
     private synchronized void reactivate(long id, String url, String sourceName, String headers, String episodeTitle) {
         db.update("""
                 UPDATE hls_download_task SET status = 'pending', attempts = 0, next_attempt_at = NULL,
                        message = NULL, hidden_at = NULL, url = ?, source_name = ?, headers = ?,
                        episode_title = ?, updated_at = ?
-                 WHERE id = ? AND status IN ('skipped', 'failed', 'completed')
+                 WHERE id = ? AND status IN ('skipped', 'failed', 'completed', 'cancelled')
                 """, m3u8(url), sourceName, headers, episodeTitle, HlsSupport.now(), id);
     }
 
     public synchronized Map<String, Object> retry(long id) {
         requireEnvironment();
         Map<String, Object> task = task(id);
-        if (!List.of("failed", "skipped").contains(HlsSupport.text(task.get("status")))) {
-            throw new BusinessException(400, "只有失败或跳过的任务可以重新下载");
+        if (!List.of("failed", "skipped", "cancelled").contains(HlsSupport.text(task.get("status")))) {
+            throw new BusinessException(400, "只有失败、跳过或已取消的任务可以重新下载");
         }
-        db.update("""
+        int updated = db.update("""
                 UPDATE hls_download_task SET status = 'pending', attempts = 0, next_attempt_at = NULL,
-                       message = NULL, hidden_at = NULL, updated_at = ? WHERE id = ? AND status IN ('failed', 'skipped')
+                       message = NULL, hidden_at = NULL, updated_at = ?
+                 WHERE id = ? AND status IN ('failed', 'skipped', 'cancelled')
                 """, HlsSupport.now(), id);
+        if (updated == 0) throw new BusinessException(400, "任务状态已变化，请刷新后重试");
         kick(); return publicTask(id);
+    }
+
+    /**
+     * 取消等待中或正在执行的任务。状态先落库，再终止当前下载工具；这样即使进程在
+     * 取消与退出之间结束，下载线程也不会把任务重新改成 pending 或 completed。
+     */
+    public synchronized Map<String, Object> cancel(long id) {
+        Map<String, Object> task = task(id);
+        String status = HlsSupport.text(task.get("status"));
+        if (!List.of("pending", "downloading", "verifying").contains(status)) {
+            throw new BusinessException(400, "只有等待中或进行中的任务可以取消");
+        }
+        int updated = db.update("""
+                UPDATE hls_download_task SET status = 'cancelled', next_attempt_at = NULL,
+                       message = '任务已取消', updated_at = ?
+                 WHERE id = ? AND status IN ('pending', 'downloading', 'verifying')
+                """, HlsSupport.now(), id);
+        if (updated == 0) throw new BusinessException(400, "任务状态已变化，请刷新后重试");
+        boolean running = activeTaskId == id;
+        if (running) {
+            activeCancelled = true;
+            terminate(activeProcess);
+        }
+        // 分片和半成品可立即回收；download.log 仍保留给「日志」查看。
+        // 当前尝试可能仍由下载线程持有，等它退出后再清理，避免与正在写入的文件竞争。
+        if (!running) cleanup(workspaceOf(id));
+        return publicTask(id);
     }
 
     /**
@@ -278,6 +310,7 @@ public class HlsDownloadService implements ApplicationRunner {
                 case "downloading", "verifying" -> "该剧集正在下载中，无需重复提交";
                 case "completed" -> "该剧集已下载完成，归档文件仍在";
                 case "pending" -> "该剧集已在下载队列中";
+                case "cancelled" -> "该任务已取消，可重新下载";
                 default -> "该剧集已有下载记录";
             });
         }
@@ -332,6 +365,8 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     private void download(long id) {
+        activeTaskId = id;
+        activeCancelled = false;
         Map<String, Object> task = task(id);
         String title = HlsSupport.text(task.get("series_title"));
         int season = (int) HlsSupport.number(task.get("season"));
@@ -339,19 +374,29 @@ public class HlsDownloadService implements ApplicationRunner {
         String name = HlsSupport.filename(title, season, episode);
         ActiveProgress progress = new ActiveProgress(id, new HlsDownloadProgress());
         activeProgress = progress;
+        Settings settings = null;
         try {
+            ensureNotCancelled(id);
             requireEnvironment();
-            Settings settings = settings();
+            settings = settings();
             Path archive = directory(root().resolve(HlsSupport.safeName(title)));
             // 两种封装都查一遍，避免修改默认格式后重复下载已完成的文件。
             Path previous = task.get("save_path") == null ? null : Path.of(task.get("save_path").toString());
             if (previous != null && Files.exists(previous) && managedPath(previous, null)) {
-                verify(previous); complete(id, previous, name); return;
+                ensureNotCancelled(id);
+                verify(previous);
+                ensureNotCancelled(id);
+                complete(id, previous, name);
+                return;
             }
             for (String extension : List.of("mp4", "mkv")) {
                 Path existing = archive.resolve(name + "." + extension);
                 if (Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
-                    verify(existing); complete(id, existing, name); return;
+                    ensureNotCancelled(id);
+                    verify(existing);
+                    ensureNotCancelled(id);
+                    complete(id, existing, name);
+                    return;
                 }
             }
             Path workspace = directory(root().resolve(".huluwa-work").resolve(Long.toString(id)));
@@ -362,19 +407,29 @@ public class HlsDownloadService implements ApplicationRunner {
             Path taskLog = attempt.resolve("download.log");
             db.update("UPDATE hls_download_task SET log_path = ?, updated_at = ? WHERE id = ?", taskLog.toString(), HlsSupport.now(), id);
             String url = freshUrl(task);
-            List<String> command = new ArrayList<>(List.of(paths.getBinary(), url,
+            ensureNotCancelled(id);
+            String binary = paths.getBinary();
+            String ffmpeg = paths.getFfmpeg();
+            List<String> command = new ArrayList<>(List.of(binary, url,
                     "--save-name", name, "--save-dir", output.toString(), "--tmp-dir", segments.toString(),
                     "--auto-select", "--thread-count", Integer.toString(settings.threadCount()),
                     "--download-retry-count", "3", "--http-request-timeout", "60", "--check-segments-count", "true",
                     "--mux-after-done", "format=" + settings.format() + ":muxer=ffmpeg",
-                    "--ffmpeg-binary-path", paths.getFfmpeg(), "--no-log", "--write-meta-json", "false",
+                    "--ffmpeg-binary-path", ffmpeg, "--no-log", "--write-meta-json", "false",
                     "--no-ansi-color", "--disable-update-check", "--ui-language", "zh-CN"));
             Map<String, String> headers = HlsSupport.headerMap(HlsSupport.text(task.get("headers")));
             headers.forEach((key, value) -> { command.add("--header"); command.add(key + ": " + value); });
             if (!settings.maxSpeed().isBlank()) { command.add("--max-speed"); command.add(settings.maxSpeed()); }
             execute(command, attempt, taskLog, settings.timeoutMinutes(), headers, progress.progress());
+            ensureNotCancelled(id);
             if (stopping) throw new InterruptedException();
-            db.update("UPDATE hls_download_task SET status = 'verifying', updated_at = ? WHERE id = ?", HlsSupport.now(), id);
+            if (db.update("""
+                    UPDATE hls_download_task SET status = 'verifying', updated_at = ?
+                     WHERE id = ? AND status = 'downloading'
+                    """, HlsSupport.now(), id) == 0) {
+                ensureNotCancelled(id);
+                throw new IOException("任务状态已变化");
+            }
             List<Path> results;
             try (var files = Files.list(output)) {
                 results = files.filter(file -> file.getFileName().toString().endsWith("." + settings.format()))
@@ -382,32 +437,60 @@ public class HlsDownloadService implements ApplicationRunner {
             }
             if (results.size() != 1) throw new IOException("下载未产生唯一的最终媒体文件，请查看任务日志");
             Path media = results.getFirst();
+            ensureNotCancelled(id);
             verify(media);
+            ensureNotCancelled(id);
             Path target = archive.resolve(name + "." + settings.format());
             // 同一个媒体挂载内发布；硬链接原子创建且拒绝覆盖同名文件。
             Files.createLink(target, media);
             Files.delete(media);
             complete(id, target, name);
         } catch (Exception e) {
+            if (isCancelled(id)) {
+                // 取消接口已把状态落为 cancelled；等当前进程完全退出后再回收临时文件。
+                cleanup(workspaceOf(id));
+                return;
+            }
             if (stopping || e instanceof InterruptedException) {
-                db.update("UPDATE hls_download_task SET status = 'pending', message = '等待应用重启后继续', updated_at = ? WHERE id = ?",
-                        HlsSupport.now(), id);
-                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+                // 这里不能把已取消的行改回 pending；若取消先落库，只回收临时文件。
+                int interrupted = db.update("""
+                        UPDATE hls_download_task SET status = 'pending', message = '等待应用重启后继续', updated_at = ?
+                         WHERE id = ? AND status IN ('downloading', 'verifying')
+                        """, HlsSupport.now(), id);
+                if (interrupted == 0) cleanup(workspaceOf(id));
+                if (stopping && e instanceof InterruptedException) Thread.currentThread().interrupt();
                 return;
             }
             int attempts = (int) HlsSupport.number(task.get("attempts"));
-            boolean failed = attempts >= settings().maxAttempts();
+            int maxAttempts = settings == null ? config.getInt("hls.attempts", 3) : settings.maxAttempts();
+            boolean failed = attempts >= maxAttempts;
             String message = HlsSupport.error(e);
-            db.update("""
-                    UPDATE hls_download_task SET status = ?, message = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?
+            int changed = db.update("""
+                    UPDATE hls_download_task SET status = ?, message = ?, next_attempt_at = ?, updated_at = ?
+                     WHERE id = ? AND status IN ('downloading', 'verifying')
                     """, failed ? "failed" : "pending", message,
-                    failed ? null : HlsSupport.afterMinutes(Math.min(60, 5L << Math.min(attempts - 1, 4))), HlsSupport.now(), id);
-            if (failed) notices.publish("剧集下载失败", name + "：" + message, true);
+                    failed ? null : HlsSupport.afterMinutes(Math.min(60, 5L << Math.min(attempts - 1, 4))),
+                    HlsSupport.now(), id);
+            if (changed > 0 && failed) notices.publish("剧集下载失败", name + "：" + message, true);
             // 失败/待重试时清掉本次尝试的工作副本，避免分片与残片越积越多（日志保留）。
+            // cancelled 行也回收半成品；取消状态不会被这里覆盖。
             cleanup(workspaceOf(id));
         } finally {
+            if (activeTaskId == id) {
+                activeTaskId = 0;
+                activeCancelled = false;
+            }
             activeProgress = null;
         }
+    }
+
+    /** 取消或停机时会打断正在运行的下载工具；在关键节点再核对状态，避免竞态下继续提交。 */
+    private void ensureNotCancelled(long id) throws InterruptedException {
+        if (activeCancelled || isCancelled(id)) throw new InterruptedException();
+    }
+
+    private boolean isCancelled(long id) {
+        return "cancelled".equals(HlsSupport.text(task(id).get("status")));
     }
 
     private String freshUrl(Map<String, Object> task) {
@@ -499,9 +582,20 @@ public class HlsDownloadService implements ApplicationRunner {
 
     private void execute(List<String> command, Path directory, Path taskLog, int timeout, Map<String, String> secrets,
                          HlsDownloadProgress progress) throws Exception {
+        if (activeCancelled) throw new InterruptedException();
+        // 取消可能发生在进程启动之前或赋值之前；两步都复核，避免漏掉刚启动的进程。
         Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+        if (activeCancelled) {
+            terminate(process);
+            throw new InterruptedException();
+        }
         activeProcess = process;
+        if (activeCancelled) {
+            terminate(process);
+            throw new InterruptedException();
+        }
         process.getOutputStream().close();
+        long startedAt = System.nanoTime();
         Thread reader = Thread.ofVirtual().start(() -> {
             try (var input = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 java.io.BufferedWriter output = null;
@@ -527,27 +621,48 @@ public class HlsDownloadService implements ApplicationRunner {
             } catch (IOException e) { log.warn("HLS 任务日志读取失败：{}", HlsSupport.error(e)); }
         });
         try {
-            if (!process.waitFor(timeout, TimeUnit.MINUTES)) throw new IOException("下载任务超时");
+            while (!process.waitFor(1, TimeUnit.SECONDS)) {
+                if (activeCancelled) throw new InterruptedException();
+                if (System.nanoTime() - startedAt >= TimeUnit.MINUTES.toNanos(timeout)) throw new IOException("下载任务超时");
+            }
+            if (activeCancelled) throw new InterruptedException();
             if (process.exitValue() != 0) throw new IOException("下载工具退出码 " + process.exitValue() + "，请查看任务日志");
         } finally {
-            terminate(process); reader.join(5000); activeProcess = null;
+            terminate(process);
+            reader.join(5000);
+            activeProcess = null;
         }
     }
 
     private void verify(Path file) throws Exception {
+        if (activeCancelled) throw new InterruptedException();
         if (!managedPath(file, null)
                 || !Files.isRegularFile(file) || Files.size(file) < 1024) throw new IOException("媒体文件不存在、过小或路径无效");
         Process probe = new ProcessBuilder(paths.getFfprobe(), "-v", "error", "-show_entries",
                 "format=duration:stream=codec_type", "-of", "json", file.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        if (activeCancelled) {
+            terminate(probe);
+            throw new InterruptedException();
+        }
         activeProcess = probe;
+        if (activeCancelled) {
+            terminate(probe);
+            throw new InterruptedException();
+        }
         // 只读取选定字段，避免完整媒体信息填满进程管道。
         var result = new java.util.concurrent.atomic.AtomicReference<String>("");
+        long startedAt = System.nanoTime();
         Thread reader = Thread.ofVirtual().start(() -> {
             try { result.set(new String(probe.getInputStream().readNBytes(1_000_000), StandardCharsets.UTF_8)); }
             catch (IOException ignored) { }
         });
         try {
-            if (!probe.waitFor(60, TimeUnit.SECONDS) || probe.exitValue() != 0) throw new IOException("ffprobe 无法读取媒体文件");
+            while (!probe.waitFor(1, TimeUnit.SECONDS)) {
+                if (activeCancelled) throw new InterruptedException();
+                if (System.nanoTime() - startedAt >= TimeUnit.SECONDS.toNanos(60)) throw new IOException("ffprobe 读取媒体文件超时");
+            }
+            if (activeCancelled) throw new InterruptedException();
+            if (probe.exitValue() != 0) throw new IOException("ffprobe 无法读取媒体文件");
             reader.join(5000);
             JsonNode info = json.readTree(result.get());
             boolean video = false;
@@ -556,14 +671,17 @@ public class HlsDownloadService implements ApplicationRunner {
         } finally { terminate(probe); activeProcess = null; }
     }
 
-    private void complete(long id, Path target, String name) {
-        db.update("""
+    private boolean complete(long id, Path target, String name) {
+        int updated = db.update("""
                 UPDATE hls_download_task SET status = 'completed', save_path = ?, message = NULL,
-                       next_attempt_at = NULL, completed_at = ?, updated_at = ? WHERE id = ?
+                       next_attempt_at = NULL, completed_at = ?, updated_at = ?
+                 WHERE id = ? AND status IN ('pending', 'downloading', 'verifying')
                 """, target.toString(), HlsSupport.now(), HlsSupport.now(), id);
+        if (updated == 0) return false;
         // 一集成功后清理所有尝试的残片，保留各次脱敏日志。
         cleanup(workspaceOf(id));
         notices.publish("剧集下载完成", name + " 已归档：" + target, false);
+        return true;
     }
 
     private Path root() { return Path.of(paths.getMediaRoot()).toAbsolutePath().normalize(); }
