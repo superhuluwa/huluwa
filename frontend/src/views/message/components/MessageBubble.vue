@@ -7,7 +7,7 @@
     <!-- 普通气泡 -->
     <div v-else class="message-row" :class="{ mine: isMine }">
         <div v-if="!isMine" class="avatar bot"
-            :class="{ movie: isMovie || isMovieSearchWatch, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession }">
+            :class="{ movie: isMovie || isMovieSearchWatch, dytt: isDytt, magnet: isMagnet, video: isVideoSession, xunlei: isXunleiSession, 'xunlei-win': isXunleiWinSession }">
             <SessionIcon :kind="botIconKind" fallback-text="Q" />
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
@@ -213,6 +213,9 @@ export default {
             if (this.isXunleiSession) {
                 return 'xunlei'
             }
+            if (this.isXunleiWinSession) {
+                return 'xunlei-win'
+            }
             return ''
         },
         /** 本地乐观发送态：等待服务端 ack（WS chat.ack / HTTP 响应） */
@@ -295,9 +298,13 @@ export default {
         isVideoSession() {
             return this.payload.kind === 'video'
         },
-        /** 迅雷下载会话的机器人回复显示闪电头像 */
+        /** 迅雷下载【飞牛】会话的机器人回复显示闪电头像 */
         isXunleiSession() {
             return this.payload.kind === 'xunlei'
+        },
+        /** 迅雷下载【Win】会话的机器人回复显示迅雷头像 */
+        isXunleiWinSession() {
+            return this.payload.kind === 'xunlei-win'
         },
         /** 大图标题：优先用载荷里的片名 */
         coverTitle() {
@@ -515,7 +522,8 @@ export default {
 .avatar.bot.dytt,
 .avatar.bot.magnet,
 .avatar.bot.video,
-.avatar.bot.xunlei {
+.avatar.bot.xunlei,
+.avatar.bot.xunlei\-win {
     border-radius: 10px;
     background: transparent;
 }

@@ -9,7 +9,8 @@
 | `dytt` | 电影天堂 | `dytt-dyttzyw.png` | https://dyttzyw.com/template/default/img/favicon.png （官方站点图标） |
 | `magnet` | qBittorrent 下载 | `magnet-qbittorrent.png` | https://www.qbittorrent.org/favicon.ico （官方站点图标） |
 | `video` | 视频解析 | `video-douyin.png` | https://www.douyin.com/favicon.ico （抖音官方图标；该会话解析抖音等 App 的分享口令） |
-| `xunlei` | 迅雷下载 | `xunlei.png` | 飞牛迅雷（迅雷 NAS 版）官方 SPK 的应用图标（蜂鸟）`ui/images/pan-xunlei-com-256.png` |
+| `xunlei` | 迅雷下载【飞牛】 | `xunlei.png` | 飞牛迅雷（迅雷 NAS 版）官方 SPK 的应用图标（蜂鸟）`ui/images/pan-xunlei-com-256.png` |
+| `xunlei-win` | 迅雷下载【Win】 | `xunlei.png` | 与迅雷下载【飞牛】共用迅雷官方图标（蜂鸟） |
 
 ## 目录说明
 

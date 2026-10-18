@@ -67,7 +67,7 @@ import {
     NModal
 } from 'naive-ui'
 /**
- * 迅雷远程下载连接配置表单（「迅雷下载」会话首次使用与顶栏入口共用）：
+ * 迅雷远程下载（飞牛）连接配置表单（「迅雷下载【飞牛】」会话首次使用与顶栏入口共用）：
  * 原生模式可用飞牛账号密码自动登录并续取 fnos-token，也保留手动 Cookie 入口。
  * 两步验证码只用于当前登录请求；密码与认证值只写不读。
  */
@@ -125,7 +125,7 @@ export default {
             }
         },
         title() {
-            return this.configured ? '迅雷连接设置' : '配置迅雷连接'
+            return this.configured ? '迅雷【飞牛】连接设置' : '配置迅雷【飞牛】连接'
         },
         nativeFnos() {
             const url = this.form.url.trim()
@@ -209,7 +209,7 @@ export default {
                     this.form.token = ''
                     this.form.fnosPassword = ''
                     this.form.twofaCode = ''
-                    this.$message.success('迅雷配置已保存')
+                    this.$message.success('迅雷【飞牛】配置已保存')
                     this.visible = false
                     this.$emit('saved', data)
                 } catch (error) {

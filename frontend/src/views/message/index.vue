@@ -12,10 +12,11 @@
         <section v-if="showRoom" class="chat-room">
             <ChatHeader :session-key="currentKey" :title="title" :subtitle="subtitle" :show-back="narrow"
                 :compact="isMobile" :clearable="canSend" :markable="isSystem"
-                :magnet="isMagnet" :video="isVideoSession" :xunlei="isXunleiSession"
+                :magnet="isMagnet" :video="isVideoSession" :xunlei="isXunleiSession" :xunlei-win="isXunleiWinSession"
                 @refresh="refresh" @clear="onClear" @back="backToList" @open-session="switchSession"
                 @mark-all="onMarkAll" @qb-settings="openQbDialog"
-                @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog" @movie-settings="movieDialog = true" />
+                @video-settings="openVideoDialog" @xunlei-settings="openXunleiDialog"
+                @xunlei-win-settings="openXunleiWinDialog" @movie-settings="movieDialog = true" />
 
             <MessageList :messages="currentMessages" :has-more="hasMore" :loading-earlier="loadingEarlier"
                 :loading="loadingMessages" :session-key="currentKey" :empty-title="emptyTitle"
@@ -40,9 +41,13 @@
         <VideoSettingsDialog v-model:show="videoDialog" intro="解析分享口令前需要先配置视频解析服务的连接信息。"
             @saved="onVideoSaved" />
 
-        <!-- 首次在「迅雷下载」会话提交磁力时，自动弹出迅雷配置表单 -->
+        <!-- 首次在「迅雷下载【飞牛】」会话提交磁力时，自动弹出迅雷配置表单 -->
         <XunleiSettingsDialog v-model:show="xunleiDialog" intro="提交下载任务前请配置飞牛地址和登录账号密码；原生迅雷自动使用默认下载目录。"
             @saved="onXunleiSaved" />
+
+        <!-- 首次在「迅雷下载【Win】」会话提交磁力时，自动弹出迅雷【Win】配置表单 -->
+        <XunleiWinSettingsDialog v-model:show="xunleiWinDialog" intro="提交下载任务前请配置 Windows 机器上 xunlei-win-api 的服务地址。"
+            @saved="onXunleiWinSaved" />
     </div>
 </template>
 
@@ -59,7 +64,9 @@
  *  - 内置「电影天堂」会话：同样整条输入即关键字，卡片带评分与在线播放线路（无磁力，不订阅下载）；
  *  - 内置「qBittorrent 下载」会话：发送磁力链接即提交 qBittorrent，首次使用自动弹出连接配置表单；
  *  - 内置「视频解析」会话：发送抖音等分享口令即调用解析服务，回复可内联播放的视频 / 图集气泡；
- *  - 内置「迅雷下载」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
+ *  - 内置「迅雷下载【飞牛】」会话：发送磁力链接即在飞牛迅雷创建下载任务，首次使用自动弹出连接配置表单；
+ *  - 内置「迅雷下载【Win】」会话：发送磁力链接即经 xunlei-win-api 在 Windows 迅雷创建下载任务，
+ *    首次使用自动弹出连接配置表单；
  *  - 「系统通知」为虚拟会话，读既有 message 表（消息中心原有数据），只读且不渲染底部输入条。
  *
  * 手机端（触屏 + 窄视口）的页面形态：
@@ -81,6 +88,7 @@ import CoverViewer from './components/CoverViewer.vue'
 import QbSettingsDialog from './components/QbSettingsDialog.vue'
 import VideoSettingsDialog from './components/VideoSettingsDialog.vue'
 import XunleiSettingsDialog from './components/XunleiSettingsDialog.vue'
+import XunleiWinSettingsDialog from './components/XunleiWinSettingsDialog.vue'
 import MovieSubscriptionDialog from './components/MovieSubscriptionDialog.vue'
 
 /** 打开消息中心时默认进入的会话（电影港），无则回落到第一个会话 */
@@ -97,6 +105,7 @@ export default {
         QbSettingsDialog,
         VideoSettingsDialog,
         XunleiSettingsDialog,
+        XunleiWinSettingsDialog,
         MovieSubscriptionDialog
     },
     setup() {
@@ -124,6 +133,10 @@ export default {
             xunleiDialog: false,
             /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
             xunleiPrompted: false,
+            /** 首次提交迅雷【Win】磁力且尚未配置时自动弹出的配置表单 */
+            xunleiWinDialog: false,
+            /** 已自动弹过一次就不再打扰（用户可在顶栏入口手动打开） */
+            xunleiWinPrompted: false,
             /**
              * 配置引导的触发基线：会话进入 / 刷新时先把最后一条已加载机器人消息记进基线，
              * 只有基线之后新到达（id 更大）的机器人消息才允许弹出配置表单，
@@ -161,7 +174,8 @@ export default {
                 dytt: '在线影库',
                 magnet: 'qBittorrent 下载',
                 video: '分享口令解析',
-                xunlei: '迅雷远程下载',
+                xunlei: '迅雷远程下载（飞牛）',
+                'xunlei-win': '迅雷远程下载（Windows）',
                 system: '系统事件与运行通知'
             }[this.currentSession.kind] || '会话'
             return kindText + ' · ' + count + ' 条消息'
@@ -193,6 +207,9 @@ export default {
         isXunleiSession() {
             return this.currentSession?.kind === 'xunlei'
         },
+        isXunleiWinSession() {
+            return this.currentSession?.kind === 'xunlei-win'
+        },
         emptyTitle() {
             if (this.currentKind === 'movie') {
                 return '还没有搜索记录'
@@ -208,6 +225,9 @@ export default {
             }
             if (this.currentKind === 'xunlei') {
                 return '还没有迅雷下载记录'
+            }
+            if (this.currentKind === 'xunlei-win') {
+                return '还没有迅雷【Win】下载记录'
             }
             return '暂无消息'
         },
@@ -233,6 +253,11 @@ export default {
                     ? '把磁力链接粘贴到下方输入框，发送即提交迅雷下载'
                     : '把磁力链接粘贴到下方输入框，回车即创建迅雷下载任务'
             }
+            if (this.currentKind === 'xunlei-win') {
+                return this.isMobile
+                    ? '把磁力链接粘贴到下方输入框，发送即提交迅雷【Win】下载'
+                    : '把磁力链接粘贴到下方输入框，回车即在 Windows 迅雷创建下载任务'
+            }
             return '系统事件与运行通知会显示在这里'
         },
         composerHint() {
@@ -255,6 +280,9 @@ export default {
             }
             if (this.currentKind === 'xunlei') {
                 return this.isMobile ? '' : '粘贴磁力链接回车即提交迅雷；输入「状态」看配置，「帮助」看用法'
+            }
+            if (this.currentKind === 'xunlei-win') {
+                return this.isMobile ? '' : '粘贴磁力链接回车即提交迅雷【Win】；输入「状态」看配置，「帮助」看用法'
             }
             return ''
         }
@@ -290,6 +318,10 @@ export default {
             if (kind === 'xunlei' && this.isXunleiSession && !this.xunleiPrompted) {
                 this.xunleiPrompted = true
                 this.xunleiDialog = true
+            }
+            if (kind === 'xunlei-win' && this.isXunleiWinSession && !this.xunleiWinPrompted) {
+                this.xunleiWinPrompted = true
+                this.xunleiWinDialog = true
             }
         },
         '$route.query.session'(next) {
@@ -476,6 +508,15 @@ export default {
         onXunleiSaved() {
             this.xunleiPrompted = true
             this.xunleiDialog = false
+        },
+        /** 打开迅雷【Win】连接配置表单（顶栏入口与配置引导共用） */
+        openXunleiWinDialog() {
+            this.xunleiWinDialog = true
+        },
+        /** 配置保存后标记已引导过，避免再次自动弹出配置表单 */
+        onXunleiWinSaved() {
+            this.xunleiWinPrompted = true
+            this.xunleiWinDialog = false
         },
         /** 系统通知「全部已读」：沿用消息中心既有接口 */
         async onMarkAll() {

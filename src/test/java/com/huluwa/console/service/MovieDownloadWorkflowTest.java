@@ -25,6 +25,7 @@ class MovieDownloadWorkflowTest {
     private final MovieSearchService search = mock(MovieSearchService.class);
     private final QBittorrentService qb = mock(QBittorrentService.class);
     private final XunleiService xl = mock(XunleiService.class);
+    private final XunleiWinService xlwin = mock(XunleiWinService.class);
     private SingleConnectionDataSource dataSource;
     private JdbcTemplate jdbc;
     private MovieSubscriptionService service;
@@ -34,7 +35,7 @@ class MovieDownloadWorkflowTest {
         dataSource = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
         new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
         jdbc = new JdbcTemplate(dataSource);
-        service = new MovieSubscriptionService(jdbc, search, qb, xl,
+        service = new MovieSubscriptionService(jdbc, search, qb, xl, xlwin,
                 mock(MessageService.class), mock(ChatPushService.class),
                 new SubscriptionCheckLogService(jdbc));
         when(search.fetchDetail(anyString())).thenReturn(new MovieSearchService.DetailPage(TITLE, List.of()));
@@ -131,6 +132,44 @@ class MovieDownloadWorkflowTest {
         verify(qb).add(List.of(magnet('e')), PATH);
         assertEquals("added", jdbc.queryForObject("SELECT status FROM movie_download_task", String.class));
         assertEquals(PATH, jdbc.queryForObject("SELECT save_path FROM movie_download_task", String.class));
+    }
+
+    @Test
+    void xunleiWinDownloadsUseWindowsSavePathAndTrackProgressBySerial() {
+        // 迅雷【Win】：Windows 根目录 + 剧名子目录提交，流水号落 external_task_id，
+        // 跟踪时按 xunlei-win-api 的实时状态回填 status / message / progress
+        when(xlwin.settings()).thenReturn(new XunleiWinService.Settings("http://xlwin:8899", "D:\\迅雷下载"));
+        when(xlwin.describe()).thenReturn(new java.util.LinkedHashMap<>(java.util.Map.of(
+                "url", "http://xlwin:8899", "configured", true)));
+        when(xlwin.add(anyList(), anyString())).thenReturn(List.of(
+                new XunleiWinService.TaskResult(true, "已提交迅雷【Win】下载", null, 0, 0, "SN-1")));
+        subscribe("xunlei-win");
+
+        Map<String, Object> result = service.downloadMagnet(URL, TITLE, magnet('w'), "2160P", "5");
+        assertEquals(true, result.get("ok"));
+        String winPath = "D:\\迅雷下载\\斗破苍穹 第5季";
+        assertEquals(winPath, result.get("savePath"));
+        verify(xlwin).add(List.of(magnet('w')), winPath);
+        verify(xl, never()).add(anyList(), anyString());
+        assertEquals("SN-1", jdbc.queryForObject("SELECT external_task_id FROM movie_download_task", String.class));
+        assertEquals("xunlei-win", jdbc.queryForObject("SELECT downloader FROM movie_download_task", String.class));
+
+        when(xlwin.task("SN-1")).thenReturn(new XunleiWinService.TaskStatus(
+                "PHASE_TYPE_RUNNING", "下载中 42.5%", 42.5));
+        service.refreshDownloads();
+        assertEquals("downloading", jdbc.queryForObject("SELECT status FROM movie_download_task", String.class));
+        assertEquals("下载中 42.5%", jdbc.queryForObject("SELECT message FROM movie_download_task", String.class));
+        assertEquals(43, jdbc.queryForObject("SELECT progress FROM movie_download_task", Integer.class));
+        // 通知写入「迅雷下载【Win】」会话，而不是磁力会话或飞牛迅雷会话
+        assertEquals("xunlei-win", jdbc.queryForObject(
+                "SELECT session_id FROM chat_message WHERE role = 'bot' ORDER BY id LIMIT 1", String.class));
+
+        when(xlwin.task("SN-1")).thenReturn(new XunleiWinService.TaskStatus(
+                "PHASE_TYPE_COMPLETE", "下载完成", 100));
+        service.refreshDownloads();
+        assertEquals("completed", jdbc.queryForObject("SELECT status FROM movie_download_task", String.class));
+        assertEquals(100, jdbc.queryForObject("SELECT progress FROM movie_download_task", Integer.class));
+        assertNotNull(jdbc.queryForObject("SELECT completed_at FROM movie_download_task", String.class));
     }
 
     @Test

@@ -1,5 +1,5 @@
 /**
- * 配置引导判定：会话里自动弹「qBittorrent / 视频解析 / 迅雷连接设置」的公共条件。
+ * 配置引导判定：会话里自动弹「qBittorrent / 视频解析 / 迅雷【飞牛】/ 迅雷【Win】连接设置」的公共条件。
  *
  * 只有同时满足下面三条才会引导用户去填配置：
  *  1. 引导已武装 —— 会话进入 / 刷新期间的历史回放不弹（那些消息早就存在，用户多半早已配置好）；
@@ -9,7 +9,7 @@
  *
  * @param {object|null} message 机器人消息行（含 payload JSON 字符串）
  * @param {{ baseline?: number, armed?: boolean }} options 当前会话的引导基线 / 是否武装
- * @returns {string|null} 需要弹出的配置表单种类（magnet / video / xunlei），不需要时返回 null
+ * @returns {string|null} 需要弹出的配置表单种类（magnet / video / xunlei / xunlei-win），不需要时返回 null
  */
 export function configPromptKind(message, { baseline = 0, armed = false } = {}) {
     if (!armed || !message || !message.payload) {

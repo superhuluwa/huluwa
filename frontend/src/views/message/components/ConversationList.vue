@@ -39,7 +39,7 @@ import SessionIcon from './SessionIcon.vue'
  * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
  * 各内置会话使用对应服务的官方品牌图标（SessionIcon；见 assets/brand-icons/README.md），
  * 无品牌图标（系统通知等）退回 Font Awesome。
- * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载 + 系统通知虚拟会话），列表不做删除。
+ * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载【飞牛】/ 迅雷下载【Win】+ 系统通知虚拟会话），列表不做删除。
  *
  * 手机端（mobile）：标题与状态栏安全区由公共顶栏处理，列表行高与触控目标放大、
  * 右侧加箭头提示可进入聊天详情，因此不再需要高亮当前会话。
@@ -109,6 +109,9 @@ export default {
             if (item.kind === 'xunlei') {
                 return 'fa-solid fa-bolt'
             }
+            if (item.kind === 'xunlei-win') {
+                return 'fa-solid fa-bolt'
+            }
             return 'fa-regular fa-comments'
         },
         iconClass(item) {
@@ -118,6 +121,7 @@ export default {
                 magnet: item.kind === 'magnet',
                 video: item.kind === 'video',
                 xunlei: item.kind === 'xunlei',
+                'xunlei-win': item.kind === 'xunlei-win',
                 system: item.kind === 'system'
             }
         }

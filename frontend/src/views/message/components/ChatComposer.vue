@@ -39,7 +39,7 @@ export default {
             type: String,
             default: ''
         },
-        /** 会话类型：movie 电影港 / dytt 电影天堂 / magnet 提交磁力 / video 解析口令 / xunlei 提交迅雷 / system 只读 / chat 普通对话 */
+        /** 会话类型：movie 电影港 / dytt 电影天堂 / magnet 提交磁力 / video 解析口令 / xunlei 提交迅雷【飞牛】/ xunlei-win 提交迅雷【Win】/ system 只读 / chat 普通对话 */
         kind: {
             type: String,
             default: 'chat'
@@ -86,6 +86,9 @@ export default {
             if (this.kind === 'xunlei') {
                 return this.mobile ? '粘贴磁力链接提交迅雷' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交迅雷；可一次贴多条'
             }
+            if (this.kind === 'xunlei-win') {
+                return this.mobile ? '粘贴磁力链接提交迅雷【Win】' : '粘贴磁力链接（magnet:?xt=urn:btih:…）回车提交迅雷【Win】；可一次贴多条'
+            }
             return this.mobile ? '输入消息…' : '输入消息…（Enter 发送 / Shift+Enter 换行）'
         },
         canSend() {
@@ -102,6 +105,9 @@ export default {
             if (this.kind === 'xunlei') {
                 return '正在提交到迅雷，解析磁力文件清单可能需要十几秒…'
             }
+            if (this.kind === 'xunlei-win') {
+                return '正在提交到迅雷【Win】，创建任务可能需要几秒…'
+            }
             return '正在搜索，请稍候…'
         },
         busyIcon() {
@@ -113,6 +119,9 @@ export default {
             }
             if (this.kind === 'xunlei') {
                 return 'fa-solid fa-bolt'
+            }
+            if (this.kind === 'xunlei-win') {
+                return 'fa-brands fa-windows'
             }
             return 'fa-solid fa-magnifying-glass'
         }

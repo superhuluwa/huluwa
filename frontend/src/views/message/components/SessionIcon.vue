@@ -7,7 +7,7 @@
 
 <script>
 /**
- * 会话品牌图标：把内置会话（电影港 / 电影天堂 / qBittorrent / 视频解析 / 迅雷下载）
+ * 会话品牌图标：把内置会话（电影港 / 电影天堂 / qBittorrent / 视频解析 / 迅雷下载【飞牛】/ 迅雷下载【Win】）
  * 的默认 Font Awesome 图标换成各服务官方图标，系统通知等无品牌的会话仍用图标字体。
  *
  * 图标文件取自官方来源（站点 favicon / 官方 LOGO / 官方安装包），见 assets/brand-icons/README.md；
@@ -19,19 +19,20 @@ import magnetIcon from '@/assets/brand-icons/magnet-qbittorrent.png'
 import videoIcon from '@/assets/brand-icons/video-douyin.png'
 import xunleiIcon from '@/assets/brand-icons/xunlei.png'
 
-/** 会话类型 → 品牌图标（键与 chat_session.kind 一致） */
+/** 会话类型 → 品牌图标（键与 chat_session.kind 一致；迅雷【Win】与飞牛版共用迅雷官方图标） */
 const BRAND_ICONS = {
     movie: movieIcon,
     dytt: dyttIcon,
     magnet: magnetIcon,
     video: videoIcon,
-    xunlei: xunleiIcon
+    xunlei: xunleiIcon,
+    'xunlei-win': xunleiIcon
 }
 
 export default {
     name: 'SessionIcon',
     props: {
-        /** 会话类型：movie / dytt / magnet / video / xunlei / system / chat */
+        /** 会话类型：movie / dytt / magnet / video / xunlei / xunlei-win / system / chat */
         kind: {
             type: String,
             default: ''

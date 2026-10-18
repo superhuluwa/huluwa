@@ -15,7 +15,7 @@
             </span>
             <span class="mm-tip">
                 <i class="fa-solid fa-circle-info"></i>
-                使用{{ data.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}下载，按剧名创建文件夹
+                使用{{ downloaderLabel }}下载，按剧名创建文件夹
             </span>
         </div>
 
@@ -101,6 +101,11 @@ export default {
             set(value) {
                 this.$emit('update:show', value)
             }
+        },
+        /** 下载工具显示名：迅雷【飞牛】/ 迅雷【Win】/ qBittorrent */
+        downloaderLabel() {
+            if (this.data.downloader === 'xunlei-win') return '迅雷【Win】'
+            return this.data.downloader === 'xunlei' ? '迅雷' : 'qBittorrent'
         }
     },
     watch: {

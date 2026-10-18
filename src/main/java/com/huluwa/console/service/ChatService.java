@@ -21,7 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析、迅雷下载）/ 已读 / 清空 / 检索。
+ * 消息中心会话服务：会话列表 / 消息流 / 发送（电影港搜索、磁力下载、视频解析、迅雷下载【飞牛】、迅雷下载【Win】）/ 已读 / 清空 / 检索。
  *
  * 数据来源两条线：
  *  - 「电影港」等聊天会话：chat_session + chat_message（用户发送与机器人回复都落库）；
@@ -54,8 +54,10 @@ public class ChatService {
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
     public static final String VIDEO_SESSION = "video";
-    /** 迅雷下载会话键（schema 内置） */
+    /** 迅雷下载【飞牛】会话键（schema 内置；历史键名保持 xunlei 兼容既有数据与路由） */
     public static final String XUNLEI_SESSION = "xunlei";
+    /** 迅雷下载【Win】会话键（schema 内置） */
+    public static final String XUNLEI_WIN_SESSION = "xunlei-win";
     /** 磁力下载会话内的配置引导指令 */
     private static final String MAGNET_HELP_TASK = "帮助";
     /** 磁力下载会话内的任务状态指令 */
@@ -72,6 +74,12 @@ public class ChatService {
     private static final String XUNLEI_STATUS_TASK = "状态";
     /** Docker 版迅雷会话内的保存路径指令前缀 */
     private static final String XUNLEI_PATH_PREFIX = "路径";
+    /** 迅雷【Win】会话内的配置引导指令 */
+    private static final String XUNLEI_WIN_HELP_TASK = "帮助";
+    /** 迅雷【Win】会话内的任务状态指令 */
+    private static final String XUNLEI_WIN_STATUS_TASK = "状态";
+    /** 迅雷【Win】会话内的保存目录指令前缀（Windows 路径，如「路径 D:\\迅雷下载」） */
+    private static final String XUNLEI_WIN_PATH_PREFIX = "路径";
     /** 单条搜索最多展示的结果条数（与参考脚本 scripts_dygangs_max 缺省一致） */
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
     /** 电影天堂单条搜索最多展示的结果条数 */
@@ -94,6 +102,7 @@ public class ChatService {
     private final MovieSubscriptionService movieSubscriptionService;
     private final VideoParseService videoParseService;
     private final XunleiService xunleiService;
+    private final XunleiWinService xunleiWinService;
     private final ChatRequestService chatRequestService;
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -103,6 +112,7 @@ public class ChatService {
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
                        VideoParseService videoParseService, XunleiService xunleiService,
+                       XunleiWinService xunleiWinService,
                        ChatRequestService chatRequestService,
                        ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
@@ -113,6 +123,7 @@ public class ChatService {
         this.movieSubscriptionService = movieSubscriptionService;
         this.videoParseService = videoParseService;
         this.xunleiService = xunleiService;
+        this.xunleiWinService = xunleiWinService;
         this.chatRequestService = chatRequestService;
         this.chatPushService = chatPushService;
     }
@@ -367,8 +378,11 @@ public class ChatService {
                 // 视频解析会话：把分享口令交给解析服务，回复视频 / 图集气泡
                 replies.addAll(runVideoParseTask(sessionId, text));
             } else if ("xunlei".equals(kind)) {
-                // 迅雷会话：submit = 提交磁力给迅雷建下载任务（未配置时引导配置），状态 / 帮助为内置指令
+                // 迅雷【飞牛】会话：submit = 提交磁力给飞牛迅雷建下载任务（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runXunleiTask(sessionId, text));
+            } else if ("xunlei-win".equals(kind)) {
+                // 迅雷【Win】会话：submit = 提交磁力给 Windows 迅雷建下载任务，状态 / 帮助为内置指令
+                replies.addAll(runXunleiWinTask(sessionId, text));
             }
             touch(sessionId);
             chatRequestService.markDone(requestId);
@@ -859,6 +873,144 @@ public class ChatService {
     }
 
     private ChatMessage xunleiText(String sessionId, String content, String payload) {
+        return append(sessionId, "bot", "text", content, null, payload);
+    }
+
+    // ------------------------------------------------------------------ 迅雷下载【Win】
+
+    /**
+     * 迅雷【Win】会话的一次发送：识别内置指令（帮助 / 状态 / 路径），否则按磁力提交给 Windows 迅雷。
+     *
+     * <p>对接 Windows 机器上的 xunlei-win-api 服务：提交返回流水号，进度由「我的下载」跟踪；
+     * 未配置服务地址时返回「配置引导」气泡（payload.kind=xunlei-win），前端据此弹出配置表单。</p>
+     */
+    private List<ChatMessage> runXunleiWinTask(String sessionId, String text) {
+        List<ChatMessage> replies = new ArrayList<>();
+        String task = text == null ? "" : text.trim();
+        boolean configured = xunleiWinService.settings().configured();
+
+        if (task.isEmpty() || XUNLEI_WIN_HELP_TASK.equals(task)) {
+            replies.add(xunleiWinText(sessionId, xunleiWinHelpText(configured), xunleiWinMeta(configured)));
+            return replies;
+        }
+        if (XUNLEI_WIN_STATUS_TASK.equals(task)) {
+            replies.add(xunleiWinStatus(sessionId));
+            return replies;
+        }
+        if (task.startsWith(XUNLEI_WIN_PATH_PREFIX + " ") || task.equals(XUNLEI_WIN_PATH_PREFIX)) {
+            String path = task.length() > XUNLEI_WIN_PATH_PREFIX.length()
+                    ? task.substring(XUNLEI_WIN_PATH_PREFIX.length()).trim() : "";
+            replies.add(xunleiWinSavePath(sessionId, path));
+            return replies;
+        }
+
+        List<String> magnets = QBittorrentService.extractMagnets(task);
+        if (magnets.isEmpty()) {
+            replies.add(xunleiWinText(sessionId,
+                    "没有识别到磁力链接，把 magnet:?xt=urn:btih:… 整段发给我即可创建迅雷【Win】下载任务。",
+                    xunleiWinMeta(configured)));
+            return replies;
+        }
+        if (!configured) {
+            replies.add(xunleiWinText(sessionId,
+                    "已收到 " + magnets.size() + " 条磁力链接，但还没有配置迅雷下载【Win】。"
+                            + "\n请填写 Windows 机器上 xunlei-win-api 的服务地址，配置完成后本条磁力可直接重发。",
+                    xunleiWinMeta("config", magnets)));
+            return replies;
+        }
+
+        List<XunleiWinService.TaskResult> results;
+        try {
+            results = xunleiWinService.add(magnets, null);
+        } catch (Exception e) {
+            replies.add(xunleiWinText(sessionId, "提交失败：" + safeMessage(e), xunleiWinMeta(true)));
+            return replies;
+        }
+
+        for (XunleiWinService.TaskResult result : results) {
+            if (result.ok()) {
+                String headline = "✅ 已提交迅雷【Win】下载任务"
+                        + (string(result.taskId()) == null ? "" : "（流水号 " + result.taskId() + "）")
+                        + "\n下载进度在「我的下载 → 磁力下载」查看。";
+                replies.add(xunleiWinText(sessionId, headline, xunleiWinMeta(true)));
+            } else {
+                replies.add(xunleiWinText(sessionId, "⚠️ 提交失败：" + result.message(), xunleiWinMeta(true)));
+            }
+        }
+        // 磁力链接很长，逐条单独成气泡（可整体复制）
+        for (String magnet : magnets) {
+            replies.add(append(sessionId, "bot", "text", magnet, null, xunleiWinMeta(true)));
+        }
+        return replies;
+    }
+
+    /** 「状态」指令：展示当前配置并实时探测 xunlei-win-api 在线状态 */
+    private ChatMessage xunleiWinStatus(String sessionId) {
+        XunleiWinService.Settings settings = xunleiWinService.settings();
+        if (!settings.configured()) {
+            return xunleiWinText(sessionId, "尚未配置迅雷下载【Win】服务地址，请先完成配置。", xunleiWinMeta(false));
+        }
+        StringBuilder sb = new StringBuilder("迅雷下载【Win】配置：\n");
+        sb.append("• 服务地址：").append(settings.url()).append('\n');
+        sb.append("• 保存目录：").append(settings.savePath() == null || settings.savePath().isBlank()
+                ? "迅雷客户端默认目录" : settings.savePath()).append('\n');
+        Map<String, Object> probe = xunleiWinService.test(settings.url());
+        sb.append("• 连接状态：").append(Boolean.TRUE.equals(probe.get("success")) ? "" : "不").append("在线")
+                .append("（").append(probe.get("message")).append('）').append('\n');
+        sb.append("• 用法：把磁力链接直接发给我即可创建下载任务。");
+        return xunleiWinText(sessionId, sb.toString(), xunleiWinMeta(true));
+    }
+
+    /** 「路径 xxx」修改 Windows 保存根目录；「路径」单独发送则清空，回到迅雷客户端默认目录。 */
+    private ChatMessage xunleiWinSavePath(String sessionId, String path) {
+        if (!xunleiWinService.settings().configured()) {
+            return xunleiWinText(sessionId, "请先完成迅雷下载【Win】连接配置，再设置保存目录。", xunleiWinMeta(false));
+        }
+        xunleiWinService.saveSavePath(path);
+        return xunleiWinText(sessionId, path.isEmpty()
+                ? "已清空保存根目录：之后的新任务由迅雷客户端使用默认下载目录。"
+                : "已设置迅雷【Win】保存根目录：" + path + "\n（Windows 本机路径，如 D:\\迅雷下载）",
+                xunleiWinMeta(true));
+    }
+
+    /** 配置引导文案：未配置时是「首次使用向导」，已配置时是帮助卡片 */
+    private static String xunleiWinHelpText(boolean configured) {
+        if (!configured) {
+            return """
+                    还没有配置迅雷下载【Win】，无法提交下载任务。请完成配置：
+                    1. 在 Windows 机器上安装迅雷客户端并保持运行，部署 xunlei-win-api 服务；
+                    2. 填写服务地址（如 http://192.168.3.100:8899），「测试连接」确认迅雷正在运行；
+                    3. 保存根目录可留空，留空时新任务使用迅雷客户端的默认下载目录。""";
+        }
+        return """
+                迅雷下载【Win】已就绪，把磁力链接直接发给我即可：
+                1. 一条消息可放多个磁力链接（空格或换行分隔），逐条在 Windows 迅雷创建下载任务；
+                2. 输入「状态」查看当前配置与 xunlei-win-api 在线状态；
+                3. 输入「路径 D:\\迅雷下载」设置保存根目录，「路径」单独发送则清空（用迅雷默认目录）；
+                4. 电影港订阅 / 资源列表下载时也可选择「迅雷【Win】」工具，进度在「我的下载」查看。""";
+    }
+
+    /** 迅雷【Win】会话消息的结构化载荷（前端据此渲染闪电头像与配置入口） */
+    private String xunleiWinMeta(boolean configured) {
+        return xunleiWinMeta(configured ? "ready" : "config");
+    }
+
+    private String xunleiWinMeta(String status) {
+        return xunleiWinMeta(status, null);
+    }
+
+    private String xunleiWinMeta(String status, List<String> magnets) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("kind", "xunlei-win");
+        meta.put("status", status);
+        meta.put("settings", xunleiWinService.describe());
+        if (magnets != null && !magnets.isEmpty()) {
+            meta.put("magnets", magnets);
+        }
+        return toJson(meta);
+    }
+
+    private ChatMessage xunleiWinText(String sessionId, String content, String payload) {
         return append(sessionId, "bot", "text", content, null, payload);
     }
 

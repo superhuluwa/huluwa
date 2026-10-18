@@ -80,12 +80,12 @@ CREATE TABLE IF NOT EXISTS sys_schema_version (
 INSERT OR IGNORE INTO sys_schema_version (version, applied_at)
 VALUES (1, datetime('now', 'localtime'));
 
--- 消息中心会话（聊天对象）：当前内置「电影港」「电影天堂」搜索、「qBittorrent 下载」、「视频解析」与「迅雷下载」会话；
--- 「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
+-- 消息中心会话（聊天对象）：当前内置「电影港」「电影天堂」搜索、「qBittorrent 下载」、「视频解析」、
+-- 「迅雷下载【飞牛】」与「迅雷下载【Win】」会话；「系统通知」为虚拟会话，直接读 message 表，不落 chat_session。
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | dytt | magnet | video | xunlei | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | dytt | magnet | video | xunlei | xunlei-win | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -138,10 +138,17 @@ UPDATE chat_session SET title = 'qBittorrent 下载' WHERE id = 'magnet' AND tit
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('video', '视频解析', 'video', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
--- 内置会话：迅雷下载（把磁力链接提交给飞牛迅雷（迅雷 NAS 版）建下载任务；
+-- 内置会话：迅雷下载【飞牛】（把磁力链接提交给飞牛迅雷（迅雷 NAS 版）建下载任务；
 -- 直连地址、Docker 版保存路径、手动 Cookie / 飞牛账号登录配置存 sys_config；飞牛原生版使用迅雷默认目录，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
-VALUES ('xunlei', '迅雷下载', 'xunlei', datetime('now', 'localtime'), datetime('now', 'localtime'));
+VALUES ('xunlei', '迅雷下载【飞牛】', 'xunlei', datetime('now', 'localtime'), datetime('now', 'localtime'));
+-- 老库标题同步：历史版本该会话标题为「迅雷下载」，按 id 幂等更新，避免仅新部署生效
+UPDATE chat_session SET title = '迅雷下载【飞牛】' WHERE id = 'xunlei' AND title = '迅雷下载';
+
+-- 内置会话：迅雷下载【Win】（把磁力链接提交给 Windows 机器上的 xunlei-win-api 服务建下载任务；
+-- 服务地址与 Windows 保存根目录存 sys_config：xlwin.url / xlwin.savepath，幂等）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('xunlei-win', '迅雷下载【Win】', 'xunlei-win', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- 电影港搜索监听：暂无资源时按关键字巡检，命中后通知一次并结束；重启后继续。
 CREATE TABLE IF NOT EXISTS movie_search_watch (
@@ -176,7 +183,7 @@ CREATE TABLE IF NOT EXISTS movie_subscription (
     genre         TEXT,
     cover         TEXT,
     detail_url    TEXT NOT NULL,                 -- 电影港具体链接（剧集详情页）
-    downloader    TEXT NOT NULL DEFAULT 'qb',    -- 本剧绑定下载工具 qb|xunlei；旧订阅在启动时补齐
+    downloader    TEXT NOT NULL DEFAULT 'qb',    -- 本剧绑定下载工具 qb|xunlei|xunlei-win；旧订阅在启动时补齐
     enabled       INTEGER NOT NULL DEFAULT 1,    -- 0 取消订阅（数据保留，可重新订阅）
     baseline_at   TEXT,                          -- 订阅基线采集完成时间
     last_check_at TEXT,                          -- 最近一次巡检时间
@@ -210,8 +217,9 @@ CREATE TABLE IF NOT EXISTS movie_download_task (
     magnet          TEXT NOT NULL,
     torrent_hash    TEXT,                        -- info hash，用于跟踪 qB 任务
     save_path       TEXT,                        -- 保存目录：统一根目录 / 剧名
-    downloader      TEXT NOT NULL DEFAULT 'qb', -- qb|xunlei，历史任务继续用原工具跟踪
-    external_task_id TEXT,                       -- 迅雷返回的任务 ID
+    downloader      TEXT NOT NULL DEFAULT 'qb', -- qb|xunlei|xunlei-win，历史任务继续用原工具跟踪
+    external_task_id TEXT,                       -- 迅雷返回的任务 ID（飞牛版任务ID / Win 版流水号）
+    progress        INTEGER,                     -- 下载进度（0-100；迅雷【Win】与 qBittorrent 实时回填）
     status          TEXT NOT NULL DEFAULT 'pending', -- pending|added|downloading|completed|failed|removed
     message         TEXT,
     created_at      TEXT NOT NULL,

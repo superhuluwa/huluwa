@@ -38,7 +38,7 @@
                                 <span>每 {{ item.intervalMinutes }} 分钟检查 · 从第 {{ item.fromEpisode }} 集开始</span>
                             </template>
                             <template v-else>
-                                <span><i class="fa-solid fa-download"></i> {{ item.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
+                                <span><i class="fa-solid fa-download"></i> {{ downloaderLabel(item.downloader) }}</span>
                                 <span><i class="fa-solid fa-magnet"></i> 已记录 {{ item.magnetCount }} 条磁力</span>
                             </template>
                             <span v-if="item.createdAt"><i class="fa-regular fa-calendar-plus"></i> 加入于 {{ item.createdAt }}</span>
@@ -87,7 +87,7 @@
                         <n-button v-else size="tiny" type="primary" :loading="downloading === m.id"
                             @click="downloadMagnet(m)">
                             <template #icon><i class="fa-solid fa-download"></i></template>
-                            {{ item.downloader === 'xunlei' ? '迅雷下载' : 'qBittorrent 下载' }}
+                            {{ downloaderLabel(item.downloader) }} 下载
                         </n-button>
                     </div>
                 </div>
@@ -162,6 +162,11 @@ export default {
     },
     methods: {
         isHls(item) { return item.source === 'dytt' },
+        /** 下载工具显示名：迅雷【飞牛】/ 迅雷【Win】/ qBittorrent */
+        downloaderLabel(downloader) {
+            if (downloader === 'xunlei-win') return '迅雷【Win】'
+            return downloader === 'xunlei' ? '迅雷' : 'qBittorrent'
+        },
         async reload() {
             this.loading = true
             // 本页任何增删改都会重新拉取清单：顺手让会话页的实时订阅集合过期，

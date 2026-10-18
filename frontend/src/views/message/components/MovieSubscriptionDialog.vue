@@ -8,15 +8,16 @@
                     <n-select v-model:value="downloader" :options="toolOptions" :disabled="loading || saving" />
                 </n-form-item>
                 <n-form-item label="保存目录">
-                    <n-input :value="savePath" readonly />
+                    <n-input :value="displaySavePath" readonly />
                 </n-form-item>
             </n-form>
-            <p class="tip">迅雷与 qBittorrent 都保存到 {{ saveRoot }}，按剧名创建文件夹。</p>
+            <p class="tip">迅雷【飞牛】与 qBittorrent 保存到 {{ saveRoot }}；迅雷【Win】保存到其配置的 Windows 目录，均按剧名创建文件夹。</p>
             <p v-if="movie" class="tip">本剧绑定所选下载工具，订阅列表手动下载与自动下载都使用该工具。</p>
             <p v-if="movie" class="tip">{{ editing ? '修改后，新下载与失败任务重试使用所选工具，已提交任务继续由原工具下载。' : '订阅后记录现有磁力作为基线，每小时检查更新，新剧集选择最高清晰度自动下载。' }}</p>
             <div class="connections">
                 <n-button size="small" @click="qbDialog = true">qBittorrent 连接设置</n-button>
-                <n-button size="small" @click="xunleiDialog = true">迅雷连接设置</n-button>
+                <n-button size="small" @click="xunleiDialog = true">迅雷【飞牛】连接设置</n-button>
+                <n-button size="small" @click="xunleiWinDialog = true">迅雷【Win】连接设置</n-button>
             </div>
         </n-spin>
         <template #footer>
@@ -30,6 +31,7 @@
     </n-modal>
     <QbSettingsDialog v-model:show="qbDialog" />
     <XunleiSettingsDialog v-model:show="xunleiDialog" />
+    <XunleiWinSettingsDialog v-model:show="xunleiWinDialog" />
 </template>
 
 <script>
@@ -48,12 +50,14 @@ import {
 } from '@/api/chat'
 import QbSettingsDialog from './QbSettingsDialog.vue'
 import XunleiSettingsDialog from './XunleiSettingsDialog.vue'
+import XunleiWinSettingsDialog from './XunleiWinSettingsDialog.vue'
 
 export default {
     name: 'MovieSubscriptionDialog',
     components: {
         QbSettingsDialog,
         XunleiSettingsDialog,
+        XunleiWinSettingsDialog,
         NButton,
         NForm,
         NFormItem,
@@ -79,7 +83,12 @@ export default {
             saving: false,
             qbDialog: false,
             xunleiDialog: false,
-            toolOptions: [{ label: '迅雷', value: 'xunlei' }, { label: 'qBittorrent', value: 'qb' }]
+            xunleiWinDialog: false,
+            toolOptions: [
+                { label: '迅雷【飞牛】', value: 'xunlei' },
+                { label: '迅雷【Win】', value: 'xunlei-win' },
+                { label: 'qBittorrent', value: 'qb' }
+            ]
         }
     },
     computed: {
@@ -88,7 +97,17 @@ export default {
             set(value) { this.$emit('update:show', value) }
         },
         editing() { return !!this.subscription && !this.resubscribe },
-        dialogTitle() { return !this.movie ? '电影港默认下载设置' : this.editing ? '订阅设置' : '选择订阅下载工具' }
+        dialogTitle() { return !this.movie ? '电影港默认下载设置' : this.editing ? '订阅设置' : '选择订阅下载工具' },
+        /** 保存目录展示：迅雷【Win】按 Windows 根目录 \ 剧名（根目录在其连接设置里配置） */
+        displaySavePath() {
+            if (this.downloader === 'xunlei-win') {
+                const prefix = this.saveRoot + '/'
+                const folder = this.savePath.startsWith(prefix) ? this.savePath.slice(prefix.length) : ''
+                const root = 'Windows 保存根目录（迅雷【Win】连接设置里配置）'
+                return folder ? root + '\\' + folder : root
+            }
+            return this.savePath
+        }
     },
     watch: {
         show(next) { if (next) this.load() }

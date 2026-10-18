@@ -47,9 +47,13 @@
                     @click="$emit('video-settings')">
                     <i class="fa-solid fa-clapperboard"></i>
                 </button>
-                <button v-if="xunlei" class="icon-btn" type="button" title="迅雷设置（仅迅雷下载会话）"
+                <button v-if="xunlei" class="icon-btn" type="button" title="迅雷设置（仅迅雷下载【飞牛】会话）"
                     @click="$emit('xunlei-settings')">
                     <i class="fa-solid fa-bolt"></i>
+                </button>
+                <button v-if="xunleiWin" class="icon-btn" type="button" title="迅雷【Win】设置（仅迅雷下载【Win】会话）"
+                    @click="$emit('xunlei-win-settings')">
+                    <i class="fa-brands fa-windows"></i>
                 </button>
                 <button v-if="markable" class="icon-btn" type="button" title="全部标记已读" @click="$emit('mark-all')">
                     <i class="fa-solid fa-check-double"></i>
@@ -79,7 +83,8 @@ import { NDropdown, NInput, NPopover } from 'naive-ui'
 /**
  * 会话顶栏（对齐量子端 ChatHeader 的布局）：标题、副标题（消息数/会话类型）、
  * 跨会话消息搜索、刷新、清空会话。系统通知虚拟会话不支持清空（清除入口在消息中心）。
- * 会话专属设置入口：磁力下载 → qBittorrent 设置，视频解析 → 视频解析服务设置，迅雷下载 → 迅雷设置。
+ * 会话专属设置入口：磁力下载 → qBittorrent 设置，视频解析 → 视频解析服务设置，
+ * 迅雷下载【飞牛】→ 迅雷设置，迅雷下载【Win】→ 迅雷【Win】设置。
  */
 import { h } from 'vue'
 import { SearchMessages } from '@/api/chat'
@@ -134,13 +139,18 @@ export default {
             type: Boolean,
             default: false
         },
-        /** 当前是否为「迅雷下载」会话：仅该会话提供迅雷设置入口 */
+        /** 当前是否为「迅雷下载【飞牛】」会话：仅该会话提供迅雷设置入口 */
         xunlei: {
+            type: Boolean,
+            default: false
+        },
+        /** 当前是否为「迅雷下载【Win】」会话：仅该会话提供迅雷【Win】设置入口 */
+        xunleiWin: {
             type: Boolean,
             default: false
         }
     },
-    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings', 'video-settings', 'xunlei-settings', 'movie-settings'],
+    emits: ['refresh', 'clear', 'back', 'open-session', 'mark-all', 'menu', 'qb-settings', 'video-settings', 'xunlei-settings', 'xunlei-win-settings', 'movie-settings'],
     data() {
         return {
             searching: false,
@@ -178,10 +188,15 @@ export default {
                 options.push({ type: 'divider', key: 'dv' })
                 options.push({ label: '视频解析设置', key: 'video-settings', icon: () => h('i', { class: 'fa-solid fa-clapperboard' }) })
             }
-            // 迅雷设置同理，只属于「迅雷下载」会话
+            // 迅雷设置同理，只属于「迅雷下载【飞牛】」会话
             if (this.xunlei) {
                 options.push({ type: 'divider', key: 'dx' })
-                options.push({ label: '迅雷设置', key: 'xunlei-settings', icon: () => h('i', { class: 'fa-solid fa-bolt' }) })
+                options.push({ label: '迅雷【飞牛】设置', key: 'xunlei-settings', icon: () => h('i', { class: 'fa-solid fa-bolt' }) })
+            }
+            // 迅雷【Win】设置同理，只属于「迅雷下载【Win】」会话
+            if (this.xunleiWin) {
+                options.push({ type: 'divider', key: 'dw' })
+                options.push({ label: '迅雷【Win】设置', key: 'xunlei-win-settings', icon: () => h('i', { class: 'fa-brands fa-windows' }) })
             }
             if (this.showMenu) {
                 options.push({ type: 'divider', key: 'd1' })
@@ -255,6 +270,10 @@ export default {
             }
             if (key === 'xunlei-settings') {
                 this.$emit('xunlei-settings')
+                return
+            }
+            if (key === 'xunlei-win-settings') {
+                this.$emit('xunlei-win-settings')
             }
         }
     }

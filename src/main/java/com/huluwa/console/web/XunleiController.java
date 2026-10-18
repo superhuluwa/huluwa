@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * 迅雷远程下载连接配置接口（供「迅雷下载」会话的配置表单调用）。
+ * 迅雷远程下载（飞牛）连接配置接口（供「迅雷下载【飞牛】」会话的配置表单调用）。
  *
  * <p>飞牛账号密码与认证值只写不读；查询只返回账号和「是否已设置」，
  * 密码与认证值留空表示沿用原值。两步验证码只用于当前请求。</p>

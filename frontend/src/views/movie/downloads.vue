@@ -35,7 +35,8 @@
                         <div class="task-tags">
                             <span v-if="row.episode" class="tag">第 {{ row.episode }} 集</span>
                             <span v-if="row.quality" class="tag">{{ row.quality }}</span>
-                            <span class="tag">{{ row.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' }}</span>
+                            <span class="tag">{{ downloaderLabel(row.downloader) }}</span>
+                            <span v-if="progressText(row)" class="tag progress">{{ progressText(row) }}</span>
                         </div>
                         <div class="task-fields">
                             <div class="field">
@@ -115,10 +116,18 @@ export default {
                 { title: '剧名', key: 'seriesTitle', ellipsis: { tooltip: true } },
                 { title: '集号', key: 'episode', width: 70 },
                 { title: '清晰度', key: 'quality', width: 90 },
-                { title: '工具', key: 'downloader', width: 100, render: row => row.downloader === 'xunlei' ? '迅雷' : 'qBittorrent' },
+                {
+                    title: '工具', key: 'downloader', width: 110,
+                    render: row => this.downloaderLabel(row.downloader)
+                },
                 {
                     title: '状态', key: 'status', width: 90,
                     render: (row) => STATUS_LABEL[row.status] || row.status
+                },
+                {
+                    // 下载进度：迅雷【Win】与 qBittorrent 实时回填，其余工具无进度数据时显示 —
+                    title: '进度', key: 'progress', width: 90,
+                    render: (row) => this.progressText(row) || '—'
                 },
                 { title: '保存目录', key: 'savePath', ellipsis: { tooltip: true } },
                 { title: '时间', key: 'createdAt', width: 160 }
@@ -146,6 +155,18 @@ export default {
         },
         statusTone(status) {
             return STATUS_TONE[status] || 'off'
+        },
+        /** 下载工具显示名：迅雷【飞牛】/ 迅雷【Win】/ qBittorrent */
+        downloaderLabel(downloader) {
+            if (downloader === 'xunlei-win') return '迅雷【Win】'
+            return downloader === 'xunlei' ? '迅雷【飞牛】' : 'qBittorrent'
+        },
+        /** 进度文案：只有带进度数据且未完成的行显示百分比，完成行由状态列表达 */
+        progressText(row) {
+            if (typeof row.progress !== 'number' || row.status === 'completed') {
+                return ''
+            }
+            return Math.max(0, Math.min(100, Math.round(row.progress))) + '%'
         },
         clearRecords() {
             window.$dialog?.warning({
@@ -262,6 +283,13 @@ export default {
     font-size: 11px;
     background: rgba(148, 163, 184, .12);
     color: var(--text-2);
+}
+
+/* 进度标签：下载中行的实时百分比，用主题色弱化底突出 */
+.tag.progress {
+    background: var(--accent-weak);
+    color: var(--accent-2);
+    font-variant-numeric: tabular-nums;
 }
 
 .task-fields {

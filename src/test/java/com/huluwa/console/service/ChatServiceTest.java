@@ -29,7 +29,8 @@ class ChatServiceTest {
         when(qb.settings()).thenReturn(new QBittorrentService.Settings(null, null, null, null));
         ChatService service = new ChatService(jdbc, mock(MovieSearchService.class), mock(DyttSearchService.class), qb,
                 mock(MessageService.class), mock(MovieSubscriptionService.class), mock(VideoParseService.class),
-                mock(XunleiService.class), mock(ChatRequestService.class), mock(ChatPushService.class));
+                mock(XunleiService.class), mock(XunleiWinService.class),
+                mock(ChatRequestService.class), mock(ChatPushService.class));
         try {
             var submitted = service.submit("magnet", "request-fixture", "fixture text");
             long id = submitted.userMessage().id();
