@@ -36,6 +36,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "magnet" -> Icons.Outlined.CloudDownload
     "video" -> Icons.Outlined.SmartDisplay
     "xunlei", "xunlei-win" -> Icons.Outlined.Bolt
+    "upgrade" -> Icons.Outlined.SystemUpdate
     "system" -> Icons.Outlined.NotificationsNone
     else -> Icons.AutoMirrored.Outlined.Chat
 }

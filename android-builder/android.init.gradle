@@ -1,0 +1,16 @@
+// Apply release metadata to the selected Git revision, including older revisions.
+allprojects { project ->
+    project.plugins.withId('com.android.application') {
+        project.extensions.getByName('androidComponents').finalizeDsl { android ->
+            android.defaultConfig.versionCode = Integer.parseInt(System.getenv('HULUWA_VERSION_CODE'))
+            def versionName = System.getenv('HULUWA_VERSION_NAME')
+            if (versionName) android.defaultConfig.versionName = versionName
+            def signing = android.signingConfigs.findByName('huluwaWebRelease') ?: android.signingConfigs.create('huluwaWebRelease')
+            signing.storeFile = new File(System.getenv('HULUWA_KEYSTORE_FILE'))
+            signing.storePassword = System.getenv('HULUWA_STORE_PASSWORD')
+            signing.keyAlias = System.getenv('HULUWA_KEY_ALIAS')
+            signing.keyPassword = System.getenv('HULUWA_KEY_PASSWORD')
+            android.buildTypes.getByName('release').signingConfig = signing
+        }
+    }
+}

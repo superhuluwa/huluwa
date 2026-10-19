@@ -14,6 +14,10 @@ services:
     environment:
       # docker-java SDK 直连宿主机 Docker 守护进程，无需容器内安装 docker CLI。
       DOCKER_HOST: unix:///var/run/docker.sock
+      HULUWA_ANDROID_BUILD_ENABLED: "true"
+      HULUWA_ANDROID_BUILD_DIR: /app/android-build
+      HULUWA_ANDROID_TIMEOUT_SECONDS: ${HULUWA_ANDROID_TIMEOUT_SECONDS:-1800}
+      HULUWA_ANDROID_RETENTION: ${HULUWA_ANDROID_RETENTION:-10}
       HULUWA_HLS_MEDIA_ROOT: /vol1/1000/downloads
       # 私有工作区留在容器可写层，不能添加对应的 volumes 挂载。
       HULUWA_HLS_WORK_ROOT: /app/.huluwa-work
@@ -25,6 +29,7 @@ services:
       - "${DOCKER_GID:-0}"
     volumes:
       - ${HULUWA_DATA_DIR:-./data}:/app/data
+      - android-build-data:/app/android-build
       # 与迅雷、qBittorrent 共用宿主机下载根目录；容器内外路径保持一致。
       # 这里只存放完成文件；临时分片、合并视频和日志保存在容器私有目录。
       - /vol1/1000/downloads:/vol1/1000/downloads
@@ -37,3 +42,39 @@ services:
       # 路径可用 .env 的 HULUWA_FRP_DIR 覆盖（飞牛默认 /vol1/1000/docker/frpc）。
       # 注意：目录需归 uid 10001 所有，且 frpc 侧也要目录挂载，原子替换才对双方可见。
       - ${HULUWA_FRP_DIR:-/root/frp}:/app/frp
+
+  android-builder:
+    image: huluwa-android-builder:latest
+    container_name: huluwa-android-builder
+    build:
+      context: ./android-builder
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    user: "10001:10001"
+    cpus: "${HULUWA_ANDROID_CPUS:-2}"
+    mem_limit: ${HULUWA_ANDROID_MEMORY:-4g}
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      HULUWA_ANDROID_REPOSITORY: ${HULUWA_ANDROID_REPOSITORY:-https://gitee.com/wangjing71/huluwa.git}
+      HULUWA_ANDROID_BRANCH: ${HULUWA_ANDROID_BRANCH:-master}
+      HULUWA_GIT_USERNAME: ${HULUWA_ANDROID_GIT_USERNAME:-oauth2}
+    volumes:
+      - android-build-data:/build-data
+      - android-workspace:/workspace
+      - android-signing:/signing:ro
+      - android-credentials:/credentials:ro
+
+volumes:
+  android-build-data:
+    name: huluwa-android-build-data
+  android-workspace:
+    name: huluwa-android-workspace
+  android-signing:
+    name: huluwa-android-signing
+  android-credentials:
+    name: huluwa-android-credentials

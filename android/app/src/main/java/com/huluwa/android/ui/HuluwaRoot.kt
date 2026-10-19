@@ -38,7 +38,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else {
-        if (ui.chat.session != null) ChatScreen(ui, vm, snackbar)
+        if (ui.chat.session?.kind == "upgrade") AppUpgradeScreen(ui, vm, snackbar)
+        else if (ui.chat.session != null) ChatScreen(ui, vm, snackbar)
         else Scaffold(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),

@@ -53,6 +53,8 @@ RUN apt-get update \
     && chown huluwa:huluwa /app/data /app/.huluwa-work /vol1/1000/downloads /media \
     && chmod 700 /app/.huluwa-work
 
+RUN mkdir -p /app/android-build/tasks && chown -R huluwa:huluwa /app/android-build
+
 COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
 COPY --from=hls-tools /out/N_m3u8DL-RE /usr/local/bin/N_m3u8DL-RE
 

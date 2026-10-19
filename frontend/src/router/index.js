@@ -72,6 +72,12 @@ const routes = [
                 component: createRouteLoader(() => import('@/views/frp/index.vue'))
             },
             {
+                path: 'android',
+                name: 'android-app',
+                meta: { title: '安卓 App', icon: 'fa-brands fa-android' },
+                component: createRouteLoader(() => import('@/views/android/index.vue'))
+            },
+            {
                 path: 'push',
                 name: 'push',
                 meta: { title: '推送设置', icon: 'fa-solid fa-paper-plane' },

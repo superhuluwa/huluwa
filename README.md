@@ -35,6 +35,8 @@
 
 安卓源码位于同一 Git 仓库的 [`android/`](android/README.md) 目录，使用 Kotlin + Jetpack Compose 实现独立的手机界面，通过现有后端接口管理会话、下载、订阅、Frp 和 Docker，默认首页为“我的会话”。
 
+网页左侧“安卓 App”可更新源码、编译签名 Release APK、查看日志并下载安装包。独立构建服务位于 [`android-builder/`](android-builder/README.md)，首次部署需导入已有 Release 签名。
+
 使用 Android Studio 打开 `android/` 目录即可导入安卓工程。工程配置和开发说明见 [安卓客户端说明](android/README.md)。
 
 ## 架构与 tech stack

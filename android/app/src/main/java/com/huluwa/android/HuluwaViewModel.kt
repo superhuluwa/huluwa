@@ -29,6 +29,7 @@ data class ChatState(val session: Session? = null, val messages: List<ChatMessag
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Sessions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
+    val upgrade: AppUpgradeState = AppUpgradeState(),
     val downloads: LoadState<List<DownloadTask>> = LoadState(emptyList()), val subscriptions: LoadState<List<Subscription>> = LoadState(emptyList()),
     val tunnels: LoadState<List<Tunnel>> = LoadState(emptyList()), val runtime: FrpRuntime = FrpRuntime(),
     val containers: LoadState<List<DockerContainer>> = LoadState(emptyList()), val overview: DockerOverview = DockerOverview(),
@@ -39,13 +40,22 @@ data class AppState(
 class HuluwaViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as HuluwaApplication).repository
     private val session = repository.api.store
+    private val appUpdates = (application as HuluwaApplication).appUpdates
     private val mutable = MutableStateFlow(AppState(auth = AuthState(session.server, session.username, session.loggedIn)))
-    val state = mutable.asStateFlow()
+    private fun withUpgradeSession(value: AppState, upgrade: AppUpgradeState): AppState {
+        val upgradeSession = Session(UPGRADE_SESSION_ID, "在线升级", "upgrade", if (upgrade.hasUpdate) 1 else 0,
+            null, upgrade.sessionPreview)
+        return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data =
+            listOf(upgradeSession) + value.sessions.data.filterNot { it.id == UPGRADE_SESSION_ID || it.kind == "upgrade" }))
+    }
+    val state = combine(mutable, appUpdates.state) { value, upgrade -> withUpgradeSession(value, upgrade) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, withUpgradeSession(mutable.value, appUpdates.state.value))
     private val notices = Channel<String>(Channel.BUFFERED)
     val messages = notices.receiveAsFlow()
     private var foreground = false
     private var socketJob: Job? = null
     private var pollingJob: Job? = null
+    private var upgradeDownloadJob: Job? = null
     private var chatJob: Job? = null
     private var authJob: Job? = null
     private var mutationJob: Job? = null
@@ -86,7 +96,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun logout(message: String? = null) {
         generation++; stopForegroundWork(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
-        session.clear(); repository.clearCaches()
+        appUpdates.reset(); session.clear(); repository.clearCaches()
         mutable.value = AppState(auth = AuthState(session.server, session.username, error = message))
         if (message != null) notify(message)
     }
@@ -98,6 +108,16 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (active && session.loggedIn) startForegroundWork() else stopForegroundWork()
     }
     private fun startForegroundWork() {
+        appUpdates.refreshInstalledVersion()
+        checkAppUpdate()
+        if (upgradeDownloadJob?.isActive != true) upgradeDownloadJob = viewModelScope.launch {
+            while (isActive && session.loggedIn) {
+                try { appUpdates.pollDownload() }
+                catch (error: CancellationException) { throw error }
+                catch (error: Throwable) { handleError(error) }
+                delay(if (appUpdates.state.value.download.active) 700 else 2000)
+            }
+        }
         if (socketJob?.isActive != true) socketJob = viewModelScope.launch {
             ChatRealtime(repository.api).events().catch { handleError(it) }.collect { event -> when (event) {
                 RealtimeEvent.Connected -> { mutable.update { it.copy(realtime = true) }; refreshSessions(true); refreshChat() }
@@ -107,7 +127,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (pollingJob?.isActive != true) pollingJob = viewModelScope.launch {
             while (isActive && session.loggedIn) {
-                refreshCurrent(true); refreshSessions(true); refreshChat()
+                refreshCurrent(true); refreshSessions(true); refreshChat(); checkAppUpdate()
                 if (mutable.value.chat.processing && System.currentTimeMillis() - processingStarted > 180_000) mutable.update { it.copy(chat = it.chat.copy(processing = false)) }
                 delay(if (mutable.value.realtime) 15_000 else 8_000)
             }
@@ -115,6 +135,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     private fun stopForegroundWork() {
         socketJob?.cancel(); socketJob = null; pollingJob?.cancel(); pollingJob = null
+        upgradeDownloadJob?.cancel(); upgradeDownloadJob = null
         mutable.update { it.copy(realtime = false) }
     }
     fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab) }; refreshCurrent(false) }
@@ -183,6 +204,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var chatGeneration = 0
     private var localId = -1L
     fun openSession(session: Session) {
+        if (session.kind == "upgrade") {
+            closeChat()
+            mutable.update { it.copy(chat = ChatState(session = session)) }
+            checkAppUpdate()
+            return
+        }
         chatGeneration++; chatJob?.cancel()
         val current = chatGeneration
         mutable.update { it.copy(chat = ChatState(session = session, loading = true)) }
@@ -198,10 +225,28 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun closeChat() { chatGeneration++; chatJob?.cancel(); mutable.update { it.copy(chat = ChatState()) } }
+
+    fun checkAppUpdate() = refresh("app-upgrade") {
+        try { appUpdates.checkLatest() }
+        catch (error: CancellationException) { throw error }
+        catch (error: Throwable) { handleError(error) }
+    }
+    fun downloadAppUpdate() = refresh("app-upgrade-download") {
+        try { appUpdates.downloadLatest() }
+        catch (error: CancellationException) { throw error }
+        catch (error: Throwable) { appUpdates.downloadError(error.userMessage()) }
+    }
+    fun cancelAppUpdate() = refresh("app-upgrade-cancel") { appUpdates.cancelDownload() }
+    fun consumeUpdateInstallRequest() = appUpdates.consumeInstallRequest()
+    fun canInstallAppUpdate() = appUpdates.canInstallPackages()
+    fun appUpdateInstallationError(message: String) = appUpdates.installationError(message)
+    suspend fun appUpdateInstallerIntent() = appUpdates.installerIntent()
+    fun refreshAppUpdateAfterInstall() { appUpdates.refreshInstalledVersion(); checkAppUpdate() }
+
     private fun merge(old: List<ChatMessage>, incoming: List<ChatMessage>) = (old + incoming).associateBy { it.id }.values.sortedWith(compareBy<ChatMessage> { if (it.id < 0) Long.MAX_VALUE else it.id }.thenBy { it.createdAt })
     fun refreshChat() {
         val chat = mutable.value.chat; val id = chat.session?.id ?: return
-        if (chat.loading) return
+        if (chat.loading || chat.session?.kind == "upgrade") return
         val current = chatGeneration
         refresh("chat:$id") {
             try {
@@ -236,7 +281,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun send(content: String, retry: ChatMessage? = null) {
         val chat = mutable.value.chat; val selected = chat.session ?: return
-        if (selected.kind == "system" || content.isBlank()) return
+        if (selected.kind in setOf("system", "upgrade") || content.isBlank()) return
         val current = chatGeneration; val nonce = retry?.requestId ?: UUID.randomUUID().toString()
         val outgoing = retry?.copy(delivery = Delivery.Sending) ?: ChatMessage(localId--, selected.id, "user", "text", content.trim(), content.trim(), JsonObject(emptyMap()), LocalDateTime.now().toString().replace('T', ' '), Delivery.Sending, nonce)
         processingStarted = System.currentTimeMillis()

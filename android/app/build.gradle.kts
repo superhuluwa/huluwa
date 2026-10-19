@@ -22,8 +22,8 @@ android {
         applicationId = "com.huluwa.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = providers.gradleProperty("huluwaVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("huluwaVersionName").orNull ?: "1.0.0"
     }
     signingConfigs {
         if (releaseKeystoreFile.isFile) {
@@ -56,6 +56,7 @@ kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.10.01")
     implementation(composeBom)
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

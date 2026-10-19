@@ -354,3 +354,27 @@ CREATE TABLE IF NOT EXISTS xunlei_win_download_task (
 CREATE INDEX IF NOT EXISTS idx_xunlei_win_task_status ON xunlei_win_download_task (status, checked_at, id);
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (8, datetime('now', 'localtime'));
+
+-- 安卓更新 / Release 编译任务。日志、请求和 APK 位于独立持久化卷。
+CREATE TABLE IF NOT EXISTS android_build_task (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'QUEUED',
+    source_commit TEXT,
+    commit_subject TEXT,
+    version_code INTEGER,
+    version_name TEXT,
+    artifact_name TEXT,
+    apk_size INTEGER,
+    sha256 TEXT,
+    signature_sha256 TEXT,
+    error_text TEXT,
+    requested_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    deadline INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_android_single_active
+    ON android_build_task ((1)) WHERE status IN ('QUEUED', 'RUNNING', 'CANCELLING');

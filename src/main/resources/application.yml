@@ -38,6 +38,11 @@ spring:
 
 huluwa:
   data-dir: ./data
+  android-build:
+    enabled: ${HULUWA_ANDROID_BUILD_ENABLED:false}
+    directory: ${HULUWA_ANDROID_BUILD_DIR:/app/android-build}
+    timeout-seconds: ${HULUWA_ANDROID_TIMEOUT_SECONDS:1800}
+    retention: ${HULUWA_ANDROID_RETENTION:10}
   hls:
     # 与迅雷、qBittorrent 共用下载根目录，文件直接归档到剧名目录。
     media-root: ${HULUWA_HLS_MEDIA_ROOT:/vol1/1000/downloads}

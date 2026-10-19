@@ -40,8 +40,8 @@ enum class DownloadSource(val title: String) { Hls("离线剧集"), Magnet("磁�
 enum class SubscriptionSource(val title: String) { Hls("电影天堂"), Movie("电影港") }
 enum class Delivery { Sent, Sending, Failed }
 
-data class Session(val id: String, val title: String, val kind: String, val unread: Int, val last: ChatMessage?) {
-    val preview: String get() = last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
+data class Session(val id: String, val title: String, val kind: String, val unread: Int, val last: ChatMessage?, val previewOverride: String? = null) {
+    val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject) = Session(raw.text("id"), raw.text("title"), raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
             (raw["last"] as? JsonObject)?.let(ChatMessage::from))
