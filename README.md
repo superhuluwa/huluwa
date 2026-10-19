@@ -31,6 +31,12 @@
 ### 🔔 推送设置
 系统事件（订阅命中、下载完成、巡检异常等）的推送渠道配置。
 
+## 原生安卓客户端
+
+安卓源码位于同一 Git 仓库的 [`android/`](android/README.md) 目录，使用 Kotlin + Jetpack Compose 实现独立的手机界面，通过现有后端接口管理会话、下载、订阅、Frp 和 Docker，默认首页为“我的会话”。
+
+使用 Android Studio 打开 `android/` 目录即可导入安卓工程。工程配置和开发说明见 [安卓客户端说明](android/README.md)。
+
 ## 架构与 tech stack
 
 ```
@@ -123,6 +129,7 @@ huluwa/
 │   ├── schema.sql        # SQLite 表结构
 │   └── static/           # 前端构建产物（由 Vite 生成）
 ├── frontend/             # Vue 3 前端源码（views / components / stores ...）
+├── android/              # Kotlin + Jetpack Compose 原生安卓客户端
 ├── scripts/              # HLS 工具安装、下载目录授权等辅助脚本
 ├── docs/                 # 飞牛影视 m3u8 订阅适配方案
 ├── Dockerfile / compose.yaml / deploy-centos.sh / deploy.bat / deploy_fnos.bat
@@ -136,6 +143,8 @@ huluwa/
 - 登录基于 JWT（默认 72 小时过期），令牌密钥首次启动自动生成并持久化
 
 ## 相关文档
+
+- [android/README.md](android/README.md) — 原生安卓客户端导入与开发说明
 
 - [DOCKER.md](DOCKER.md) — Docker 部署完整文档（CentOS / 飞牛）
 - [docs/飞牛影视-m3u8-订阅适配方案.md](docs/飞牛影视-m3u8-订阅适配方案.md) — m3u8 订阅下载与飞牛影视适配细节

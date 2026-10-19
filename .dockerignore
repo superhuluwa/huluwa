@@ -34,3 +34,6 @@ data
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# 原生安卓工程独立开发，不进入服务端容器构建上下文
+android

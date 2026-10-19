@@ -32,3 +32,13 @@ backups/
 .deploy-state
 .compose.yaml.fnos-backup
 .compose.fnos.override.yaml
+
+# 原生安卓工程：源码 data 包不属于运行期数据，Wrapper JAR 是工程必需文件
+!android/app/src/main/java/com/huluwa/android/data/
+!android/app/src/test/java/com/huluwa/android/data/
+!android/gradle/wrapper/gradle-wrapper.jar
+
+# 本地生成的安卓设计预览与交付压缩包
+/output/android-design/
+/output/android-design.zip
+/output/huluwa-android-design.zip
