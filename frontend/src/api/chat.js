@@ -100,7 +100,7 @@ export function DownloadMagnet(payload) {
     return http.post('/chat/subscriptions/magnets/download', payload, { timeout: 60000 })
 }
 
-/** 清空磁力下载记录：只隐藏已结束的历史行，进行中的任务保留 */
+/** 清空磁力下载列表的全部记录，下载器中的任务继续执行 */
 export function ClearSubscriptionDownloads() {
     return http.delete('/chat/subscriptions/downloads')
 }

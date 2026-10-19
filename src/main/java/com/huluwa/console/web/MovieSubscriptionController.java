@@ -184,7 +184,7 @@ public class MovieSubscriptionController {
         return ApiResult.ok(subscriptionService.downloads(id, refresh));
     }
 
-    /** 清空下载记录：隐藏已完成 / 失败的历史行，进行中的任务保留 */
+    /** 清空磁力下载列表的全部记录，保留下载器任务与去重历史 */
     @DeleteMapping("/downloads")
     public ApiResult<Map<String, Object>> clearDownloads() {
         return ApiResult.ok(subscriptionService.clearDownloads());

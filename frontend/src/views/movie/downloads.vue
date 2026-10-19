@@ -122,7 +122,7 @@ export default {
         }
     },
     computed: {
-        clearable() { return this.rows.some(row => ['completed', 'failed', 'removed'].includes(row.status)) },
+        clearable() { return this.rows.length > 0 },
         syncMessage() {
             if (this.loadError) return this.loadError
             return this.rows.some(row => row.queryError)
@@ -222,16 +222,18 @@ export default {
             if (this.clearing || this.fetching || !this.clearable) return
             window.$dialog?.warning({
                 title: '清空下载记录',
-                content: '将清空已完成 / 失败 / 已移除的历史记录，待提交与下载中的任务保留。下载器里已提交的任务不受影响，确认清空？',
+                content: '将清空磁力下载列表中的全部记录，包括待提交、已提交和下载中的任务记录。下载器中的任务仍会继续执行，已下载文件保留，确认清空？',
                 positiveText: '清空',
                 negativeText: '取消',
                 onPositiveClick: async () => {
+                    if (this.clearing) return false
                     this.clearing = true
                     // 丢弃清空之前发出的轮询结果，避免刚清理的行再次出现。
                     this.requestVersion += 1
                     try {
                         const result = await ClearSubscriptionDownloads()
-                        this.rows = this.rows.filter(row => !['completed', 'failed', 'removed'].includes(row.status))
+                        this.rows = []
+                        this.loadError = ''
                         window.$message?.success(result?.message || '已清空下载记录')
                     } catch (error) { /* 拦截器已提示 */ }
                     finally { this.clearing = false }

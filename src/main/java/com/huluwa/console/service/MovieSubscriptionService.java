@@ -529,7 +529,7 @@ public class MovieSubscriptionService {
             try {
                 Map<String, Object> result = submitOne(subscription.id(), subscription.title(),
                         string(row.get("episode")), string(row.get("quality")), string(row.get("magnet")),
-                        string(row.get("torrent_hash")), savePathOf(subscription.title()));
+                        string(row.get("torrent_hash")), savePathOf(subscription.title()), false);
                 if (Boolean.TRUE.equals(result.get("ok"))) {
                     done++;
                 }
@@ -547,7 +547,7 @@ public class MovieSubscriptionService {
             return false;
         }
         Map<String, Object> result = submitOne(subscription.id(), subscription.title(), item.episode(),
-                item.quality(), magnet, item.hash(), savePathOf(subscription.title()));
+                item.quality(), magnet, item.hash(), savePathOf(subscription.title()), false);
         return Boolean.TRUE.equals(result.get("ok"));
     }
 
@@ -559,10 +559,12 @@ public class MovieSubscriptionService {
      * 之后下载跟踪补文件名、以及巡检去重（同一集不重复下）都依赖这两个字段。</p>
      *
      * @param subscriptionId 订阅 id；手动下载时可为 null（不参与订阅巡检去重）
+     * @param revealInDownloads 手动重新提交时恢复列表可见性；后台提交保留已有隐藏状态
      * @return { ok, duplicate, inserted, taskId, savePath, status, message }
      */
     private Map<String, Object> submitOne(Long subscriptionId, String seriesTitle, String episode,
-                                          String quality, String magnet, String hash, String savePath) {
+                                          String quality, String magnet, String hash, String savePath,
+                                          boolean revealInDownloads) {
         Map<String, Object> out = new LinkedHashMap<>();
         String tool = subscriptionId == null ? downloadSettings().downloader()
                 : subscriptionDownloader(findRowById(subscriptionId));
@@ -584,6 +586,12 @@ public class MovieSubscriptionService {
         long taskId = taskIdOf(magnet);
         out.put("taskId", taskId);
         out.put("inserted", inserted > 0);
+
+        // 手动重提在访问下载器前恢复显示；提交期间若被清空，结果回写时保持隐藏。
+        // 后台自动重试只更新任务状态，避免把已清空的记录重新带回列表。
+        if (inserted == 0 && revealInDownloads) {
+            jdbcTemplate.update("UPDATE movie_download_task SET hidden_at = NULL WHERE id = ?", taskId);
+        }
 
         String status;
         String headline;
@@ -614,13 +622,12 @@ public class MovieSubscriptionService {
                 headline = "⚠️ 提交失败：" + (result == null ? toolLabel(tool) + " 未返回结果" : result.message());
             }
         }
-        // 重新提交（含自动重试此前失败的行）时解除隐藏，让被「清空下载记录」隐藏的条目重新可见；
-        // 新任务先保存磁力解析得到的总大小，其余进度信息由跟踪查询回填。
+        // 先保存磁力解析得到的总大小，其余进度信息由跟踪查询回填，保留当前隐藏状态。
         jdbcTemplate.update("""
                 UPDATE movie_download_task SET status = ?, message = ?, save_path = ?, downloader = ?,
                        external_task_id = ?, progress = NULL, total_bytes = ?, received_bytes = NULL,
                        download_speed = NULL, speedup_speed = NULL, checked_at = NULL, query_error = NULL,
-                       completed_at = NULL, hidden_at = NULL, updated_at = ?
+                       completed_at = NULL, updated_at = ?
                  WHERE id = ?
                 """, status, headline, savePath, tool, externalTaskId, totalBytes, now(), taskId);
 
@@ -1417,7 +1424,7 @@ public class MovieSubscriptionService {
             data.put("message", "该磁力已在下载列表中，未重复提交。");
             return data;
         }
-        Map<String, Object> result = submitOne(subscriptionId, title, ep, grade, link, hash, savePath);
+        Map<String, Object> result = submitOne(subscriptionId, title, ep, grade, link, hash, savePath, true);
         Map<String, Object> data = new LinkedHashMap<>(result);
         data.put("episode", ep);
         data.put("quality", grade);
@@ -1470,24 +1477,18 @@ public class MovieSubscriptionService {
     }
 
     /**
-     * 清空下载记录：只隐藏终态行（已完成 / 失败 / 已移除），
-     * 已提交与下载中的任务保留在列表里；隐藏而非删除，
-     * 重复提交判定与订阅巡检去重仍依赖这些历史行。
+     * 清空磁力下载列表中的全部记录；隐藏后仍跟踪下载器任务，
+     * 重复提交判定与订阅巡检去重继续使用保留的历史行。
      */
     public Map<String, Object> clearDownloads() {
         int hidden = jdbcTemplate.update("""
                 UPDATE movie_download_task SET hidden_at = ?
-                 WHERE hidden_at IS NULL AND status NOT IN ('pending', 'added', 'downloading')
+                 WHERE hidden_at IS NULL
                 """, now());
-        Integer kept = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL", Integer.class);
-        int keptInt = kept == null ? 0 : kept;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("hidden", hidden);
-        result.put("kept", keptInt);
-        result.put("message", hidden > 0
-                ? "已清空 " + hidden + " 条下载记录" + (keptInt > 0 ? "，保留 " + keptInt + " 条进行中的任务" : "")
-                : keptInt > 0 ? "进行中的任务不会被清空，当前没有可清理的下载记录" : "暂无下载记录");
+        result.put("kept", 0);
+        result.put("message", hidden > 0 ? "已清空 " + hidden + " 条下载记录" : "暂无下载记录");
         return result;
     }
 

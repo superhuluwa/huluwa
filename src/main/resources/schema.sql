@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS movie_download_task (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     completed_at    TEXT,
-    hidden_at       TEXT                         -- 清空下载记录：隐藏终态行，去重历史仍保留
+    hidden_at       TEXT                         -- 清空磁力下载列表：隐藏全部记录，去重历史仍保留
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_task_magnet ON movie_download_task (magnet);
 CREATE INDEX IF NOT EXISTS idx_movie_task_status ON movie_download_task (status, id);
@@ -298,7 +298,7 @@ CREATE INDEX IF NOT EXISTS idx_hls_task_due ON hls_download_task(status, next_at
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (4, datetime('now', 'localtime'));
 
--- v5：清空下载记录。隐藏终态行而不是删除：订阅巡检与重复提交判定仍读取这些历史行。
+-- v5：清空下载记录。隐藏记录而保留历史数据：订阅巡检与重复提交判定仍读取这些历史行。
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (5, datetime('now', 'localtime'));
 

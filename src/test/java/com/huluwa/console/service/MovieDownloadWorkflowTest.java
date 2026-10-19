@@ -225,25 +225,58 @@ class MovieDownloadWorkflowTest {
     }
 
     @Test
-    void clearingDownloadsHidesFinishedMagnetRowsAndKeepsTrackingVisible() {
+    void clearingDownloadsHidesAllStatusesAndKeepsTrackingAndDeduplication() {
         MovieSubscriptionService.Subscription subscription = subscribe("qb");
-        service.downloadMagnet(URL, TITLE, magnet('7'), "1080P", "1");
-        service.downloadMagnet(URL, TITLE, magnet('8'), "1080P", "2");
-        jdbc.update("UPDATE movie_download_task SET status = 'completed' WHERE magnet = ?", magnet('7'));
+        List<String> statuses = List.of("pending", "added", "downloading", "completed", "failed", "removed");
+        for (int i = 0; i < statuses.size(); i++) {
+            String magnet = magnet((char) ('1' + i));
+            service.downloadMagnet(URL, TITLE, magnet, "1080P", String.valueOf(i + 1));
+            jdbc.update("UPDATE movie_download_task SET status = ? WHERE magnet = ?", statuses.get(i), magnet);
+        }
 
         Map<String, Object> cleared = service.clearDownloads();
-        assertEquals(1, cleared.get("hidden"));
-        assertEquals(1, cleared.get("kept"));
-        assertEquals(List.of(magnet('8')), service.downloads(0).stream()
-                .map(row -> String.valueOf(row.get("id"))).map(id -> jdbc.queryForObject(
-                        "SELECT magnet FROM movie_download_task WHERE id = ?", String.class, Long.parseLong(id))).toList());
+        assertEquals(statuses.size(), cleared.get("hidden"));
+        assertEquals(0, cleared.get("kept"));
+        assertTrue(service.downloads(0).isEmpty());
+        assertEquals(statuses.size(), jdbc.queryForObject("SELECT COUNT(*) FROM movie_download_task", Integer.class));
 
-        // 清空不移除去重历史：同一磁力再次提交仍然命中「已在下载列表」
-        Map<String, Object> duplicate = service.downloadMagnet(URL, TITLE, magnet('7'), "1080P", "1");
-        assertEquals(true, duplicate.get("duplicate"));
-        verify(qb, times(2)).add(anyList(), anyString());
+        // 已完成与进行中的任务都保留去重历史。
+        assertEquals(true, service.downloadMagnet(URL, TITLE, magnet('4'), "1080P", "4").get("duplicate"));
+        assertEquals(true, service.downloadMagnet(URL, TITLE, magnet('2'), "1080P", "2").get("duplicate"));
+        verify(qb, times(statuses.size())).add(anyList(), anyString());
+
+        // 隐藏后的任务仍能完成跟踪，状态回写不会恢复列表可见性。
+        when(qb.torrent("2".repeat(40))).thenReturn(new QBittorrentService.Torrent(
+                "2".repeat(40), TITLE, 1, "uploading", 0, 0, 0));
+        service.refreshDownloads();
+        assertEquals("completed", jdbc.queryForObject(
+                "SELECT status FROM movie_download_task WHERE magnet = ?", String.class, magnet('2')));
+        assertTrue(service.downloads(0).isEmpty());
+
+        // 巡检自动重试失败任务后，已经清空的记录也不会重新出现。
+        when(search.fetchMagnets(URL)).thenReturn(List.of());
+        service.scan(subscription.id(), SubscriptionCheckLogService.TRIGGER_MANUAL);
+        assertEquals("added", jdbc.queryForObject(
+                "SELECT status FROM movie_download_task WHERE magnet = ?", String.class, magnet('5')));
+        assertTrue(service.downloads(0).isEmpty());
+        verify(qb, times(statuses.size() + 1)).add(anyList(), anyString());
         assertEquals(0, jdbc.queryForObject(
-                "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL AND status = 'completed'", Integer.class));
+                "SELECT COUNT(*) FROM movie_download_task WHERE hidden_at IS NULL", Integer.class));
+    }
+
+    @Test
+    void clearingDuringSubmissionKeepsTheRecordHiddenWhenSubmissionReturns() {
+        subscribe("qb");
+        when(qb.add(anyList(), anyString())).thenAnswer(invocation -> {
+            assertEquals(1, service.clearDownloads().get("hidden"));
+            return new QBittorrentService.AddResult(true, false, "已提交");
+        });
+
+        Map<String, Object> result = service.downloadMagnet(URL, TITLE, magnet('7'), "1080P", "1");
+
+        assertEquals(true, result.get("ok"));
+        assertEquals("added", jdbc.queryForObject("SELECT status FROM movie_download_task", String.class));
+        assertTrue(service.downloads(0).isEmpty());
     }
 
     /**
