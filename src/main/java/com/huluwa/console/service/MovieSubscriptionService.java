@@ -1167,7 +1167,7 @@ public class MovieSubscriptionService {
      * 「资源列表」弹窗的排序：按集数倒序，最新一集在最前；识别不出集号的条目排最后。
      *
      * <p>同一集的多条磁力保持详情页内的相对顺序（稳定排序）。集号按数字比较，
-     * 因此「第 10 集」排在「第 9 集」前面，而不是按字符串比较。</p>
+     * 合并资源取结束集号，因此「第 1 集至第 14 集」按第 14 集排序。</p>
      */
     static int compareEpisodeDesc(MovieSearchService.MagnetItem left, MovieSearchService.MagnetItem right) {
         Integer leftEpisode = episodeNumber(left == null ? null : left.episode());
@@ -1184,13 +1184,19 @@ public class MovieSubscriptionService {
         return Integer.compare(rightEpisode, leftEpisode);
     }
 
-    /** 集号转数字用于倒序比较；非数字集号（如特别篇编号）按无法识别处理，排在最后 */
+    /** 集号转数字用于倒序比较，范围取结束集号；无法识别的编号排在最后 */
     private static Integer episodeNumber(String episode) {
         if (episode == null || episode.isBlank()) {
             return null;
         }
         try {
-            return Integer.parseInt(episode.trim());
+            String value = episode.trim();
+            int separator = value.indexOf('-');
+            if (separator > 0) {
+                Integer.parseInt(value.substring(0, separator));
+                value = value.substring(separator + 1);
+            }
+            return Integer.parseInt(value);
         } catch (NumberFormatException e) {
             return null;
         }

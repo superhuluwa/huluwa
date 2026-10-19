@@ -78,20 +78,29 @@ public class MovieSearchService {
     /** 媒体扩展名（抽集号前先剔除，避免把「.mp4 / .mkv」里的数字当集号） */
     private static final Pattern MEDIA_EXTENSION = Pattern.compile(
             "(?i)\\.(?:mp4|m4v|mkv|avi|rmvb|rm|ts|m2ts|mts|mov|flv|wmv|webm|mpg|mpeg|iso|3gp|vob|asf|f4v|ogv)\\s*$");
+    /** 合并集号的范围分隔符，兼容半角 / 全角横线、波浪线与「至 / 到」 */
+    private static final String EPISODE_RANGE_SEPARATOR = "\\s*[-~～－—–至到]\\s*";
     /**
      * 独立数字段：左右不能紧贴字母数字（避免「x264 / 10bit」），前后也不能构成「数字.数字」
      * （避免把「5.1 / 7.1」声道记号当集号）。裸数字集号（212 / 04）与合并集号（208-209）走这里。
      */
     private static final Pattern STANDALONE_DIGITS = Pattern.compile(
-            "(?<![0-9A-Za-z])(?<!\\d\\.)(\\d{1,4})(?![0-9A-Za-z])(?!\\.\\d)");
+            "(?<![0-9A-Za-z])(?<!\\d\\.)(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
+                    + "(\\d{1,4}))?(?![0-9A-Za-z])(?!\\.\\d)");
     /** 年份不是集号（如「某电影.2024.1080p.mkv」没有集号） */
     private static final Pattern RELEASE_YEAR = Pattern.compile("^(?:19|20)\\d{2}$");
     /** SxxExx 写法（英美剧） */
-    private static final Pattern SXXEXX = Pattern.compile("(?i)S\\d{1,2}E(\\d{1,4})");
+    private static final Pattern SXXEXX = Pattern.compile(
+            "(?i)S\\d{1,2}E(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
+                    + "(?:S\\d{1,2})?E?(\\d{1,4}))?(?!\\d)");
     /** 「第 xx 集」显式集号写法（必须带「集」，避免与「第 N 季」混淆） */
-    private static final Pattern CN_EPISODE = Pattern.compile("第\\s*(\\d{1,4})\\s*集");
+    private static final Pattern CN_EPISODE = Pattern.compile(
+            "第\\s*(\\d{1,4})(?:\\s*集)?(?:" + EPISODE_RANGE_SEPARATOR
+                    + "(?:第\\s*)?(\\d{1,4}))?\\s*集");
     /** 「EPxx」/「E12」显式集号写法 */
-    private static final Pattern EN_EPISODE = Pattern.compile("(?i)\\b(?:EP|E)(\\d{1,4})\\b");
+    private static final Pattern EN_EPISODE = Pattern.compile(
+            "(?i)\\b(?:EP|E)(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
+                    + "(?:EP|E)?(\\d{1,4}))?\\b");
     /** 「第 N 季」分隔符 */
     private static final Pattern SEASON = Pattern.compile("第\\s*\\d+\\s*季");
     private static final Pattern TAG = Pattern.compile("<[^>]+>");
@@ -190,7 +199,7 @@ public class MovieSearchService {
      * @param magnet 磁力链接（HTML 实体已还原）
      * @param hash   info hash（小写；无法解析时为 null）
      * @param quality 清晰度标签（2160P / 1080P / 720P / 480P / 360P / OTHER）
-     * @param episode 剧集键（集号；无法识别时为 null）
+     * @param episode 剧集键（集号或起止范围，如 1 / 1-14；无法识别时为 null）
      */
     public record MagnetItem(String title, String magnet, String hash, String quality, String episode) {
     }
@@ -335,8 +344,8 @@ public class MovieSearchService {
     }
 
     /**
-     * 抽取剧集键（集号）：优先「第 N 季」之后的数字段，其次 SxxExx / EPxx / 独立数字段。
-     * 一集一个键，便于跨清晰度去重（同一集的 1080P / 2160P 视为同一更新）。
+     * 抽取剧集键（集号或范围）：优先 SxxExx / 第 N 集 / EPxx，其次「第 N 季」之后的独立数字段。
+     * 合并集号保留起止范围（01-14 → 1-14），便于跨清晰度去重，并与同起始集的单集资源区分。
      *
      * <p>识别不出集号时返回 null：整季打包（「第一季全集打包.1080p.mp4」）、
      * 正片 / 剧场版（「某电影.2024.1080p.mkv」）都属此类，不会把扩展名或年份当成集号。</p>
@@ -348,16 +357,16 @@ public class MovieSearchService {
         // 1) 英美剧习惯的 SxxExx（先于通用数字段，否则会先抽到季号）
         Matcher sxxexx = SXXEXX.matcher(title);
         if (sxxexx.find()) {
-            return normalizeEpisode(sxxexx.group(1));
+            return normalizeEpisode(sxxexx.group(1), sxxexx.group(2));
         }
         // 2) 「第 N 集」/「EPxx」等显式写法
         Matcher cn = CN_EPISODE.matcher(title);
         if (cn.find()) {
-            return normalizeEpisode(cn.group(1));
+            return normalizeEpisode(cn.group(1), cn.group(2));
         }
         Matcher en = EN_EPISODE.matcher(title);
         if (en.find()) {
-            return normalizeEpisode(en.group(1));
+            return normalizeEpisode(en.group(1), en.group(2));
         }
         // 3) 「第 N 季」之后的第一个独立数字段（电影港剧集页最常见的写法）
         Matcher season = SEASON.matcher(title);
@@ -372,20 +381,23 @@ public class MovieSearchService {
         Matcher digits = STANDALONE_DIGITS.matcher(tail);
         while (digits.find()) {
             String found = digits.group(1);
-            if (!RELEASE_YEAR.matcher(found).matches()) {
-                return normalizeEpisode(found);
+            String end = digits.group(2);
+            if (!RELEASE_YEAR.matcher(found).matches()
+                    && (end == null || !RELEASE_YEAR.matcher(end).matches())) {
+                return normalizeEpisode(found, end);
             }
         }
         return null;
     }
 
-    /** 去掉集号的前导零（01 → 1），同一集的不同写法归并成一个键 */
-    private static String normalizeEpisode(String digits) {
-        try {
-            return String.valueOf(Integer.parseInt(digits));
-        } catch (NumberFormatException e) {
-            return digits;
+    /** 去掉集号两端的前导零（01-14 → 1-14），相同起止集号归并成单集 */
+    private static String normalizeEpisode(String digits, String endDigits) {
+        int start = Integer.parseInt(digits);
+        if (endDigits == null) {
+            return String.valueOf(start);
         }
+        int end = Integer.parseInt(endDigits);
+        return end > start ? start + "-" + end : String.valueOf(start);
     }
 
     // ------------------------------------------------------------------ 解析

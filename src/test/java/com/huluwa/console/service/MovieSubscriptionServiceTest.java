@@ -44,7 +44,7 @@ class MovieSubscriptionServiceTest {
         assertTrue(first.magnet().contains("&dn="), "HTML 实体必须还原成 &，否则 qB 拿不到 tracker 参数");
         assertFalse(first.magnet().contains("&amp;"), "不应残留 &amp;");
         assertEquals("2160P", first.quality());
-        assertEquals("208", first.episode());
+        assertEquals("208-209", first.episode());
         assertEquals("斗破苍穹 第5季208-209.2160p.HD国语中字无水印.mp4", first.title());
 
         // 同一 info hash 只保留首次出现（站点会重复挂同一集）
@@ -64,7 +64,7 @@ class MovieSubscriptionServiceTest {
         int latest = sorted.stream()
                 .map(MovieSearchService.MagnetItem::episode)
                 .filter(episode -> episode != null && !episode.isBlank())
-                .mapToInt(Integer::parseInt)
+                .mapToInt(episode -> Integer.parseInt(episode.substring(episode.lastIndexOf('-') + 1)))
                 .max()
                 .orElseThrow();
         assertEquals("214", String.valueOf(latest), "快照里的最新集数应稳定为 214");
@@ -79,13 +79,13 @@ class MovieSubscriptionServiceTest {
                 continue;
             }
             assertFalse(sawUnknown, "识别不出集号的条目必须排在最后，异常位置：" + item.title());
-            int current = Integer.parseInt(episode);
+            int current = Integer.parseInt(episode.substring(episode.lastIndexOf('-') + 1));
             assertTrue(current <= previous, "集数必须按倒序排列，异常位置：" + episode);
             previous = current;
         }
 
         // 详情页解析顺序保持不变，订阅巡检仍按页面顺序处理基线
-        assertEquals("208", magnets.get(0).episode(), "解析层不应被接口层的倒序排序影响");
+        assertEquals("208-209", magnets.get(0).episode(), "解析层不应被接口层的倒序排序影响");
     }
 
     /** 无法识别集号的条目放在末尾，不会插到最新一集前面 */
@@ -97,12 +97,15 @@ class MovieSubscriptionServiceTest {
                 new MovieSearchService.MagnetItem("剧 第1季02.1080p.mp4",
                         "magnet:?xt=urn:btih:" + "b".repeat(40), "b".repeat(40), "1080P", "2"),
                 new MovieSearchService.MagnetItem("剧 第1季10.1080p.mp4",
-                        "magnet:?xt=urn:btih:" + "c".repeat(40), "c".repeat(40), "1080P", "10")));
+                        "magnet:?xt=urn:btih:" + "c".repeat(40), "c".repeat(40), "1080P", "10"),
+                new MovieSearchService.MagnetItem("剧 第1季01-14.1080p.mp4",
+                        "magnet:?xt=urn:btih:" + "d".repeat(40), "d".repeat(40), "1080P", "1-14")));
         items.sort(MovieSubscriptionService::compareEpisodeDesc);
 
-        assertEquals("10", items.get(0).episode(), "两位数集号必须排在个位数之前");
-        assertEquals("2", items.get(1).episode());
-        assertEquals(null, items.get(2).episode(), "识别不出集号的条目排在最后");
+        assertEquals("1-14", items.get(0).episode(), "合并资源按结束集号排序");
+        assertEquals("10", items.get(1).episode(), "两位数集号必须排在个位数之前");
+        assertEquals("2", items.get(2).episode());
+        assertEquals(null, items.get(3).episode(), "识别不出集号的条目排在最后");
     }
 
     @Test
@@ -126,10 +129,16 @@ class MovieSubscriptionServiceTest {
     @Test
     void episodeOfHandlesSeasonAndExplicitFormats() {
         assertEquals("212", MovieSearchService.episodeOf("斗破苍穹 第5季212.2160p.mp4"));
-        assertEquals("208", MovieSearchService.episodeOf("斗破苍穹 第5季208-209.2160p.mp4"));
+        assertEquals("208-209", MovieSearchService.episodeOf("斗破苍穹 第5季208-209.2160p.mp4"));
         assertEquals("12", MovieSearchService.episodeOf("Some.Show.S05E12.1080p.mkv"));
         assertEquals("2", MovieSearchService.episodeOf("某剧 第02集 1080P"));
         assertEquals("2", MovieSearchService.episodeOf("剧名 第5季02.1080p.mp4"));
+        assertEquals("1-14", MovieSearchService.episodeOf("玉簟秋.01-14.1080p.mp4"));
+        assertEquals("1-14", MovieSearchService.episodeOf("玉簟秋 第01集-第14集 1080P"));
+        assertEquals("1-14", MovieSearchService.episodeOf("玉簟秋 第01-14集 1080P"));
+        assertEquals("1-14", MovieSearchService.episodeOf("玉簟秋 EP01-EP14 1080P"));
+        assertEquals("1-14", MovieSearchService.episodeOf("Some.Show.S01E01-E14.1080p.mkv"));
+        assertEquals("1", MovieSearchService.episodeOf("玉簟秋.01-01.1080p.mp4"));
         assertEquals(null, MovieSearchService.episodeOf("全集打包 1080P"));
     }
 
@@ -153,7 +162,7 @@ class MovieSubscriptionServiceTest {
         assertEquals(null, MovieSearchService.episodeOf("某电影.2024.1080p.BluRay.x264.mkv"));
         // 但真正的裸集号不受影响（站点常见写法）
         assertEquals("212", MovieSearchService.episodeOf("斗破苍穹 第5季212.2160p.HD国语中字无水印.mp4"));
-        assertEquals("177", MovieSearchService.episodeOf("177-178.1080p.HD国语中字无水印.mkv"));
+        assertEquals("177-178", MovieSearchService.episodeOf("177-178.1080p.HD国语中字无水印.mkv"));
         assertEquals("4", MovieSearchService.episodeOf("重返天南04.2160p.HD国语中字无水印.mp4"));
 
         // 快照整页复核：整季打包与电影条目必须是「无集号」，且不再出现被误判的 4

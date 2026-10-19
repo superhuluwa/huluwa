@@ -24,18 +24,29 @@
             <div ref="listRef" class="mm-list">
                 <div v-for="(m, index) in items" :key="m.hash || index" class="mm-row"
                     :class="{ downloaded: m.downloaded }">
-                    <span class="mm-quality" :class="qualityClass(m.quality)">{{ m.quality }}</span>
-                    <span v-if="m.episode" class="mm-ep">第 {{ m.episode }} 集</span>
-                    <span class="mm-name" :title="m.title">{{ m.title || '（无标题）' }}</span>
-                    <n-button v-if="m.downloaded" size="tiny" disabled>
-                        <template #icon><i class="fa-solid fa-check"></i></template>
-                        已下载
-                    </n-button>
-                    <n-button v-else size="tiny" type="primary" :loading="busyIndex === index"
-                        @click="download(m, index)">
-                        <template #icon><i class="fa-solid fa-download"></i></template>
-                        下载
-                    </n-button>
+                    <div class="mm-row-head">
+                        <span class="mm-ep">{{ episodeLabel(m.episode) }}</span>
+                        <div class="mm-actions">
+                            <n-button size="tiny" title="复制磁力链接" aria-label="复制磁力链接"
+                                :disabled="!m.magnet" @click="copyMagnet(m.magnet)">
+                                <template #icon><i class="fa-regular fa-copy"></i></template>
+                                复制
+                            </n-button>
+                            <n-button v-if="m.downloaded" size="tiny" disabled>
+                                <template #icon><i class="fa-solid fa-check"></i></template>
+                                已下载
+                            </n-button>
+                            <n-button v-else size="tiny" type="primary" :loading="busyIndex === index"
+                                @click="download(m, index)">
+                                <template #icon><i class="fa-solid fa-download"></i></template>
+                                下载
+                            </n-button>
+                        </div>
+                    </div>
+                    <div class="mm-row-meta">
+                        <span class="mm-quality" :class="qualityClass(m.quality)">{{ m.quality }}</span>
+                        <span class="mm-name" :title="m.title">{{ m.title || '（无标题）' }}</span>
+                    </div>
                 </div>
             </div>
         </n-spin>
@@ -60,6 +71,7 @@ import { NButton, NModal, NSpin } from 'naive-ui'
 /**
  * 磁力列表弹窗（搜索结果卡片的「资源列表」按钮）：
  *  - 实时抓取电影港详情页的磁力，按清晰度给出色标；
+ *  - 每行「复制」按钮复制完整磁力链接，已下载的资源也可复制；
  *  - 每行「下载」按钮提交本剧选择的下载工具，保存目录为「下载根目录 / 剧名」，
  *    结果同时写入对应工具的下载会话；
  *  - 已在下载任务表里的条目渲染成「已下载」，避免重复提交；
@@ -137,12 +149,52 @@ export default {
                 this.loading = false
             }
         },
+        episodeLabel(episode) {
+            if (!episode) return '未识别集数'
+            return String(episode).split('-').map(value => `第${value}集`).join('-')
+        },
         qualityClass(quality) {
             const value = String(quality || '').toUpperCase()
             if (value === '2160P' || value === '4K') return 'q4k'
             if (value === '1080P') return 'q1080'
             if (value === '720P') return 'q720'
             return 'qother'
+        },
+        async copyMagnet(magnet) {
+            if (!magnet) return
+            try {
+                let copied = false
+                if (navigator.clipboard && window.isSecureContext) {
+                    try {
+                        await navigator.clipboard.writeText(magnet)
+                        copied = true
+                    } catch (e) {
+                        // 剪贴板权限被拒绝时，继续尝试浏览器兼容复制。
+                    }
+                }
+                if (!copied) {
+                    const previousFocus = document.activeElement
+                    const input = document.createElement('textarea')
+                    input.value = magnet
+                    input.setAttribute('readonly', '')
+                    input.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0'
+                    // 放在弹窗内，避免焦点被模态框的焦点限制移走。
+                    this.$refs.listRef.appendChild(input)
+                    try {
+                        input.focus({ preventScroll: true })
+                        input.select()
+                        if (!document.execCommand('copy')) {
+                            throw new Error('复制失败')
+                        }
+                    } finally {
+                        input.remove()
+                        previousFocus?.focus({ preventScroll: true })
+                    }
+                }
+                this.$message?.success('磁力链接已复制')
+            } catch (e) {
+                this.$message?.error('复制失败，请检查浏览器剪贴板权限后重试')
+            }
         },
         async download(m, index) {
             this.busyIndex = index
@@ -229,12 +281,29 @@ export default {
 
 .mm-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex: none;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
     padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: 8px;
     background: rgba(148, 163, 184, .04);
+}
+
+.mm-row-head,
+.mm-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.mm-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
 }
 
 .mm-row.downloaded {
@@ -272,7 +341,9 @@ export default {
 }
 
 .mm-ep {
-    flex: none;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
     font-size: 12px;
     color: var(--text-2);
 }
