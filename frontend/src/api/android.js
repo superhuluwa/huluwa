@@ -7,16 +7,16 @@ export const buildAndroidApk = () => http.post('/android/build')
 export const cancelAndroidTask = (id) => http.post(`/android/tasks/${id}/cancel`)
 export const getAndroidLogs = (id, cursor, config) => http.get(`/android/tasks/${id}/logs`, { cursor }, config)
 
-export async function downloadAndroidFile(task, logFile = false, onProgress) {
-    const blob = await http.get(`/android/tasks/${task.id}/${logFile ? 'log-file' : 'apk'}`, null, {
-        responseType: 'blob', timeout: 0, onDownloadProgress: onProgress
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = logFile ? `android-task-${task.id}.log` : task.artifactName
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
+export async function prepareAndroidDownload(task, logFile = false) {
+    const result = await http.post(`/android/tasks/${task.id}/download-ticket`, { logFile }, { silent: true })
+    const url = new URL(result.path, window.location.origin)
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/public/android-downloads/')) {
+        throw new Error('下载地址无效，请刷新页面后重试')
+    }
+    return { ...result, url: url.href }
+}
+
+export function startAndroidDownload(download) {
+    // A normal HTTP navigation works without blob support or a separate builder address.
+    window.location.assign(download.url)
 }

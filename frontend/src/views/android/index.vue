@@ -51,13 +51,23 @@
                     <template #icon><i class="fa-solid fa-hammer"></i></template>编译 APK
                 </n-button>
                 <n-button :disabled="!status.latestApk || !!downloading" :loading="downloading === status.latestApk?.id" @click="download(status.latestApk)">
-                    <template #icon><i class="fa-solid fa-download"></i></template>{{ downloadPercent ? `下载 ${downloadPercent}%` : '下载 APK' }}
+                    <template #icon><i class="fa-solid fa-download"></i></template>{{ downloading === status.latestApk?.id ? '准备下载…' : '下载 APK' }}
                 </n-button>
                 <n-button v-if="activeTask" type="error" secondary :loading="cancelling" :disabled="activeTask.status === 'CANCELLING'" @click="cancel">
                     {{ activeTask.status === 'CANCELLING' ? '正在取消' : '取消任务' }}
                 </n-button>
             </div>
         </div>
+
+        <n-alert v-if="lastDownload" type="success" :bordered="false" class="download-notice" closable @close="lastDownload = null">
+            <div>下载已准备好：{{ lastDownload.filename }}</div>
+            <div class="download-help">如果浏览器没有开始下载，请点击链接，或复制到系统浏览器打开。</div>
+            <div class="download-links">
+                <a :href="lastDownload.url" :download="lastDownload.filename" target="_blank" rel="noopener noreferrer">点击下载文件</a>
+                <n-button size="small" text @click="copyDownloadLink">复制下载链接</n-button>
+                <span class="muted">链接 10 分钟内有效，过期后重新点击下载按钮即可</span>
+            </div>
+        </n-alert>
 
         <div class="glass-card log-panel">
             <div class="panel-toolbar">
@@ -100,12 +110,12 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { NAlert, NButton, NTag } from 'naive-ui'
 import { message } from '@/libs/discrete'
-import { getAndroidStatus, getAndroidTasks, updateAndroidCode, buildAndroidApk, cancelAndroidTask, getAndroidLogs, downloadAndroidFile } from '@/api/android'
+import { getAndroidStatus, getAndroidTasks, updateAndroidCode, buildAndroidApk, cancelAndroidTask, getAndroidLogs, prepareAndroidDownload, startAndroidDownload } from '@/api/android'
 
 defineOptions({ name: 'AndroidApp' })
 const status = ref({}), tasks = ref([]), selectedTask = ref(null), logText = ref(''), logElement = ref(null)
 const loaded = ref(false), connectionError = ref(false), follow = ref(true), submitting = ref(''), cancelling = ref(false)
-const downloading = ref(null), downloadPercent = ref(0), clock = ref(Date.now())
+const downloading = ref(null), lastDownload = ref(null), clock = ref(Date.now())
 const activeTask = computed(() => status.value.activeTask)
 const canSubmit = computed(() => loaded.value && status.value.enabled && status.value.workerOnline && !activeTask.value && !submitting.value)
 const activeStatuses = ['QUEUED', 'RUNNING', 'CANCELLING']
@@ -212,27 +222,38 @@ async function cancel() {
 async function download(task, logFile = false) {
     if (!task || downloading.value) return
     downloading.value = task.id
-    downloadPercent.value = 0
     try {
-        await downloadAndroidFile(task, logFile, (event) => {
-            if (event.total) downloadPercent.value = Math.floor(event.loaded * 100 / event.total)
-        })
+        const prepared = await prepareAndroidDownload(task, logFile)
+        lastDownload.value = prepared
+        startAndroidDownload(prepared)
     } catch (error) {
-        // The shared HTTP interceptor displays the server error.
-    } finally { downloading.value = null; downloadPercent.value = 0 }
+        if (error.response?.status !== 401) {
+            message.error(error.response?.data?.message || error.message || '下载准备失败，请刷新后重试')
+        }
+    } finally { downloading.value = null }
+}
+async function copyDownloadLink() {
+    if (!lastDownload.value) return
+    try {
+        await copyText(lastDownload.value.url)
+        message.success('下载链接已复制，可在系统浏览器打开')
+    } catch (error) { message.warning('复制失败，请长按下载链接复制') }
+}
+async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text)
+    else {
+        const input = document.createElement('textarea')
+        input.value = text
+        input.style.position = 'fixed'; input.style.opacity = '0'
+        document.body.appendChild(input); input.select()
+        const copied = document.execCommand('copy')
+        input.remove()
+        if (!copied) throw new Error('copy failed')
+    }
 }
 async function copyLogs() {
     try {
-        if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(logText.value)
-        else {
-            const input = document.createElement('textarea')
-            input.value = logText.value
-            input.style.position = 'fixed'; input.style.opacity = '0'
-            document.body.appendChild(input); input.select()
-            const copied = document.execCommand('copy')
-            input.remove()
-            if (!copied) throw new Error('copy failed')
-        }
+        await copyText(logText.value)
         message.success('日志已复制')
     } catch (error) { message.warning('复制失败，请选择日志文本复制或下载日志') }
 }
@@ -290,6 +311,9 @@ onBeforeUnmount(() => { deactivate(); document.removeEventListener('visibilitych
 .log-content { margin: 0; padding: 18px; height: 360px; overflow: auto; background: #080f19; color: #c7d9ca; font: 12px/1.8 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
 .log-footer { display: flex; justify-content: space-between; padding: 9px 18px; color: var(--text-3); font-size: 11px; }
 .task-error { padding: 10px 18px; color: var(--danger); background: rgba(230, 70, 70, .08); overflow-wrap: anywhere; }
+.download-help { font-size: 12px; margin-top: 5px; }
+.download-links { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+.download-links a { color: var(--accent); font-weight: 600; text-decoration: underline; }
 .history-scroll { overflow-x: auto; }
 .history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; white-space: nowrap; }
 .history-table th { color: var(--text-3); font-weight: 500; padding: 10px 18px; background: rgba(255,255,255,.02); }

@@ -3,6 +3,7 @@ package com.huluwa.console.web;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.security.AuthInterceptor;
 import com.huluwa.console.service.AndroidBuildService;
+import com.huluwa.console.service.AndroidDownloadService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -24,8 +25,12 @@ import java.util.Map;
 @RequestMapping("/api/android")
 public class AndroidBuildController {
     private final AndroidBuildService builds;
+    private final AndroidDownloadService downloads;
 
-    public AndroidBuildController(AndroidBuildService builds) { this.builds = builds; }
+    public AndroidBuildController(AndroidBuildService builds, AndroidDownloadService downloads) {
+        this.builds = builds;
+        this.downloads = downloads;
+    }
 
     @GetMapping("/status")
     public ApiResult<Map<String, Object>> status() { return ApiResult.ok(builds.status()); }
@@ -57,6 +62,14 @@ public class AndroidBuildController {
     @GetMapping("/tasks/{id}/logs")
     public ApiResult<Map<String, Object>> logs(@PathVariable long id, @RequestParam(defaultValue = "0") long cursor) {
         return ApiResult.ok(builds.logs(id, cursor));
+    }
+
+    public record DownloadRequest(boolean logFile) {}
+
+    @PostMapping("/tasks/{id}/download-ticket")
+    public ApiResult<Map<String, Object>> downloadTicket(@PathVariable long id,
+                                                        @RequestBody(required = false) DownloadRequest request) {
+        return ApiResult.ok(downloads.create(id, request != null && request.logFile()));
     }
 
     @GetMapping("/tasks/{id}/apk")
