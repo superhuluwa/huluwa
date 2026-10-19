@@ -18,11 +18,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.huluwa.android.R
 import com.huluwa.android.data.*
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -44,6 +46,16 @@ fun sessionColor(kind: String): Color = when (kind) {
     "xunlei", "xunlei-win" -> HuluwaColors.Amber
     else -> HuluwaColors.Pine
 }
+
+/** 会话品牌图标与网页版 SessionIcon.vue 保持一致；无品牌图标的会话返回 null。 */
+private fun sessionBrandIcon(kind: String): Int? = when (kind) {
+    "movie" -> R.drawable.session_icon_movie
+    "dytt" -> R.drawable.session_icon_dytt
+    "magnet" -> R.drawable.session_icon_magnet
+    "video" -> R.drawable.session_icon_video
+    "xunlei", "xunlei-win" -> R.drawable.session_icon_xunlei
+    else -> null
+}
 @Composable fun Panel(modifier: Modifier = Modifier, color: Color = Color.White, content: @Composable ColumnScope.() -> Unit) {
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = color,
         border = if (color == Color.White) BorderStroke(1.dp, HuluwaColors.Line) else null) {
@@ -53,6 +65,14 @@ fun sessionColor(kind: String): Color = when (kind) {
 @Composable fun RoundIcon(icon: ImageVector, color: Color = HuluwaColors.Pine, modifier: Modifier = Modifier) {
     Box(modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = .10f)), contentAlignment = Alignment.Center) {
         Icon(icon, null, Modifier.size(24.dp), tint = color)
+    }
+}
+@Composable fun SessionIcon(kind: String, modifier: Modifier = Modifier) {
+    val brandIcon = sessionBrandIcon(kind)
+    if (brandIcon != null) {
+        Image(painterResource(brandIcon), null, modifier.size(44.dp), contentScale = ContentScale.Fit)
+    } else {
+        RoundIcon(sessionIcon(kind), sessionColor(kind), modifier)
     }
 }
 @Composable fun HeaderAction(icon: ImageVector, label: String, onClick: () -> Unit, enabled: Boolean = true) {

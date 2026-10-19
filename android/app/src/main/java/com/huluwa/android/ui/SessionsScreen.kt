@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,18 +17,10 @@ import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel) {
-    var keyword by rememberSaveable { mutableStateOf("") }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
-    val rows = ui.sessions.data.filter { (!unreadOnly || it.unread > 0) && (it.title + it.preview).contains(keyword.trim(), true) }
+    val rows = ui.sessions.data.filter { !unreadOnly || it.unread > 0 }
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp)) {
         item {
-            ConnectionHero("一句话，搞定家里的事", when {
-                ui.realtime -> "家庭服务器已连接 · 实时同步中"
-                ui.sessions.error != null -> "连接暂不可用，稍后将自动重试"
-                ui.sessions.loaded -> "服务已连接 · 消息自动轮询同步"
-                else -> "正在连接家庭服务器…"
-            }, Icons.Outlined.Dns, ui.sessions.error == null)
-            Spacer(Modifier.height(16.dp)); SearchBox(keyword, { keyword = it }, "搜索会话或消息内容")
             SectionTitle("全部会话 ${ui.sessions.data.size}") {
                 FilterChip(!unreadOnly, { unreadOnly = false }, label = { Text("全部") })
                 Spacer(Modifier.width(6.dp)); FilterChip(unreadOnly, { unreadOnly = true }, label = { Text("未读 ${ui.sessions.data.count { it.unread > 0 }}") })
@@ -38,7 +28,7 @@ import com.huluwa.android.HuluwaViewModel
             Feedback(ui.sessions.loading, ui.sessions.error, { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
-            EmptyContent(if (keyword.isNotBlank()) "没有匹配的会话" else if (unreadOnly) "消息都已读完" else "暂无会话",
+            EmptyContent(if (unreadOnly) "消息都已读完" else "暂无会话",
                 if (ui.sessions.error != null) "连接成功后，会话会自动显示在这里" else "内置服务会由服务器自动提供", loading = !ui.sessions.loaded)
         }
         itemsIndexed(rows, key = { _, row -> row.id }) { index, session ->
@@ -48,7 +38,7 @@ import com.huluwa.android.HuluwaViewModel
                 Column {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        RoundIcon(sessionIcon(session.kind), sessionColor(session.kind))
+                        SessionIcon(session.kind)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(session.preview, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
