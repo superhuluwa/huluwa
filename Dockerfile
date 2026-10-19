@@ -38,6 +38,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai \
     SERVER_PORT=8000 \
     HULUWA_DATA_DIR=/app/data \
+    HULUWA_HLS_WORK_ROOT=/app/.huluwa-work \
     HOME=/app/data \
     JAVA_TOOL_OPTIONS="-Duser.timezone=Asia/Shanghai"
 
@@ -48,8 +49,9 @@ RUN apt-get update \
     && groupadd --gid 10001 huluwa \
     && useradd --uid 10001 --gid huluwa --no-create-home \
         --home-dir /app --shell /usr/sbin/nologin huluwa \
-    && mkdir -p /app/data /vol1/1000/downloads /media \
-    && chown huluwa:huluwa /app/data /vol1/1000/downloads /media
+    && mkdir -p /app/data /app/.huluwa-work /vol1/1000/downloads /media \
+    && chown huluwa:huluwa /app/data /app/.huluwa-work /vol1/1000/downloads /media \
+    && chmod 700 /app/.huluwa-work
 
 COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar
 COPY --from=hls-tools /out/N_m3u8DL-RE /usr/local/bin/N_m3u8DL-RE

@@ -15,6 +15,9 @@ services:
       # docker-java SDK 直连宿主机 Docker 守护进程，无需容器内安装 docker CLI。
       DOCKER_HOST: unix:///var/run/docker.sock
       HULUWA_HLS_MEDIA_ROOT: /vol1/1000/downloads
+      # 私有工作区留在容器可写层，不能添加对应的 volumes 挂载。
+      HULUWA_HLS_WORK_ROOT: /app/.huluwa-work
+      HULUWA_HLS_LOG_RETENTION_DAYS: ${HULUWA_HLS_LOG_RETENTION_DAYS:-7}
       HULUWA_HLS_LEGACY_MEDIA_ROOT: /media
     # 容器进程以 10001:10001 运行，需加入 socket 所属组才能访问。
     # 取值命令：stat -c '%g' /var/run/docker.sock（CentOS 常见 999 或 994）
@@ -23,7 +26,7 @@ services:
     volumes:
       - ${HULUWA_DATA_DIR:-./data}:/app/data
       # 与迅雷、qBittorrent 共用宿主机下载根目录；容器内外路径保持一致。
-      # 完成文件位于“下载根目录/剧名”，临时分片位于 .huluwa-work。
+      # 这里只存放完成文件；临时分片、合并视频和日志保存在容器私有目录。
       - /vol1/1000/downloads:/vol1/1000/downloads
       # 旧版本媒体目录保留只读挂载，供历史任务读取文件和日志。
       - ${HULUWA_MEDIA_DIR:-./data/media}:/media:ro

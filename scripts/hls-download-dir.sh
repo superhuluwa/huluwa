@@ -65,10 +65,11 @@ check_mount() {
 }
 
 check_write() {
-  # 使用应用的 UID/GID 创建、硬链接并删除临时文件，验证实际下载归档所需权限。
+  # 检查共享成品目录与容器私有工作区的读写，以及成品目录内的硬链接发布权限。
   # 只清理本次 mktemp 创建的文件，不接触已有媒体或下载任务。
   if ! docker exec --user 10001:10001 "${CONTAINER}" sh -eu -c '
     root=/vol1/1000/downloads
+    work=${HULUWA_HLS_WORK_ROOT:-/app/.huluwa-work}
     probe=
     cleanup() {
       if [ -n "$probe" ]; then
@@ -79,22 +80,20 @@ check_write() {
     trap cleanup EXIT
     trap "exit 1" HUP INT TERM
     test -d "$root"
-    for dir in "$root" "$root/.huluwa-work"; do
+    for dir in "$root" "$work"; do
       test ! -L "$dir"
-      if test -e "$dir"; then
-        test -d "$dir"
-        test -w "$dir"
-        probe=$(mktemp -d "$dir/.huluwa-check.XXXXXX")
-        printf "%s\n" check > "$probe/media"
-        ln "$probe/media" "$probe/link"
-        cleanup
-        probe=
-      fi
+      test -d "$dir"
+      test -w "$dir"
+      probe=$(mktemp -d "$dir/.huluwa-check.XXXXXX")
+      printf "%s\n" check > "$probe/media"
+      ln "$probe/media" "$probe/link"
+      cleanup
+      probe=
     done
   '; then
-    fail "容器 UID 10001 无法在 ${DOWNLOAD_DIR} 创建或归档文件；请检查 TrimACL/POSIX ACL、挂载及磁盘状态"
+    fail "容器 UID 10001 无法写入下载目录或私有工作区；请检查镜像目录权限、TrimACL/POSIX ACL、挂载及磁盘状态"
   fi
-  log "下载目录挂载及 UID 10001 实际写入检查通过：${DOWNLOAD_DIR}"
+  log "下载目录挂载、容器私有工作区及 UID 10001 实际写入检查通过：${DOWNLOAD_DIR}"
 }
 
 [ "$#" -le 2 ] || fail "用法：sudo bash $0 [fix|prepare|check] [容器名]"

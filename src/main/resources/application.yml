@@ -41,6 +41,10 @@ huluwa:
   hls:
     # 与迅雷、qBittorrent 共用下载根目录，文件直接归档到剧名目录。
     media-root: ${HULUWA_HLS_MEDIA_ROOT:/vol1/1000/downloads}
+    # 容器可写层内的私有目录，不绑定宿主机、不声明 Docker volume。
+    work-root: ${HULUWA_HLS_WORK_ROOT:/app/.huluwa-work}
+    # 空闲时每小时清理，日志至少保留 1 天；删除容器时工作区一起删除。
+    log-retention-days: ${HULUWA_HLS_LOG_RETENTION_DAYS:7}
     # 只用于读取旧版本媒体文件和日志。
     legacy-media-root: ${HULUWA_HLS_LEGACY_MEDIA_ROOT:/media}
     binary: ${HULUWA_HLS_BINARY:/usr/local/bin/N_m3u8DL-RE}

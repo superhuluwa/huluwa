@@ -17,17 +17,21 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,6 +53,7 @@ public class HlsDownloadService implements ApplicationRunner {
         Thread thread = new Thread(r, "hls-download"); thread.setDaemon(true); return thread;
     });
     private final AtomicBoolean busy = new AtomicBoolean();
+    private final AtomicBoolean cleanupRequested = new AtomicBoolean();
     private volatile boolean ready;
     private volatile boolean stopping;
     private volatile Process activeProcess;
@@ -100,6 +105,17 @@ public class HlsDownloadService implements ApplicationRunner {
         }
         if (!Files.isWritable(directory)) {
             throw new BusinessException(400, "下载目录 " + directory + " 无法写入，请在飞牛宿主机授予容器 UID 10001 写权限");
+        }
+        Path workspace = workRoot();
+        Path legacy = Path.of(paths.getLegacyMediaRoot()).toAbsolutePath().normalize();
+        if (workspace.startsWith(directory) || workspace.startsWith(legacy)) {
+            throw new BusinessException(400, "下载临时目录必须位于媒体目录之外，请使用容器私有目录 /app/.huluwa-work");
+        }
+        try {
+            directory(workspace, workspace);
+            if (!Files.isWritable(workspace)) throw new IOException("目录无法写入");
+        } catch (IOException e) {
+            throw new BusinessException(400, "容器下载临时目录 " + workspace + " 不可用：" + HlsSupport.error(e));
         }
     }
 
@@ -164,8 +180,8 @@ public class HlsDownloadService implements ApplicationRunner {
         if (task.get("log_path") == null) return Map.of("content", "暂无下载日志，请查看任务状态与提示。");
         try {
             Path file = Path.of(task.get("log_path").toString());
-            if (!Files.exists(file)) return Map.of("content", "日志文件已不存在。");
-            if (!managedPath(file, ".huluwa-work")) {
+            if (!Files.exists(file)) return Map.of("content", "日志已过期或随容器重建清理。");
+            if (!workspacePath(file) && !managedPath(file, ".huluwa-work")) {
                 throw new IOException("日志路径无效");
             }
             String content = Files.readString(file, StandardCharsets.UTF_8);
@@ -330,10 +346,18 @@ public class HlsDownloadService implements ApplicationRunner {
                        message = '应用重启后继续处理', updated_at = ?
                  WHERE status IN ('downloading', 'verifying')
                 """, HlsSupport.now());
-        // 上一次进程被杀或掉电时，工作区可能残留分片与半成品；归档文件已发布或会整体重下，
-        // 这里统一回收，只保留各次尝试的 download.log。
+        // 回收中断任务的分片、过期日志和复制残片，并迁移旧共享目录中的有效日志。
+        // 容器重建会丢弃私有工作区，未完成任务按持久化队列重新下载。
         cleanupStaleWorkspaces();
         ready = true; kick();
+    }
+
+    /** 每小时申请维护，在两集下载之间执行，避免删除正在写入的文件。 */
+    @Scheduled(initialDelay = 60000, fixedDelay = 3600000)
+    public void cleanupWorkspaces() {
+        if (!ready || stopping) return;
+        cleanupRequested.set(true);
+        kick();
     }
 
     @Scheduled(initialDelay = 15000, fixedDelay = 15000)
@@ -342,6 +366,10 @@ public class HlsDownloadService implements ApplicationRunner {
         worker.submit(() -> {
             try {
                 while (!stopping) {
+                    if (cleanupRequested.getAndSet(false)) {
+                        try { cleanupStaleWorkspaces(); }
+                        catch (Exception e) { log.warn("HLS 定期清理失败：{}", HlsSupport.error(e)); }
+                    }
                     List<Map<String, Object>> due = db.queryForList("""
                             SELECT t.id FROM hls_download_task t
                               LEFT JOIN hls_subscription s ON s.id = t.subscription_id
@@ -398,11 +426,11 @@ public class HlsDownloadService implements ApplicationRunner {
                     return;
                 }
             }
-            Path workspace = directory(root().resolve(".huluwa-work").resolve(Long.toString(id)));
+            Path workspace = directory(workRoot(), workspaceOf(id));
             // 每次尝试使用独立目录，不把失败尝试中的合并残片误认为本次结果。
-            Path attempt = directory(workspace.resolve("attempt-" + task.get("attempts") + "-" + UUID.randomUUID()));
-            Path output = directory(attempt.resolve("output"));
-            Path segments = directory(attempt.resolve("segments"));
+            Path attempt = directory(workRoot(), workspace.resolve("attempt-" + task.get("attempts") + "-" + UUID.randomUUID()));
+            Path output = directory(workRoot(), attempt.resolve("output"));
+            Path segments = directory(workRoot(), attempt.resolve("segments"));
             Path taskLog = attempt.resolve("download.log");
             db.update("UPDATE hls_download_task SET log_path = ?, updated_at = ? WHERE id = ?", taskLog.toString(), HlsSupport.now(), id);
             String url = freshUrl(task);
@@ -441,9 +469,7 @@ public class HlsDownloadService implements ApplicationRunner {
             verify(media);
             ensureNotCancelled(id);
             Path target = archive.resolve(name + "." + format);
-            // 同一个媒体挂载内发布；硬链接原子创建且拒绝覆盖同名文件。
-            Files.createLink(target, media);
-            Files.delete(media);
+            publish(id, media, target);
             complete(id, target, name);
         } catch (Exception e) {
             if (isCancelled(id)) {
@@ -490,7 +516,9 @@ public class HlsDownloadService implements ApplicationRunner {
     }
 
     private boolean isCancelled(long id) {
-        return "cancelled".equals(HlsSupport.text(task(id).get("status")));
+        List<String> statuses = db.queryForList("SELECT status FROM hls_download_task WHERE id = ?", String.class, id);
+        // 取消订阅会删除任务行，也应停止下载并回收工作区。
+        return statuses.isEmpty() || "cancelled".equals(statuses.getFirst());
     }
 
     private String freshUrl(Map<String, Object> task) {
@@ -674,7 +702,7 @@ public class HlsDownloadService implements ApplicationRunner {
 
     private void verify(Path file) throws Exception {
         if (activeCancelled) throw new InterruptedException();
-        if (!managedPath(file, null)
+        if ((!workspacePath(file) && !managedPath(file, null))
                 || !Files.isRegularFile(file) || Files.size(file) < 1024) throw new IOException("媒体文件不存在、过小或路径无效");
         Process probe = new ProcessBuilder(paths.getFfprobe(), "-v", "error", "-show_entries",
                 "format=duration:stream=codec_type", "-of", "json", file.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
@@ -709,6 +737,36 @@ public class HlsDownloadService implements ApplicationRunner {
         } finally { terminate(probe); activeProcess = null; }
     }
 
+    /**
+     * 私有工作区与宿主机挂载不能直接硬链接。先复制为无视频后缀的隐藏文件，
+     * 完整写入后在目标目录内以硬链接原子发布，拒绝覆盖已有成品。
+     */
+    private void publish(long id, Path media, Path target) throws Exception {
+        Path staging = target.getParent().resolve(".huluwa-publish-" + id + "-" + UUID.randomUUID() + ".part");
+        boolean created = false;
+        try {
+            try (var input = Files.newInputStream(media);
+                 var output = Files.newOutputStream(staging, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+                created = true;
+                byte[] buffer = new byte[1024 * 1024];
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    if (activeCancelled || stopping || Thread.currentThread().isInterrupted()) throw new InterruptedException();
+                    output.write(buffer, 0, read);
+                }
+            }
+            ensureNotCancelled(id);
+            if (stopping || Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            Files.createLink(target, staging);
+            Files.delete(media);
+        } finally {
+            if (created) {
+                try { Files.deleteIfExists(staging); }
+                catch (IOException e) { log.warn("HLS 归档临时文件清理失败：{}", HlsSupport.error(e)); }
+            }
+        }
+    }
+
     private boolean complete(long id, Path target, String name) {
         int updated = db.update("""
                 UPDATE hls_download_task SET status = 'completed', save_path = ?, message = NULL,
@@ -734,47 +792,129 @@ public class HlsDownloadService implements ApplicationRunner {
         }
         return false;
     }
-    private Path directory(Path value) throws IOException {
+    private Path workRoot() { return Path.of(paths.getWorkRoot()).toAbsolutePath().normalize(); }
+
+    private boolean workspacePath(Path file) throws IOException {
+        Path base = workRoot();
+        return !Files.isSymbolicLink(file) && Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS)
+                && file.toAbsolutePath().normalize().startsWith(base)
+                && file.toRealPath().startsWith(base.toRealPath());
+    }
+
+    private Path directory(Path value) throws IOException { return directory(root(), value); }
+
+    private Path directory(Path base, Path value) throws IOException {
         Path normalized = value.toAbsolutePath().normalize();
-        Path root = root();
-        if (!normalized.startsWith(root)) throw new IOException("目录超出媒体根目录");
-        Path current = root;
-        for (Path part : root.relativize(normalized)) {
+        if (!normalized.startsWith(base)) throw new IOException("目录超出指定根目录");
+        if (Files.isSymbolicLink(base)) throw new IOException("根目录不能是符号链接");
+        Files.createDirectories(base);
+        Path current = base;
+        for (Path part : base.relativize(normalized)) {
+            // 根目录自身的相对路径为空，直接使用已有目录。
+            if (part.toString().isEmpty()) continue;
             current = current.resolve(part);
-            if (Files.isSymbolicLink(current)) throw new IOException("媒体目录不能经过符号链接");
+            if (Files.isSymbolicLink(current)) throw new IOException("下载目录不能经过符号链接");
             if (!Files.exists(current)) Files.createDirectory(current);
-            if (!Files.isDirectory(current)) throw new IOException("媒体路径不是目录");
+            if (!Files.isDirectory(current)) throw new IOException("下载路径不是目录");
         }
-        if (!normalized.toRealPath().startsWith(root.toRealPath())) throw new IOException("媒体目录无效");
+        if (!normalized.toRealPath().startsWith(base.toRealPath())) throw new IOException("下载目录无效");
         return normalized;
     }
-    private Path workspaceOf(long id) { return root().resolve(".huluwa-work").resolve(Long.toString(id)); }
+    private Path workspaceOf(long id) { return workRoot().resolve(Long.toString(id)); }
 
-    /**
-     * 清理一次下载的工作区：删除分片与残片、回收空目录，只保留 download.log 供「日志」查看，
-     * 以及 .huluwa-work / 任务目录两级容器（日志文件需要有目录可挂）。
-     */
-    private void cleanup(Path attempt) {
+    private long logCutoff() {
+        return System.currentTimeMillis() - TimeUnit.DAYS.toMillis(Math.max(1, paths.getLogRetentionDays()));
+    }
+
+    /** 删除分片与半成品，只为仍有记录的任务保留未过期日志。 */
+    private void cleanup(Path attempt) { cleanup(attempt, true); }
+
+    private void cleanup(Path attempt, boolean keepLogs) {
         if (!Files.exists(attempt, LinkOption.NOFOLLOW_LINKS)) return;
+        long cutoff = logCutoff();
         try (var files = Files.walk(attempt)) {
             for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
-                if (Files.isSymbolicLink(file)) throw new IOException("临时目录出现符号链接");
-                if (file.getFileName().toString().equals("download.log")) continue;
-                // 非空目录保留（内含 download.log）；空目录与普通文件一并回收
+                if (Files.isSymbolicLink(file)) {
+                    Files.deleteIfExists(file); // 不跟随符号链接，避免越界清理。
+                    continue;
+                }
+                if (keepLogs && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                        && file.getFileName().toString().equals("download.log")
+                        && Files.getLastModifiedTime(file).toMillis() >= cutoff) continue;
                 if (Files.isDirectory(file) && !isEmptyDirectory(file)) continue;
                 Files.deleteIfExists(file);
             }
-        } catch (IOException e) { log.warn("HLS 临时文件清理失败：{}", HlsSupport.error(e)); }
+        } catch (IOException | UncheckedIOException e) { log.warn("HLS 临时文件清理失败：{}", HlsSupport.error(e)); }
     }
-    /** 启动清扫：遍历 .huluwa-work 下每个任务目录，回收分片与半成品，保留日志。 */
-    private void cleanupStaleWorkspaces() {
-        Path base = root().resolve(".huluwa-work");
-        if (!Files.isDirectory(base)) return;
-        try (var tasks = Files.list(base)) {
+
+    /** 启动和定时清理均在下载空闲时执行；旧只读 /media 挂载不做写入。 */
+    void cleanupStaleWorkspaces() {
+        Set<String> knownTasks = new HashSet<>();
+        for (Long id : db.queryForList("SELECT id FROM hls_download_task", Long.class)) {
+            knownTasks.add(id.toString());
+        }
+        migrateLegacyWorkspaces(knownTasks);
+        Path base = workRoot();
+        if (Files.isDirectory(base, LinkOption.NOFOLLOW_LINKS)) {
+            try (var tasks = Files.list(base)) {
+                for (Path task : tasks.toList()) {
+                    String id = task.getFileName().toString();
+                    if (!id.matches("[0-9]+") || id.equals(Long.toString(activeTaskId))) continue;
+                    cleanup(task, knownTasks.contains(id));
+                }
+            } catch (IOException | UncheckedIOException e) { log.warn("HLS 工作区清理失败：{}", HlsSupport.error(e)); }
+        }
+        cleanupStalePublications();
+    }
+
+    /** 将旧共享工作区的有效日志迁入私有目录，然后回收旧分片和无关联任务目录。 */
+    private void migrateLegacyWorkspaces(Set<String> knownTasks) {
+        Path legacy = root().resolve(".huluwa-work");
+        if (legacy.equals(workRoot()) || !Files.isDirectory(legacy, LinkOption.NOFOLLOW_LINKS)) return;
+        try (var tasks = Files.list(legacy)) {
             for (Path task : tasks.toList()) {
-                if (Files.isDirectory(task, LinkOption.NOFOLLOW_LINKS)) cleanup(task);
+                String id = task.getFileName().toString();
+                if (!id.matches("[0-9]+") || id.equals(Long.toString(activeTaskId))) continue;
+                try {
+                    if (knownTasks.contains(id) && Files.isDirectory(task, LinkOption.NOFOLLOW_LINKS)) {
+                        try (var files = Files.walk(task)) {
+                            for (Path file : files.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                                    .filter(path -> path.getFileName().toString().equals("download.log")).toList()) {
+                                if (Files.getLastModifiedTime(file).toMillis() < logCutoff()) continue;
+                                Path target = workRoot().resolve(id).resolve(task.relativize(file));
+                                directory(workRoot(), target.getParent());
+                                if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                                    Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES);
+                                }
+                                if (!workspacePath(target) || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                                    throw new IOException("日志迁移目标无效");
+                                }
+                                db.update("UPDATE hls_download_task SET log_path = ? WHERE id = ? AND log_path = ?",
+                                        target.toString(), id, file.toString());
+                            }
+                        }
+                    }
+                    cleanup(task, false);
+                } catch (IOException | UncheckedIOException e) {
+                    // 复制失败时保留源日志，下次维护继续迁移。
+                    log.warn("HLS 旧工作区迁移失败：{}", HlsSupport.error(e));
+                }
             }
-        } catch (IOException e) { log.warn("HLS 启动清理失败：{}", HlsSupport.error(e)); }
+        } catch (IOException | UncheckedIOException e) { log.warn("HLS 旧工作区清理失败：{}", HlsSupport.error(e)); }
+        try { if (isEmptyDirectory(legacy)) Files.deleteIfExists(legacy); }
+        catch (IOException e) { log.warn("HLS 旧工作目录删除失败：{}", HlsSupport.error(e)); }
+    }
+
+    /** 只删除本下载器的复制残片，不处理任何正式视频文件。 */
+    private void cleanupStalePublications() {
+        if (!Files.isDirectory(root())) return;
+        try (var files = Files.walk(root(), 2)) {
+            for (Path file : files.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> path.getFileName().toString()
+                            .matches("\\.huluwa-publish-[0-9]+-[0-9a-f-]{36}\\.part")).toList()) {
+                Files.deleteIfExists(file);
+            }
+        } catch (IOException | UncheckedIOException e) { log.warn("HLS 归档残片清理失败：{}", HlsSupport.error(e)); }
     }
 
     /** 目录是否为空（关闭流，避免句柄泄漏）。 */

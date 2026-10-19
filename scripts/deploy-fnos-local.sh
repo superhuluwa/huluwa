@@ -297,9 +297,7 @@ fix_data_permissions() {
       p="$d/.huluwa-write-check.$$"
       (umask 077; : > "$p")
       rm -f "$p"
-      mkdir -p "$d/.huluwa-work"
-      test -w "$d/.huluwa-work"
-    ' || fail "UID 10001 无法写入下载目录或 .huluwa-work，请检查飞牛 TrimACL/共享目录权限"
+    ' || fail "UID 10001 无法写入下载目录，请检查飞牛 TrimACL/共享目录权限"
   fi
 }
 
