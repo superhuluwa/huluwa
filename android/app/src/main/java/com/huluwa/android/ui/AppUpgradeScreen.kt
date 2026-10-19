@@ -50,10 +50,10 @@ import java.time.format.DateTimeFormatter
     }
     LaunchedEffect(continueInstallation) {
         if (continueInstallation) {
-            continueInstallation = false
             try { installer.launch(vm.appUpdateInstallerIntent()) }
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { vm.appUpdateInstallationError(error.userMessage()) }
+            finally { continueInstallation = false }
         }
     }
     val ready = download.phase == UpgradePhase.Ready
