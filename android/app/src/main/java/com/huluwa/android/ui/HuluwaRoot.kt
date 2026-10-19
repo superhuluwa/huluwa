@@ -48,7 +48,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                 }
                 MainTab.Downloads -> HeaderAction(Icons.Outlined.Add, "新建下载", { vm.showSheet(AppSheet.NewDownload) })
                 MainTab.Subscriptions -> HeaderAction(Icons.Outlined.Settings, "订阅设置", { vm.showSettings("dytt") })
-                MainTab.Frp -> HeaderAction(Icons.Outlined.Add, "新增隧道", { vm.showSheet(AppSheet.TunnelEdit()) })
+                MainTab.Frp -> Unit
                 MainTab.Docker -> HeaderAction(Icons.Outlined.Dns, "Docker 主机信息", { vm.loadText("Docker 主机") {
                     vm.state.value.overview.let { "连接状态：${if (it.online) "在线" else "不可用"}\n服务端版本：${it.version.ifBlank { "未知" }}\n${it.message}" }
                 } })

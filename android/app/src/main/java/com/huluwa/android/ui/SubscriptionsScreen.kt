@@ -7,7 +7,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -16,37 +15,12 @@ import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 @Composable fun SubscriptionsScreen(ui: AppState, vm: HuluwaViewModel) {
-    var filter by rememberSaveable { mutableIntStateOf(0) }
-    var source by rememberSaveable { mutableIntStateOf(0) }
-    var keyword by rememberSaveable { mutableStateOf("") }
-    val all = ui.subscriptions.data
-    val rows = all.filter { (filter == 0 || if (filter == 1) it.enabled else !it.enabled) && (source == 0 || it.source == SubscriptionSource.entries[source - 1]) && it.title.contains(keyword.trim(), true) }
+    val rows = ui.subscriptions.data
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            ConnectionHero("好故事，持续追更", "发现更新，自动下载到家里的 NAS", Icons.Outlined.BookmarkBorder)
-            Row(Modifier.fillMaxWidth().padding(vertical = 18.dp)) {
-                Metric(all.size.toString(), "全部订阅", Modifier.weight(1f))
-                Metric(all.count { it.enabled }.toString(), "追更中", Modifier.weight(1f), HuluwaColors.Pine)
-                Metric(all.count { !it.enabled }.toString(), "已暂停", Modifier.weight(1f))
-            }
-            SearchBox(keyword, { keyword = it }, "搜索订阅的剧集")
-            FilterRow(listOf("全部订阅", "追更中", "已暂停"), filter, { filter = it })
-            FilterRow(listOf("全部来源") + SubscriptionSource.entries.map { it.title }, source, { source = it })
-            SectionTitle("我的订阅") {
-                TextButton({ vm.showSettings(if (source == 2) "movie" else "dytt") }) { Text("下载设置") }
-                IconButton({ vm.refreshSubscriptions() }, enabled = !ui.subscriptions.loading) { Icon(Icons.Outlined.Refresh, "刷新订阅") }
-            }
-            Feedback(ui.subscriptions.loading, ui.subscriptions.error, { vm.refreshSubscriptions() })
-        }
-        if (rows.isEmpty()) item {
-            EmptyContent(if (keyword.isNotBlank()) "没有匹配的订阅" else "还没有订阅内容", "在会话里搜索剧名，找到后即可订阅追更", Icons.Outlined.BookmarkBorder, !ui.subscriptions.loaded)
-        }
         items(rows, key = { it.key }) { sub -> SubscriptionCard(sub, ui.busy == null && !ui.subscriptions.loading, vm) }
-        item { OutlinedButton({ vm.selectTab(MainTab.Sessions); vm.notify("在电影港或电影天堂会话中搜索剧名，即可添加订阅") }, Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp)) {
-            Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(7.dp)); Text("去会话里发现新内容")
-        } }
     }
 }
+
 @Composable private fun SubscriptionCard(sub: Subscription, enabled: Boolean, vm: HuluwaViewModel) {
     var menu by remember { mutableStateOf(false) }
     Panel(Modifier.fillMaxWidth()) {

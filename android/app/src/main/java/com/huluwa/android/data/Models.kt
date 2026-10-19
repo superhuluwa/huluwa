@@ -53,6 +53,7 @@ data class ChatMessage(
     val delivery: Delivery = Delivery.Sent, val requestId: String? = null,
 ) {
     val mine get() = role == "user"
+    val notify: NotifyMessage? get() = if (type == "notify") NotifyMessage.from(this) else null
     val film: FilmCard? get() = payload.takeIf { it.text("title").isNotBlank() && it.containsKey("cover") && it.containsKey("url") && it.text("kind") != "video" }?.let(FilmCard::from)
     companion object {
         fun from(raw: JsonObject): ChatMessage {
@@ -63,6 +64,24 @@ data class ChatMessage(
             }
             return ChatMessage(raw.number("id")?.toLong() ?: 0L, raw.text("sessionId"), raw.text("role"), raw.text("type"),
                 raw.text("content"), raw.text("contentText"), payload, raw.text("createdAt"))
+        }
+    }
+}
+data class NotifyMessage(
+    val level: String, val source: String, val title: String, val body: String,
+) {
+    val levelLabel: String get() = when (level) {
+        "success" -> "成功"
+        "warning" -> "警告"
+        "error" -> "错误"
+        else -> "信息"
+    }
+    companion object {
+        fun from(message: ChatMessage): NotifyMessage {
+            val meta = message.payload
+            val title = meta.text("title").ifBlank { message.contentText }
+            val body = message.content.ifBlank { if (message.contentText != title) message.contentText else "" }
+            return NotifyMessage(meta.text("level", fallback = "info"), meta.text("source"), title, body)
         }
     }
 }

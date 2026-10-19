@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -16,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,7 +44,7 @@ import com.huluwa.android.data.*
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回我的会话") }
-                    RoundIcon(sessionIcon(session.kind), sessionColor(session.kind), Modifier.size(38.dp))
+                    SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Text(session.title, style = MaterialTheme.typography.titleMedium)
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -87,8 +89,10 @@ import com.huluwa.android.data.*
 }
 
 @Composable private fun MessageBubble(message: ChatMessage, kind: String, ui: AppState, vm: HuluwaViewModel, onMedia: (String, Boolean) -> Unit) {
+    val notify = message.notify
+    if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
-        if (!message.mine) { RoundIcon(sessionIcon(kind), sessionColor(kind), Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
+        if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
             Surface(color = if (message.mine) Color(0xFFDFEBD4) else Color.White,
                 shape = RoundedCornerShape(topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp, bottomStart = 17.dp, bottomEnd = 17.dp),
@@ -117,6 +121,32 @@ import com.huluwa.android.data.*
             if (message.delivery == Delivery.Sending) Text("发送中…", color = HuluwaColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
             if (message.delivery == Delivery.Failed) TextButton({ vm.send(message.content, message) }) { Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(15.dp)); Spacer(Modifier.width(4.dp)); Text("发送失败，点击重试", color = HuluwaColors.Danger) }
             Text(timeLabel(message.createdAt), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+@Composable private fun NotifyMessageCard(message: NotifyMessage, kind: String, time: String) {
+    val accent = when (message.level) {
+        "success" -> HuluwaColors.Pine
+        "warning" -> HuluwaColors.Amber
+        "error" -> HuluwaColors.Danger
+        else -> HuluwaColors.Blue
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp))
+        Surface(Modifier.weight(1f), color = Color.White, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, HuluwaColors.Line)) {
+            Column(Modifier.padding(horizontal = 13.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
+                    Text(message.levelLabel, color = accent, style = MaterialTheme.typography.labelMedium)
+                    if (message.source.isNotBlank()) Text(message.source, Modifier.weight(1f), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    else Spacer(Modifier.weight(1f))
+                    Text(time, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+                if (message.title.isNotBlank()) Text(message.title, style = MaterialTheme.typography.titleMedium, color = HuluwaColors.Ink)
+                val body = plainText(if (message.body.isNotBlank()) message.body else message.title)
+                if (body.isNotBlank()) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyMedium, color = HuluwaColors.Ink) }
+            }
         }
     }
 }
