@@ -85,9 +85,9 @@ export function SubscriptionMagnets(id) {
     return http.get('/chat/subscriptions/' + encodeURIComponent(id) + '/magnets')
 }
 
-/** 订阅触发的下载任务（id=0 表示全部） */
-export function SubscriptionDownloads(id = 0) {
-    return http.get('/chat/subscriptions/downloads', { id })
+/** 订阅触发的下载任务；refresh 同步飞牛迅雷，quiet 用于页面静默轮询。 */
+export function SubscriptionDownloads(id = 0, { refresh = false, quiet = false } = {}) {
+    return http.get('/chat/subscriptions/downloads', { id, refresh }, { silent: quiet, timeout: 90000 })
 }
 
 /** 详情页磁力清单（搜索结果卡片「资源列表」）：实时抓取，不写基线库 */

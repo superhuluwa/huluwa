@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 电影港订阅（对齐 quantum 的 dygangs_search.cs 订阅 + dygangs.cs 监听两个脚本，收敛到一个服务）：
@@ -63,6 +64,9 @@ public class MovieSubscriptionService {
     private final MessageService messageService;
     private final ChatPushService chatPushService;
     private final SubscriptionCheckLogService checkLogs;
+    /** 页面轮询共用一次批量查询，避免多个浏览器同时反复建立迅雷会话。 */
+    private final ReentrantLock xunleiTrackingLock = new ReentrantLock();
+    private long lastXunleiRefreshNanos;
 
     public MovieSubscriptionService(JdbcTemplate jdbcTemplate,
                                     MovieSearchService movieSearchService,
@@ -584,6 +588,7 @@ public class MovieSubscriptionService {
         String status;
         String headline;
         String externalTaskId = null;
+        Long totalBytes = null;
         if (!downloaderConfigured(tool)) {
             status = "failed";
             headline = "⚠️ 未配置" + toolLabel(tool) + "，未提交下载";
@@ -601,6 +606,7 @@ public class MovieSubscriptionService {
             } else if (result != null && result.ok()) {
                 status = "added";
                 externalTaskId = result.externalTaskId();
+                totalBytes = result.totalBytes();
                 headline = (result.duplicate() ? "已在下载列表" : "✅ 已提交下载")
                         + (quality == null || quality.isBlank() ? "" : "：清晰度 " + quality);
             } else {
@@ -609,12 +615,14 @@ public class MovieSubscriptionService {
             }
         }
         // 重新提交（含自动重试此前失败的行）时解除隐藏，让被「清空下载记录」隐藏的条目重新可见；
-        // progress 一并清零，由下载跟踪按新任务的实时进度回填。
+        // 新任务先保存磁力解析得到的总大小，其余进度信息由跟踪查询回填。
         jdbcTemplate.update("""
                 UPDATE movie_download_task SET status = ?, message = ?, save_path = ?, downloader = ?,
-                       external_task_id = ?, progress = NULL, hidden_at = NULL, updated_at = ?
+                       external_task_id = ?, progress = NULL, total_bytes = ?, received_bytes = NULL,
+                       download_speed = NULL, speedup_speed = NULL, checked_at = NULL, query_error = NULL,
+                       completed_at = NULL, hidden_at = NULL, updated_at = ?
                  WHERE id = ?
-                """, status, headline, savePath, tool, externalTaskId, now(), taskId);
+                """, status, headline, savePath, tool, externalTaskId, totalBytes, now(), taskId);
 
         String detail = describeParts(episode, quality, seriesTitle);
         magnetNotice(tool, headline, detail, savePath, noticeStatus(tool, status));
@@ -717,23 +725,116 @@ public class MovieSubscriptionService {
         if (externalId == null || externalId.isBlank()) {
             return;
         }
-        XunleiService.TaskStatus task = xunleiService.task(externalId);
-        if (task == null) {
-            return;
+        xunleiTrackingLock.lock();
+        try {
+            XunleiService.TaskStatus task = xunleiService.task(externalId);
+            if (task != null) {
+                updateXunleiDownload(row, task);
+            }
+        } finally {
+            xunleiTrackingLock.unlock();
         }
-        String status = switch (task.phase()) {
+    }
+
+    /** 页面打开时批量刷新进行中的迅雷任务，并补齐旧历史行的资源大小。 */
+    private void refreshXunleiDownloads() {
+        if (!xunleiTrackingLock.tryLock()) {
+            return; // 已有查询进行时直接返回已保存的数据，不堆积轮询请求。
+        }
+        try {
+            long stamp = System.nanoTime();
+            if (lastXunleiRefreshNanos != 0 && stamp - lastXunleiRefreshNanos < 3_000_000_000L) {
+                return;
+            }
+            lastXunleiRefreshNanos = stamp;
+            if (!xunleiService.settings().configured()) {
+                return;
+            }
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                    SELECT * FROM movie_download_task
+                     WHERE downloader = 'xunlei' AND hidden_at IS NULL
+                       AND external_task_id IS NOT NULL AND external_task_id <> ''
+                       AND (status IN ('added', 'downloading') OR (total_bytes IS NULL AND checked_at IS NULL))
+                     ORDER BY CASE WHEN status IN ('added', 'downloading') THEN 0 ELSE 1 END, id DESC
+                     LIMIT 100
+                    """);
+            if (rows.isEmpty()) {
+                return;
+            }
+            Map<String, XunleiService.TaskStatus> tasks;
+            try {
+                tasks = xunleiService.tasks(rows.stream().map(row -> string(row.get("external_task_id"))).toList());
+            } catch (Exception e) {
+                log.debug("批量查询迅雷下载信息失败：{}", safeMessage(e));
+                for (Map<String, Object> row : rows) {
+                    jdbcTemplate.update("""
+                            UPDATE movie_download_task SET query_error = ?
+                             WHERE id = ? AND external_task_id = ? AND status = ?
+                            """, "迅雷下载信息暂时无法更新，保留上次数据并自动重试。",
+                            row.get("id"), row.get("external_task_id"), row.get("status"));
+                }
+                return;
+            }
+            for (Map<String, Object> row : rows) {
+                XunleiService.TaskStatus task = tasks.get(string(row.get("external_task_id")));
+                if (task == null) {
+                    // 历史任务已被迅雷清理时不反复补查，也不将临时查不到的活跃任务标记为失败。
+                    jdbcTemplate.update("""
+                            UPDATE movie_download_task SET query_error = ?, checked_at = ?
+                             WHERE id = ? AND external_task_id = ? AND status = ?
+                            """, "迅雷中暂未找到该任务，保留最近一次下载信息。", now(),
+                            row.get("id"), row.get("external_task_id"), row.get("status"));
+                    continue;
+                }
+                updateXunleiDownload(row, task);
+            }
+        } finally {
+            xunleiTrackingLock.unlock();
+        }
+    }
+
+    /** 状态未变化也同步进度和大小；历史补查仅补信息，不重复发送完成通知。 */
+    private void updateXunleiDownload(Map<String, Object> row, XunleiService.TaskStatus task) {
+        String previousStatus = string(row.get("status"));
+        boolean active = "added".equals(previousStatus) || "downloading".equals(previousStatus);
+        String status = active ? switch (task.phase()) {
             case "PHASE_TYPE_COMPLETE" -> "completed";
             case "PHASE_TYPE_ERROR" -> "failed";
             case "PHASE_TYPE_RUNNING" -> "downloading";
             default -> "added";
-        };
-        if (status.equals(string(row.get("status")))) {
-            return;
+        } : previousStatus;
+        String message = active ? task.message() : string(row.get("message"));
+        Integer progress = "completed".equals(status) ? Integer.valueOf(100) : task.progress();
+        Long total = task.totalBytes();
+        if (total == null && row.get("total_bytes") instanceof Number saved) {
+            total = saved.longValue();
         }
-        jdbcTemplate.update("""
-                UPDATE movie_download_task SET status = ?, message = ?, completed_at = ?, updated_at = ? WHERE id = ?
-                """, status, task.message(), "completed".equals(status) ? now() : null, now(), number(row.get("id")));
-        if ("completed".equals(status) || "failed".equals(status)) {
+        Long received = task.receivedBytes();
+        if (received == null && "completed".equals(status)) {
+            received = total;
+        }
+        Long speed = task.downloadSpeed();
+        Long speedup = task.speedupSpeed();
+        if (!"downloading".equals(status)) {
+            speed = 0L;
+            speedup = 0L;
+        }
+        String checkedAt = now();
+        Object completedAt = row.get("completed_at");
+        if ("completed".equals(status) && completedAt == null) {
+            completedAt = checkedAt;
+        }
+        // 原状态和任务 ID 一起匹配，避免重提任务或并发刷新触发旧任务的完成通知。
+        int updated = jdbcTemplate.update("""
+                UPDATE movie_download_task
+                   SET status = ?, message = ?, progress = COALESCE(?, progress),
+                       total_bytes = COALESCE(?, total_bytes), received_bytes = COALESCE(?, received_bytes),
+                       download_speed = ?, speedup_speed = ?, checked_at = ?, query_error = NULL,
+                       completed_at = ?, updated_at = ?
+                 WHERE id = ? AND external_task_id = ? AND status = ?
+                """, status, message, progress, total, received, speed, speedup, checkedAt,
+                completedAt, checkedAt, row.get("id"), row.get("external_task_id"), previousStatus);
+        if (updated > 0 && active && ("completed".equals(status) || "failed".equals(status))) {
             String headline = ("completed".equals(status) ? "✅ 下载完成：" : "⚠️ 下载失败：")
                     + string(row.get("series_title"));
             magnetNotice("xunlei", headline, describeRow(row) + "\n" + task.message(),
@@ -898,7 +999,11 @@ public class MovieSubscriptionService {
                 : qBittorrentService.settings().configured();
     }
 
-    private record Submission(boolean ok, boolean duplicate, String message, String externalTaskId) { }
+    private record Submission(boolean ok, boolean duplicate, String message, String externalTaskId, Long totalBytes) {
+        private Submission(boolean ok, boolean duplicate, String message, String externalTaskId) {
+            this(ok, duplicate, message, externalTaskId, null);
+        }
+    }
 
     private Submission addDownload(String tool, String magnet, String savePath) {
         if ("xunlei-win".equals(tool)) {
@@ -907,7 +1012,8 @@ public class MovieSubscriptionService {
         }
         if ("xunlei".equals(tool)) {
             XunleiService.TaskResult result = xunleiService.add(List.of(magnet), savePath).getFirst();
-            return new Submission(result.ok(), false, result.message(), result.taskId());
+            return new Submission(result.ok(), false, result.message(), result.taskId(),
+                    result.size() > 0 ? result.size() : null);
         }
         QBittorrentService.AddResult result = qBittorrentService.add(List.of(magnet), savePath);
         return new Submission(result.ok(), result.duplicate(), result.message(), null);
@@ -1323,6 +1429,13 @@ public class MovieSubscriptionService {
 
     /** 下载任务明细（订阅页查看进度；默认最近 100 条，已清空的历史行不再返回） */
     public List<Map<String, Object>> downloads(long subscriptionId) {
+        return downloads(subscriptionId, false);
+    }
+
+    public List<Map<String, Object>> downloads(long subscriptionId, boolean refresh) {
+        if (refresh) {
+            refreshXunleiDownloads();
+        }
         StringBuilder sql = new StringBuilder("SELECT * FROM movie_download_task WHERE hidden_at IS NULL");
         List<Object> params = new ArrayList<>();
         if (subscriptionId > 0) {
@@ -1342,6 +1455,12 @@ public class MovieSubscriptionService {
             item.put("downloader", row.get("downloader"));
             item.put("message", row.get("message"));
             item.put("progress", row.get("progress"));
+            item.put("totalBytes", row.get("total_bytes"));
+            item.put("receivedBytes", row.get("received_bytes"));
+            item.put("downloadSpeed", row.get("download_speed"));
+            item.put("speedupSpeed", row.get("speedup_speed"));
+            item.put("checkedAt", row.get("checked_at"));
+            item.put("queryError", row.get("query_error"));
             item.put("savePath", row.get("save_path"));
             item.put("createdAt", row.get("created_at"));
             item.put("completedAt", row.get("completed_at"));

@@ -179,8 +179,9 @@ public class MovieSubscriptionController {
 
     /** 某订阅触发的下载任务（默认最近 100 条；id=0 表示全部） */
     @GetMapping("/downloads")
-    public ApiResult<List<Map<String, Object>>> downloads(@RequestParam(defaultValue = "0") long id) {
-        return ApiResult.ok(subscriptionService.downloads(id));
+    public ApiResult<List<Map<String, Object>>> downloads(@RequestParam(defaultValue = "0") long id,
+                                                          @RequestParam(defaultValue = "false") boolean refresh) {
+        return ApiResult.ok(subscriptionService.downloads(id, refresh));
     }
 
     /** 清空下载记录：隐藏已完成 / 失败的历史行，进行中的任务保留 */

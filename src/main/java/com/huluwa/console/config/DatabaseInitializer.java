@@ -111,8 +111,14 @@ public class DatabaseInitializer implements ApplicationRunner {
         addColumnIfMissing("hls_download_task", "hidden_at", "TEXT");
         addColumnIfMissing("movie_download_task", "hidden_at", "TEXT");
         addColumnIfMissing("xunlei_win_download_task", "hidden_at", "TEXT");
-        // 「我的下载」进度列：迅雷【Win】与 qBittorrent 跟踪时回填，历史行保持空
+        // 「我的下载」的进度与资源信息：旧库补列后，迅雷历史行按需查询回填
         addColumnIfMissing("movie_download_task", "progress", "INTEGER");
+        addColumnIfMissing("movie_download_task", "total_bytes", "INTEGER");
+        addColumnIfMissing("movie_download_task", "received_bytes", "INTEGER");
+        addColumnIfMissing("movie_download_task", "download_speed", "INTEGER");
+        addColumnIfMissing("movie_download_task", "speedup_speed", "INTEGER");
+        addColumnIfMissing("movie_download_task", "checked_at", "TEXT");
+        addColumnIfMissing("movie_download_task", "query_error", "TEXT");
     }
 
     /** 补入升级前已保存的订阅任务及会话流水号，重复启动不覆盖已同步的状态。 */

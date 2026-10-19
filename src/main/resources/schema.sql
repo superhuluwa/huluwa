@@ -219,7 +219,13 @@ CREATE TABLE IF NOT EXISTS movie_download_task (
     save_path       TEXT,                        -- 保存目录：统一根目录 / 剧名
     downloader      TEXT NOT NULL DEFAULT 'qb', -- qb|xunlei|xunlei-win，历史任务继续用原工具跟踪
     external_task_id TEXT,                       -- 迅雷返回的任务 ID（飞牛版任务ID / Win 版流水号）
-    progress        INTEGER,                     -- 下载进度（0-100；迅雷【Win】与 qBittorrent 实时回填）
+    progress        INTEGER,                     -- 下载进度（0-100；各下载器跟踪时回填）
+    total_bytes     INTEGER,                     -- 资源总大小（字节；未知为 NULL）
+    received_bytes  INTEGER,                     -- 已下载 / 校验大小（字节）
+    download_speed  INTEGER,                     -- 下载速度（字节 / 秒）
+    speedup_speed   INTEGER,                     -- 迅雷加速速度（字节 / 秒）
+    checked_at      TEXT,                        -- 最近一次查询时间
+    query_error     TEXT,                        -- 查询异常；保留上次下载信息
     status          TEXT NOT NULL DEFAULT 'pending', -- pending|added|downloading|completed|failed|removed
     message         TEXT,
     created_at      TEXT NOT NULL,

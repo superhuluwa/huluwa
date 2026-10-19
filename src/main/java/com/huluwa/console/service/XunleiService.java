@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -557,25 +558,103 @@ public class XunleiService {
         return objectMapper.readTree(response.body());
     }
 
-    public record TaskStatus(String phase, String message) { }
+    /** 大小与速度以字节计；字段未返回时保留 null，区别于实际的 0。 */
+    public record TaskStatus(String phase, String message, Integer progress, Long totalBytes,
+                             Long receivedBytes, Long downloadSpeed, Long speedupSpeed) {
+        public TaskStatus(String phase, String message) {
+            this(phase, message, null, null, null, null, null);
+        }
+    }
 
-    /** 按迅雷任务 ID 查询进度，切换电影港默认工具后仍跟踪已提交的迅雷任务。 */
+    /** 按迅雷任务 ID 查询，切换默认下载工具后仍跟踪已提交的迅雷任务。 */
     public TaskStatus task(String taskId) {
+        if (taskId == null || taskId.isBlank()) {
+            return null;
+        }
+        return tasks(List.of(taskId)).get(taskId.trim());
+    }
+
+    /** 一次建立会话，按任务 ID 批量查询；分批和翻页兼容迅雷的列表上限。 */
+    public Map<String, TaskStatus> tasks(List<String> taskIds) {
+        List<String> ids = taskIds == null ? List.of() : taskIds.stream()
+                .filter(id -> id != null && !id.isBlank()).map(String::trim).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
         try {
             XlSession session = openSession(settings());
-            String filters = objectMapper.writeValueAsString(Map.of("id", Map.of("in", taskId)));
-            JsonNode data = checkedJson(send(session, "/drive/v1/tasks?space=" + encode(session.deviceId())
-                    + "&filters=" + encode(filters), null, INFO_TIMEOUT), "查询迅雷任务");
-            for (JsonNode task : data.path("tasks")) {
-                if (taskId.equals(task.path("id").asText())) {
-                    return new TaskStatus(task.path("phase").asText(""), task.path("message").asText(""));
-                }
+            Map<String, TaskStatus> statuses = new LinkedHashMap<>();
+            for (int offset = 0; offset < ids.size(); offset += 100) {
+                List<String> batch = ids.subList(offset, Math.min(offset + 100, ids.size()));
+                String filters = objectMapper.writeValueAsString(Map.of("id", Map.of("in", String.join(",", batch))));
+                String pageToken = "";
+                Set<String> seenPages = new LinkedHashSet<>();
+                do {
+                    String path = "/drive/v1/tasks?space=" + encode(session.deviceId())
+                            + "&filters=" + encode(filters) + "&limit=" + batch.size();
+                    if (!pageToken.isBlank()) {
+                        path += "&page_token=" + encode(pageToken);
+                    }
+                    JsonNode data = checkedJson(send(session, path, null, INFO_TIMEOUT), "查询迅雷任务");
+                    for (JsonNode task : data.path("tasks")) {
+                        String id = task.path("id").asText("");
+                        if (batch.contains(id)) {
+                            statuses.put(id, parseTaskStatus(task));
+                        }
+                    }
+                    pageToken = data.path("next_page_token").asText("");
+                    if (!pageToken.isBlank() && !seenPages.add(pageToken)) {
+                        throw new BusinessException(400, "查询迅雷任务失败：列表分页游标重复");
+                    }
+                } while (!pageToken.isBlank());
             }
-            return null;
+            return statuses;
         } catch (BusinessException e) {
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(400, "查询迅雷任务已中断");
         } catch (Exception e) {
             throw new BusinessException(400, "查询迅雷任务失败：" + safeMessage(e));
+        }
+    }
+
+    private static TaskStatus parseTaskStatus(JsonNode task) {
+        String phase = task.path("phase").asText("");
+        JsonNode params = task.path("params");
+        Long total = nonNegativeLong(task.path("file_size"));
+        Long received = nonNegativeLong(params.path("checked_size"));
+        Long downloaded = nonNegativeLong(params.path("download_size"));
+        double rawProgress = task.path("progress").asDouble(Double.NaN);
+        Integer progress = Double.isFinite(rawProgress) && rawProgress >= 0
+                ? (int) Math.round(Math.min(100, rawProgress)) : null;
+        // 与迅雷前端保持一致：下载结束后的校验阶段用 checked_size 计算进度。
+        if (received != null && total != null && total > 0
+                && (progress == null || (downloaded != null && downloaded.equals(total)))) {
+            progress = (int) Math.round(Math.min(100, received * 100.0 / total));
+        }
+        if ("PHASE_TYPE_COMPLETE".equals(phase)) {
+            progress = 100;
+            if (received == null) {
+                received = total;
+            }
+        }
+        if (received != null && total != null && total > 0) {
+            received = Math.min(received, total);
+        }
+        boolean running = "PHASE_TYPE_RUNNING".equals(phase);
+        return new TaskStatus(phase, task.path("message").asText(""), progress, total, received,
+                running ? nonNegativeLong(params.path("speed")) : Long.valueOf(0),
+                running ? nonNegativeLong(params.path("speedup_speed")) : Long.valueOf(0));
+    }
+
+    /** 迅雷的大数字通常是 JSON 字符串；用 long 解析，缺失或非法值不当作 0。 */
+    private static Long nonNegativeLong(JsonNode node) {
+        try {
+            long value = Long.parseLong(node.asText("").trim());
+            return value >= 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
