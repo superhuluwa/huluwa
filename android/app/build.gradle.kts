@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -6,6 +7,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
+// 本机签名由根目录的一键打包脚本生成，凭据文件已被 Git 忽略。
+val releaseKeystoreFile = rootProject.file("keystore.properties")
+val releaseKeystoreProperties = Properties().apply {
+    if (releaseKeystoreFile.isFile) {
+        releaseKeystoreFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "com.huluwa.android"
     compileSdk = 36
@@ -16,8 +25,21 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+    signingConfigs {
+        if (releaseKeystoreFile.isFile) {
+            create("release") {
+                storeFile = rootProject.file(requireNotNull(releaseKeystoreProperties.getProperty("storeFile")))
+                storePassword = requireNotNull(releaseKeystoreProperties.getProperty("storePassword"))
+                keyAlias = requireNotNull(releaseKeystoreProperties.getProperty("keyAlias"))
+                keyPassword = requireNotNull(releaseKeystoreProperties.getProperty("keyPassword"))
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseKeystoreFile.isFile) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

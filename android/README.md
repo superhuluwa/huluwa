@@ -31,6 +31,26 @@
 
 服务器部署在反向代理子目录时，可以填写 `https://服务器/huluwa/`。输入地址末尾多出的 `/api` 会被规范化，客户端会保留代理子目录。
 
+## Windows 一键打包并安装 Release
+
+在仓库根目录双击 `build-android-release.bat`，也可以在命令提示符中执行：
+
+```bat
+build-android-release.bat
+```
+
+脚本会自动查找 JDK 和 Android SDK，检查手机连接及调试授权，生成或复用 Release 签名，执行 `:app:assembleRelease`，然后安装并打开应用。单台可用设备会自动选择，多台可用设备会提示输入序号。也可以传入设备序列号，或提前设置 `ANDROID_SERIAL`：
+
+```bat
+build-android-release.bat 设备序列号
+```
+
+运行前请准备 JDK 17 或 21、Android SDK 36 和 Android SDK Platform-Tools；手机开启开发者选项及 USB 调试，用数据线连接后解锁，并允许此电脑调试。JDK 优先读取 `JAVA_HOME`，也会查找 Android Studio 自带 JDK；SDK 优先读取 `android/local.properties` 的 `sdk.dir`，其次查找 `ANDROID_HOME`、`ANDROID_SDK_ROOT`、默认安装目录及 `PATH` 中的 `adb`。首次构建需要联网下载 Gradle 和依赖。
+
+生成的已签名 APK 位于 `android/app/build/outputs/apk/release/app-release.apk`。首次运行会生成 `android/release.keystore` 和含随机密码的 `android/keystore.properties`，以后复用同一签名；这两个文件已被 Git 忽略，请一起备份。如果已有签名，可以自行填写 `keystore.properties` 的 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`；`storeFile` 相对于 `android` 目录解析。
+
+安装使用 `adb install -r` 覆盖更新。若手机上的同包名应用使用其他签名（例如之前安装的 Debug 版），会安装失败并显示错误；请确认并备份应用数据后手动卸载旧版，再重新运行。脚本不会自动卸载应用。成功或失败后窗口都会保留，便于查看输出；命令行自动调用时可设置环境变量 `HULUWA_NO_PAUSE=1` 跳过等待按键。
+
 ## 工程配置
 
 - 应用包名：`com.huluwa.android`
