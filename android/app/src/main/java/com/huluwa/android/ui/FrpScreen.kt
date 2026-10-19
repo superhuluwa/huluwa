@@ -1,4 +1,3 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.huluwa.android.ui
 
 import androidx.compose.foundation.layout.*
@@ -9,48 +8,31 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 @Composable fun FrpScreen(ui: AppState, vm: HuluwaViewModel) {
-    var keyword by rememberSaveable { mutableStateOf("") }
-    val rows = ui.tunnels.data.filter { "${it.name} ${it.localAddress} ${it.remoteAddress}".contains(keyword.trim(), true) }
     val enabled = ui.busy == null && !ui.tunnels.loading && ui.tunnels.loaded
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            ConnectionHero(when { !ui.tunnels.loaded -> "正在连接 frpc 服务"; ui.runtime.running -> "frpc 服务运行中"; else -> "frpc 服务未就绪" },
-                "${ui.runtime.container} · ${if (ui.runtime.running) "服务已连接" else ui.runtime.status}", Icons.Outlined.AccountTree, ui.runtime.running)
-            Spacer(Modifier.height(12.dp))
-            Panel(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth()) {
-                    Metric(ui.tunnels.data.size.toString(), "全部隧道", Modifier.weight(1f))
-                    Metric(ui.tunnels.data.count { it.enabled }.toString(), "已启用", Modifier.weight(1f), HuluwaColors.Pine)
-                    Metric(ui.tunnels.data.count { !it.enabled }.toString(), "已停用", Modifier.weight(1f))
+            SectionTitle("我的隧道") {
+                TextButton(onClick = { vm.refreshFrp() }, enabled = !ui.tunnels.loading) {
+                    Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("刷新")
                 }
             }
-            if (ui.runtime.message.isNotBlank()) Text(ui.runtime.message, Modifier.padding(top = 12.dp), color = HuluwaColors.Amber, style = MaterialTheme.typography.bodySmall)
-            if (ui.runtime.sharedConfig == false) Text("配置文件与 frpc 容器未共享同一目录，请先修正服务器挂载。", Modifier.padding(top = 8.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(12.dp)); SearchBox(keyword, { keyword = it }, "搜索隧道名称、地址或端口")
-            SectionTitle("我的隧道") { TextButton({ vm.refreshFrp() }, enabled = !ui.tunnels.loading) { Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("刷新状态") } }
-            Feedback(ui.tunnels.loading, ui.tunnels.error, { vm.refreshFrp() })
-        }
-        if (rows.isEmpty()) item { EmptyContent("还没有隧道", "点击右上角加号，连接第一个家中服务", Icons.Outlined.AccountTree, !ui.tunnels.loaded) }
-        items(rows, key = { it.name }) { tunnel -> TunnelCard(tunnel, enabled, vm) }
-        item {
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                TextButton(vm::showFrpConfig) { Icon(Icons.Outlined.Description, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("配置文件") }
-                TextButton(vm::frpLogs) { Icon(Icons.Outlined.Subject, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("运行日志") }
-                TextButton(vm::reloadFrp, enabled = enabled) { Text("热加载") }
-                TextButton(vm::restartFrp, enabled = enabled) { Text("重启 frpc", color = HuluwaColors.Amber) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(vm::reloadFrp, Modifier.weight(1f), enabled = enabled) { Text("热加载") }
+                OutlinedButton(vm::frpLogs, Modifier.weight(1f)) { Text("日志") }
+                OutlinedButton(vm::restartFrp, Modifier.weight(1f), enabled = enabled) { Text("重启") }
             }
-            Spacer(Modifier.height(15.dp))
         }
+        items(ui.tunnels.data, key = { it.name }) { tunnel -> TunnelCard(tunnel, enabled, vm) }
     }
 }
 @Composable private fun TunnelCard(tunnel: Tunnel, enabled: Boolean, vm: HuluwaViewModel) {
