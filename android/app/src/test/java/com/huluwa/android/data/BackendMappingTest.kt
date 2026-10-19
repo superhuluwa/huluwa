@@ -26,6 +26,23 @@ class BackendMappingTest {
         assertFalse(task.retryable)
         assertNull(task.progress)
     }
+    @Test fun mapsSystemNotifyTitleAndCompleteBody() {
+        val raw = ApiJson.parseToJsonElement("""{"id":12,"sessionId":"system","role":"bot","type":"notify","content":"第一行\n第二行\nhttps://example.test/detail","contentText":"电影港更新：测试剧集","createdAt":"2026-10-19 18:20:00","payload":"{\"level\":\"success\",\"source\":\"movie\",\"title\":\"电影港更新：测试剧集\"}"}""").asObject()
+        val notice = ChatMessage.from(raw).notify
+        assertNotNull(notice)
+        assertEquals("success", notice?.level)
+        assertEquals("成功", notice?.levelLabel)
+        assertEquals("movie", notice?.source)
+        assertEquals("电影港更新：测试剧集", notice?.title)
+        assertEquals("第一行\n第二行\nhttps://example.test/detail", notice?.body)
+    }
+    @Test fun notifyFallsBackWhenPayloadHasNoMetadata() {
+        val raw = ApiJson.parseToJsonElement("""{"id":13,"sessionId":"system","role":"bot","type":"notify","content":"完整正文","contentText":"通知标题","createdAt":"2026-10-19 18:21:00"}""").asObject()
+        val notice = ChatMessage.from(raw).notify
+        assertEquals("info", notice?.level)
+        assertEquals("通知标题", notice?.title)
+        assertEquals("完整正文", notice?.body)
+    }
     @Test fun parsesNullableMessageFieldsAndStringEncodedFilmPayload() {
         val raw = ApiJson.parseToJsonElement("""{"id":9,"sessionId":"movie","role":"bot","type":"text","content":null,"contentText":null,"createdAt":"2026-10-19 09:41:00","payload":"{\"id\":\"123\",\"title\":\"测试片名\",\"url\":\"https://example.test/123\",\"cover\":null}"}""").asObject()
         val message = ChatMessage.from(raw)
