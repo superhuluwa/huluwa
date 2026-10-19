@@ -25,7 +25,7 @@ import com.huluwa.android.HuluwaViewModel
                 FilterChip(!unreadOnly, { unreadOnly = false }, label = { Text("全部") })
                 Spacer(Modifier.width(6.dp)); FilterChip(unreadOnly, { unreadOnly = true }, label = { Text("未读 ${ui.sessions.data.count { it.unread > 0 }}") })
             }
-            Feedback(ui.sessions.loading, ui.sessions.error, { vm.refreshSessions() })
+            Feedback(false, ui.sessions.error, { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
             EmptyContent(if (unreadOnly) "消息都已读完" else "暂无会话",
