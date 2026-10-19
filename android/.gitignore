@@ -32,3 +32,6 @@ keystore.properties
 
 # 本地生成的检查报告
 docs/源码静态检查.json
+# 按需求纳入版本库的 Android Release 签名文件
+!release.keystore
+!keystore.properties
