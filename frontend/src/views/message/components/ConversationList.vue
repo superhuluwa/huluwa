@@ -25,7 +25,6 @@
                     <span class="conv-time">{{ timeOf(item) }}</span>
                     <span v-if="item.unread > 0" class="conv-unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
                 </div>
-                <i v-if="mobile" class="fa-solid fa-chevron-right conv-arrow"></i>
             </div>
         </div>
     </aside>
@@ -35,14 +34,14 @@
 import { NInput } from 'naive-ui'
 import SessionIcon from './SessionIcon.vue'
 /**
- * 会话列表（对齐 quantum ConversationList 的视觉）：
- * 44px 圆图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
+ * 会话列表：整行平铺，以文字区域下方的细线分隔，不使用圆角卡片、边框和独立底色。
+ * 44px 图标、标题、预览、时间、未读角标（>99 显示 99+），顶部筛选框按标题/预览本地过滤。
  * 各内置会话使用对应服务的官方品牌图标（SessionIcon；见 assets/brand-icons/README.md），
  * 无品牌图标（系统通知等）退回 Font Awesome。
  * 会话由服务端提供（内置电影港 / 磁力下载 / 视频解析 / 迅雷下载【飞牛】/ 迅雷下载【Win】+ 系统通知虚拟会话），列表不做删除。
  *
- * 手机端（mobile）：标题与状态栏安全区由公共顶栏处理，列表行高与触控目标放大、
- * 右侧加箭头提示可进入聊天详情，因此不再需要高亮当前会话。
+ * 手机端（mobile）：标题与状态栏安全区由公共顶栏处理，列表行高与触控目标放大，
+ * 点击整行进入聊天详情，不保留当前会话的选中态。
  */
 import { sessionPreview, formatTimeLabel } from '@/utils/chatFormat'
 
@@ -58,7 +57,7 @@ export default {
             type: String,
             default: ''
         },
-        /** 手机端形态：全屏一级页面（大行高 + 箭头） */
+        /** 手机端形态：全屏一级页面，放大行高与触控目标 */
         mobile: {
             type: Boolean,
             default: false
@@ -131,24 +130,27 @@ export default {
 
 <style scoped>
 .conversation-list {
+    --conversation-gutter-left: 14px;
+    --conversation-gutter-right: 14px;
+    --conversation-icon-size: 44px;
+    --conversation-gap: 12px;
     width: 292px;
     flex: none;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--line);
-    background: rgba(20, 28, 46, .45);
     min-height: 0;
 }
 
 .list-head {
     flex: none;
-    padding: 14px 14px 10px;
+    padding: 14px var(--conversation-gutter-right) 10px var(--conversation-gutter-left);
 }
 
 .list-body {
     flex: 1;
     overflow-y: auto;
-    padding: 2px 10px 10px;
+    padding: 0 0 10px;
     -webkit-overflow-scrolling: touch;
 }
 
@@ -163,26 +165,31 @@ export default {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px;
-    border-radius: 12px;
+    gap: var(--conversation-gap);
+    padding: 12px var(--conversation-gutter-right) 12px var(--conversation-gutter-left);
     cursor: pointer;
-    border: 1px solid transparent;
-    transition: background .15s ease;
+    transition: opacity .15s ease;
 }
 
-.conversation:hover {
-    background: rgba(148, 163, 184, .07);
+.conversation:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: calc(var(--conversation-gutter-left) + var(--conversation-icon-size) + var(--conversation-gap));
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: var(--line);
+    pointer-events: none;
 }
 
-.conversation.active {
-    background: var(--accent-weak);
-    border-color: rgba(14, 165, 233, .28);
+.conversation:hover .conv-title,
+.conversation.active .conv-title {
+    color: var(--accent);
 }
 
 .conv-icon {
-    width: 44px;
-    height: 44px;
+    width: var(--conversation-icon-size);
+    height: var(--conversation-icon-size);
     flex: none;
     /* 品牌图标是方形应用图标，圆角方形比圆形更贴合官方样式；系统通知仍用圆形图标字体底 */
     border-radius: 12px;
@@ -213,6 +220,7 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--text);
+    transition: color .15s ease;
 }
 
 .conv-preview {
@@ -228,6 +236,8 @@ export default {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    align-self: stretch;
+    justify-content: space-between;
     gap: 4px;
     flex: none;
 }
@@ -251,47 +261,28 @@ export default {
     text-align: center;
 }
 
-.conv-arrow {
-    flex: none;
-    font-size: 12px;
-    color: var(--text-3);
-}
-
 /* ==========================================================================
    手机端：会话列表 = 一级全屏页面
    ========================================================================== */
 .conversation-list.mobile {
+    /* 状态栏安全区由公共顶栏处理，内容只保留左右安全区 */
+    --conversation-gutter-left: max(16px, env(safe-area-inset-left));
+    --conversation-gutter-right: max(16px, env(safe-area-inset-right));
+    --conversation-icon-size: 52px;
+    --conversation-gap: 14px;
     width: 100%;
     border-right: 0;
-    background: var(--bg);
-}
-
-.conversation-list.mobile .list-head {
-    /* 状态栏安全区由公共控制台顶栏处理，内容只保留左右安全区 */
-    padding: 14px max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
-    border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, rgba(20, 28, 46, .9) 0%, rgba(11, 15, 25, .75) 100%);
-    backdrop-filter: blur(10px);
 }
 
 .conversation-list.mobile .list-body {
-    padding: 6px max(8px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 12px) max(8px, env(safe-area-inset-left));
+    padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
 }
 
-.conversation-list.mobile .conversation {
-    gap: 14px;
-    padding: 12px 10px;
-    border-radius: 14px;
-}
-
-/* 覆盖式高亮：手机端点击即离开本页，无需保留选中态 */
 .conversation-list.mobile .conversation:active {
-    background: rgba(148, 163, 184, .1);
+    opacity: .7;
 }
 
 .conversation-list.mobile .conv-icon {
-    width: 52px;
-    height: 52px;
     border-radius: 14px;
     font-size: 20px;
 }

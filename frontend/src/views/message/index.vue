@@ -2,7 +2,7 @@
     <!--
       会话中心：手机端在公共控制台顶栏下切换两级页面 ——
       一级 = 会话列表（默认落地），点击会话进入二级 = 聊天详情，顶栏返回键回到列表。
-      桌面端（宽屏 / 非触屏）保持原有双栏布局，样式与交互不变。
+      桌面端（宽屏 / 非触屏）使用双栏布局。
     -->
     <div class="message-page"
         :class="{ narrow, 'show-room': narrowShowRoom, mobile: isMobile, desktop: !isMobile, chrome: !fullscreen }">
@@ -565,10 +565,6 @@ export default {
     display: flex;
     height: 100%;
     min-height: 0;
-    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, .40);
     overflow: hidden;
 }
 
@@ -622,20 +618,12 @@ export default {
     padding-bottom: max(4px, env(safe-area-inset-bottom));
 }
 
-/* 非全屏（桌面端）：卡片四周留出安全边距，避免贴边显示 */
-.message-page.desktop.chrome {
-    border-radius: var(--radius);
-}
-
-/* 全屏沉浸：没有卡片边框与圆角，真正铺满整屏 */
+/* 手机端使用页面统一底色 */
 .message-page.mobile {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
     background: var(--bg);
 }
 
-/* 窄视口（桌面端窗口拖窄 / 平板）：会话列表铺满，仅保留卡片圆角 */
+/* 窄视口（桌面端窗口拖窄 / 平板）：会话列表铺满 */
 @media (max-width: 900px) {
     .message-page {
         --chat-gutter-left: 14px;
