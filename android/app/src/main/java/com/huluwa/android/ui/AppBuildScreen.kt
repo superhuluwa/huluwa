@@ -80,7 +80,7 @@ import kotlinx.coroutines.launch
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            BuildOverview(build)
+            BuildOverview(build, ui.clock)
             Feedback(build.tasks.loading && !build.tasks.loaded, build.tasks.error, { vm.refreshAndroidBuild() })
             val notice = when {
                 build.connectionError -> "暂时无法连接构建服务，正在自动重连。服务器上的任务会继续执行。"
@@ -94,19 +94,19 @@ import kotlinx.coroutines.launch
         }
         item { BuildActions(build, ui.busy != null, vm) }
         if (download.phase != UpgradePhase.Idle) item { DownloadCard(download, vm, ::install) }
-        item { LogPanel(build, vm, snackbar) }
+        item { LogPanel(build, ui.clock, vm, snackbar) }
         item { SectionTitle("任务历史", Modifier.padding(top = 4.dp)) }
         if (build.tasks.loaded && build.tasks.data.isEmpty()) item {
             EmptyContent("暂无任务记录", "先更新代码，再编译安装包", Icons.Outlined.Android)
         }
         items(build.tasks.data, key = { it.id }) { task ->
-            TaskRow(task, task.id == build.selectedId) { vm.selectAndroidTask(task) }
+            TaskRow(task, task.id == build.selectedId, ui.clock) { vm.selectAndroidTask(task) }
         }
         item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
-@Composable private fun BuildOverview(build: AndroidBuildState) {
+@Composable private fun BuildOverview(build: AndroidBuildState, clock: Long) {
     val status = build.status
     val active = status.activeTask
     Panel(Modifier.fillMaxWidth(), HuluwaColors.Pine) {
@@ -128,7 +128,7 @@ import kotlinx.coroutines.launch
         }
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             OverviewColumn("当前任务", active?.stageLabel ?: "空闲",
-                active?.let { "${it.typeLabel} #${it.id} · ${it.elapsedLabel(build.clock)}" } ?: "就绪后可以开始新的任务", Modifier.weight(1f))
+                active?.let { "${it.typeLabel} #${it.id} · ${it.elapsedLabel(clock)}" } ?: "就绪后可以开始新的任务", Modifier.weight(1f))
             OverviewColumn("签名配置", if (status.signingReady) "已配置" else "未配置",
                 if (status.signingReady) "可以编译 Release 安装包" else "需先恢复 Release 签名文件", Modifier.weight(1f))
         }
@@ -233,7 +233,7 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun LogPanel(build: AndroidBuildState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
+@Composable private fun LogPanel(build: AndroidBuildState, clock: Long, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val task = build.selectedTask
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -262,7 +262,7 @@ import kotlinx.coroutines.launch
             TextButton({ task?.let { vm.downloadAndroidArtifact(it, logFile = true) } },
                 enabled = task != null && build.logs.isNotBlank() && !build.download.active) { Text("下载日志") }
             Spacer(Modifier.weight(1f))
-            task?.let { Text(it.elapsedLabel(build.clock), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted) }
+            task?.let { Text(it.elapsedLabel(clock), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted) }
         }
         task?.error?.takeIf { it.isNotBlank() }?.let {
             Text(it, Modifier.padding(top = 6.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
@@ -285,7 +285,7 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun TaskRow(task: AndroidBuildTask, selected: Boolean, onClick: () -> Unit) {
+@Composable private fun TaskRow(task: AndroidBuildTask, selected: Boolean, clock: Long, onClick: () -> Unit) {
     Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
         color = if (selected) HuluwaColors.SoftGreen else Color.White, shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, if (selected) HuluwaColors.Pine.copy(alpha = .35f) else HuluwaColors.Line)) {
@@ -306,7 +306,7 @@ import kotlinx.coroutines.launch
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(task.startedLabel, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-                Text(task.elapsedLabel(System.currentTimeMillis()), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                Text(task.elapsedLabel(clock), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                 Spacer(Modifier.weight(1f))
                 Text(if (selected) "正在查看日志" else "点击查看日志", style = MaterialTheme.typography.labelSmall,
                     color = if (selected) HuluwaColors.Pine else HuluwaColors.Muted)
