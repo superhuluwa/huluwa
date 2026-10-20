@@ -67,6 +67,21 @@ function localStamp() {
         + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+/** 展示排序：最近消息优先，空会话按最后更新时间兜底；不依赖服务端返回顺序。 */
+function sortSessions(list) {
+    if (!Array.isArray(list)) {
+        return []
+    }
+    return list.slice().sort((left, right) => {
+        const rightTime = String(right.updatedAt || right.last?.createdAt || '')
+        const leftTime = String(left.updatedAt || left.last?.createdAt || '')
+        // 无时间的会话按最旧处理，避免空串在升/降序比较中抢占顶部。
+        const byTime = (rightTime || '0000-00-00 00:00:00')
+            .localeCompare(leftTime || '0000-00-00 00:00:00')
+        return byTime !== 0 ? byTime : String(left.id).localeCompare(String(right.id))
+    })
+}
+
 export const useChatStore = defineStore('chat', {
     state: () => ({
         sessions: [],
@@ -118,7 +133,7 @@ export const useChatStore = defineStore('chat', {
             this.loadingSessions = true
             try {
                 const list = await GetSessions()
-                this.sessions = Array.isArray(list) ? list : []
+                this.sessions = sortSessions(list)
             } finally {
                 this.loadingSessions = false
             }
@@ -414,7 +429,7 @@ export const useChatStore = defineStore('chat', {
 
         handleSessions(frame) {
             if (Array.isArray(frame.sessions)) {
-                this.sessions = frame.sessions
+                this.sessions = sortSessions(frame.sessions)
             }
         },
 

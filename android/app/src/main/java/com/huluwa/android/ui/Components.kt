@@ -37,12 +37,14 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "video" -> Icons.Outlined.SmartDisplay
     "xunlei", "xunlei-win" -> Icons.Outlined.Bolt
     "upgrade" -> Icons.Outlined.SystemUpdate
+    "frp" -> Icons.Outlined.AccountTree
+    "docker" -> Icons.Outlined.DirectionsBoat
     "system" -> Icons.Outlined.NotificationsNone
     else -> Icons.AutoMirrored.Outlined.Chat
 }
 fun sessionColor(kind: String): Color = when (kind) {
     "movie" -> HuluwaColors.Lilac
-    "magnet" -> HuluwaColors.Blue
+    "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber
     else -> HuluwaColors.Pine

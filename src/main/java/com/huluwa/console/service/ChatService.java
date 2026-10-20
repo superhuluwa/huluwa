@@ -140,32 +140,38 @@ public class ChatService {
 
     // ------------------------------------------------------------------ 会话列表
 
-    /** 会话列表（含未读与最后一条预览），按最后更新时间倒序 */
+    /** 会话列表（含未读与最后一条预览），按最近一条消息时间倒序 */
     public List<Map<String, Object>> sessions() {
         List<Map<String, Object>> list = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(
-                "SELECT id, title, kind, updated_at FROM chat_session ORDER BY updated_at DESC, id")) {
+                "SELECT id, title, kind, updated_at FROM chat_session")) {
             String id = String.valueOf(row.get("id"));
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", id);
             item.put("title", row.get("title"));
             item.put("kind", row.get("kind"));
             item.put("unread", unread(id));
-            item.put("last", lastMessage(id));
-            item.put("updatedAt", row.get("updated_at"));
+            Map<String, Object> last = lastMessage(id);
+            item.put("last", last);
+            item.put("updatedAt", last == null ? row.get("updated_at") : last.get("createdAt"));
             list.add(item);
         }
 
-        // 系统通知虚拟会话：始终排在最后（用户新建的聊天对象优先展示）
+        // 系统通知是虚拟会话；它和普通会话使用同一套最近消息排序，不再固定置底。
         Map<String, Object> system = new LinkedHashMap<>();
         system.put("id", SYSTEM_SESSION);
         system.put("title", "系统通知");
         system.put("kind", "system");
         system.put("unread", countSystemUnread());
-        system.put("last", lastSystemMessage());
-        system.put("updatedAt", string(system.get("last") == null ? null
-                : ((Map<?, ?>) system.get("last")).get("createdAt")));
+        Map<String, Object> lastSystem = lastSystemMessage();
+        system.put("last", lastSystem);
+        system.put("updatedAt", lastSystem == null ? null : lastSystem.get("createdAt"));
         list.add(system);
+
+        list.sort((left, right) -> {
+            int byTime = String.valueOf(right.get("updatedAt")).compareTo(String.valueOf(left.get("updatedAt")));
+            return byTime != 0 ? byTime : String.valueOf(left.get("id")).compareTo(String.valueOf(right.get("id")));
+        });
         return list;
     }
 
@@ -384,10 +390,10 @@ public class ChatService {
                 // 迅雷【Win】会话：submit = 提交磁力给 Windows 迅雷建下载任务，状态 / 帮助为内置指令
                 replies.addAll(runXunleiWinTask(sessionId, text));
             }
-            touch(sessionId);
             chatRequestService.markDone(requestId);
             chatPushService.messages(sessionId, replies);
             chatPushService.done(requestId, sessionId, "done", null);
+            touch(sessionId);
         } catch (Exception e) {
             log.warn("聊天请求 {} 处理失败：{}", requestId, e.getMessage());
             String reason = safeMessage(e);

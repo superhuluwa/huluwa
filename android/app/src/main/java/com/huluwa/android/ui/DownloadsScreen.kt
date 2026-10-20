@@ -10,10 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.huluwa.android.*
 import com.huluwa.android.data.*
 
@@ -24,20 +22,8 @@ import com.huluwa.android.data.*
     val all = ui.downloads.data
     val selectedSource = DownloadSource.entries.getOrNull(source - 1)
     val tasks = all.filter { (selectedSource == null || it.source == selectedSource) && when (filter) { 0 -> it.active; 1 -> it.completed; else -> true } }
-    val speed = all.filter { it.active }.mapNotNull { speedBytes(it.speed) }.takeIf { it.isNotEmpty() }?.sum()
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Panel(Modifier.fillMaxWidth(), HuluwaColors.Pine) {
-                Text("当前下载速度", color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(9.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (speed != null) "${formatBytes(speed)}/s" else if (all.any { it.active }) "等待速度同步" else "0 B/s", color = Color.White, fontSize = if (speed != null) 29.sp else 23.sp)
-                    Icon(Icons.Outlined.CloudDownload, null, Modifier.size(36.dp), tint = HuluwaColors.Lime)
-                }
-                Spacer(Modifier.height(14.dp))
-                Text("${all.count { it.status == "downloading" || it.status == "verifying" }} 个正在下载 · ${all.count { it.active && it.status != "downloading" && it.status != "verifying" }} 个等待中",
-                    color = Color.White.copy(alpha = .85f), style = MaterialTheme.typography.bodySmall)
-            }
             FilterRow(listOf("进行中 ${all.count { it.active }}", "已完成 ${all.count { it.completed }}", "全部任务 ${all.size}"), filter, { filter = it }, Modifier.padding(top = 10.dp))
             FilterRow(listOf("全部来源") + DownloadSource.entries.map { it.title }, source, { source = it })
             SectionTitle("下载任务") {
@@ -57,7 +43,6 @@ import com.huluwa.android.data.*
         }
         if (tasks.isEmpty()) item { EmptyContent("这里还没有下载任务", "订阅追更或提交磁力链接后，可在这里查看进度", Icons.Outlined.FileDownload, !ui.downloads.loaded) }
         items(tasks, key = { it.key }) { task -> DownloadCard(task, ui.busy == null && !ui.downloads.loading, vm) }
-        item { Text("文件保存到服务器配置的下载目录。", Modifier.padding(vertical = 8.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall) }
     }
 }
 @Composable private fun DownloadCard(task: DownloadTask, enabled: Boolean, vm: HuluwaViewModel) {
@@ -94,10 +79,4 @@ import com.huluwa.android.data.*
         if (task.message.isNotBlank()) Text(task.message, Modifier.padding(top = 9.dp), color = if (task.status == "failed") HuluwaColors.Danger else HuluwaColors.Muted,
             style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
-}
-private fun speedBytes(raw: String): Double? {
-    val match = Regex("([0-9.]+)\\s*(B|K(?:i)?B|M(?:i)?B|G(?:i)?B)/s", RegexOption.IGNORE_CASE).find(raw) ?: return null
-    val size = match.groupValues[1].toDoubleOrNull() ?: return null
-    val power = when (match.groupValues[2].first().uppercaseChar()) { 'K' -> 1; 'M' -> 2; 'G' -> 3; else -> 0 }
-    return size * Math.pow(1024.0, power.toDouble())
 }

@@ -25,8 +25,6 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Sessions -> Icons.Outlined.Forum
     MainTab.Downloads -> Icons.Outlined.FileDownload
     MainTab.Subscriptions -> Icons.Outlined.BookmarkBorder
-    MainTab.Frp -> Icons.Outlined.AccountTree
-    MainTab.Docker -> Icons.Outlined.DirectionsBoat
 }
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -38,8 +36,12 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else {
-        if (ui.chat.session?.kind == "upgrade") AppUpgradeScreen(ui, vm, snackbar)
-        else if (ui.chat.session != null) ChatScreen(ui, vm, snackbar)
+        val activeSession = ui.chat.session
+        if (activeSession?.kind == "upgrade") AppUpgradeScreen(ui, vm, snackbar)
+        else if (activeSession?.managementService != null) {
+            holder.SaveableStateProvider("session:${activeSession.id}") { ManagementSessionScreen(ui, vm, snackbar) }
+        }
+        else if (activeSession != null) ChatScreen(ui, vm, snackbar)
         else Scaffold(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -47,12 +49,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                 MainTab.Sessions -> Surface(shape = CircleShape, color = HuluwaColors.SoftGreen) {
                     TextButton({ vm.showSheet(AppSheet.Account) }, modifier = Modifier.size(48.dp)) { Text("葫", fontSize = 18.sp) }
                 }
-                MainTab.Downloads -> HeaderAction(Icons.Outlined.Add, "新建下载", { vm.showSheet(AppSheet.NewDownload) })
-                MainTab.Subscriptions -> HeaderAction(Icons.Outlined.Settings, "订阅设置", { vm.showSettings("dytt") })
-                MainTab.Frp -> Unit
-                MainTab.Docker -> HeaderAction(Icons.Outlined.Dns, "Docker 主机信息", { vm.loadText("Docker 主机") {
-                    vm.state.value.overview.let { "连接状态：${if (it.online) "在线" else "不可用"}\n服务端版本：${it.version.ifBlank { "未知" }}\n${it.message}" }
-                } })
+                MainTab.Downloads -> Unit
+                MainTab.Subscriptions -> Unit
             } } },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
@@ -73,8 +71,6 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                         MainTab.Sessions -> SessionsScreen(ui, vm)
                         MainTab.Downloads -> DownloadsScreen(ui, vm)
                         MainTab.Subscriptions -> SubscriptionsScreen(ui, vm)
-                        MainTab.Frp -> FrpScreen(ui, vm)
-                        MainTab.Docker -> DockerScreen(ui, vm)
                     } }
                     if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))
                 }

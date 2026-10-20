@@ -24,32 +24,42 @@ import java.util.Locale
     val containers = ui.containers.data.filter { "${it.name} ${it.image}".contains(keyword.trim(), true) }
     val resourceState: LoadState<List<DockerResource>> = ui.resources[section] ?: LoadState(emptyList())
     val resources = resourceState.data.filter { "${it.name} ${it.subtitle}".contains(keyword.trim(), true) }
-    val enabled = ui.busy == null && !ui.containers.loading
-    LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val known = ui.containers.loaded && ui.containers.error == null
+    val enabled = ui.busy == null && !ui.containers.loading && known && ui.overview.online
+    val connection = when {
+        ui.containers.loading && !ui.containers.loaded -> "连接中"
+        ui.containers.error != null -> "连接异常"
+        !ui.containers.loaded -> "等待连接"
+        ui.overview.online -> "运行正常"
+        else -> "连接异常"
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Panel(Modifier.fillMaxWidth(), HuluwaColors.Pine) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(Icons.Outlined.DirectionsBoat, null, Modifier.size(32.dp), tint = HuluwaColors.Lime)
                     Column(Modifier.weight(1f)) {
-                        Text("我的 NAS", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                        Text("Docker Engine ${ui.overview.version}", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .8f))
+                        Text("Docker Engine", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                        Text(ui.overview.version.takeIf { known && it.isNotBlank() }?.let { "服务端 v$it" } ?: "容器运行环境",
+                            style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .8f))
                     }
-                    Text(if (!ui.containers.loaded) "连接中" else if (ui.overview.online) "运行正常" else "连接异常", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Lime)
+                    Tag(connection, tone = if (ui.containers.error != null || known && !ui.overview.online) Color(0xFFFFD7BD) else HuluwaColors.Lime)
                 }
                 Row(Modifier.fillMaxWidth().padding(vertical = 19.dp)) {
-                    Metric(ui.overview.total.toString(), "全部容器", Modifier.weight(1f), Color.White)
-                    Metric(ui.overview.running.toString(), "运行中", Modifier.weight(1f), Color.White)
-                    Metric((ui.overview.total - ui.overview.running).coerceAtLeast(0).toString(), "已停止", Modifier.weight(1f), Color.White)
+                    Metric(if (known) ui.overview.total.toString() else "—", "全部容器", Modifier.weight(1f), Color.White)
+                    Metric(if (known) ui.overview.running.toString() else "—", "运行中", Modifier.weight(1f), Color.White)
+                    Metric(if (known) (ui.overview.total - ui.overview.running).coerceAtLeast(0).toString() else "—", "未运行", Modifier.weight(1f), Color.White)
                 }
                 HorizontalDivider(color = Color.White.copy(alpha = .2f))
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text("容器 CPU 合计", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .8f))
-                        Text(ui.overview.usage.cpuPercent?.let { String.format(Locale.ROOT, "%.1f%%", it) } ?: "—", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                        Text(ui.overview.usage.cpuPercent?.takeIf { known && ui.overview.online }?.let { String.format(Locale.ROOT, "%.1f%%", it) } ?: "—", color = Color.White, style = MaterialTheme.typography.bodyMedium)
                     }
                     Column(Modifier.weight(1f)) {
                         Text("容器内存合计", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .8f))
-                        Text(formatBytes(ui.overview.usage.memoryBytes), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                        Text(formatBytes(ui.overview.usage.memoryBytes?.takeIf { known && ui.overview.online }), color = Color.White, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }

@@ -8,7 +8,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 sealed interface AppSheet {
@@ -42,14 +45,39 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val session = repository.api.store
     private val appUpdates = (application as HuluwaApplication).appUpdates
     private val mutable = MutableStateFlow(AppState(auth = AuthState(session.server, session.username, session.loggedIn)))
-    private fun withUpgradeSession(value: AppState, upgrade: AppUpgradeState): AppState {
+    private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
+        val upgradeTime = upgrade.latest?.publishedAt.orEmpty().ifBlank {
+            if (upgrade.checkedAt > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(upgrade.checkedAt), ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) else ""
+        }
         val upgradeSession = Session(UPGRADE_SESSION_ID, "在线升级", "upgrade", if (upgrade.hasUpdate) 1 else 0,
-            null, upgrade.sessionPreview)
-        return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data =
-            listOf(upgradeSession) + value.sessions.data.filterNot { it.id == UPGRADE_SESSION_ID || it.kind == "upgrade" }))
+            null, upgrade.sessionPreview, upgradeTime)
+        val managementSessions = ManagementService.entries.map { service ->
+            val preview = when (service) {
+                ManagementService.Frp -> when {
+                    value.tunnels.error != null -> "暂时无法连接 Frp，点击查看详情"
+                    !value.tunnels.loaded -> if (value.tunnels.loading) "正在同步隧道状态…" else "内网穿透 · 隧道、配置与日志"
+                    !value.runtime.running -> "frpc 未运行 · 共 ${value.tunnels.data.size} 条隧道"
+                    else -> "${value.tunnels.data.count { it.running }}/${value.tunnels.data.size} 条隧道运行中 · 点击管理"
+                }
+                ManagementService.Docker -> when {
+                    value.containers.error != null -> "暂时无法连接 Docker，点击查看详情"
+                    !value.containers.loaded -> if (value.containers.loading) "正在同步容器状态…" else "容器服务 · 容器、镜像、网络与存储卷"
+                    !value.overview.online -> "Docker 连接异常，点击查看详情"
+                    else -> "${value.overview.running}/${value.overview.total} 个容器运行中 · ${value.overview.images} 个镜像"
+                }
+            }
+            Session(service.sessionId, service.title, service.kind, 0, null, preview)
+        }
+        val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
+        val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
+        // 管理会话无消息时间，按最旧处理；保留其他会话按更新时间排序的规则。
+        val sortedSessions = (remoteSessions + managementSessions + upgradeSession).sortedWith(
+            compareByDescending<Session> { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
+        return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = sortedSessions))
     }
-    val state = combine(mutable, appUpdates.state) { value, upgrade -> withUpgradeSession(value, upgrade) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, withUpgradeSession(mutable.value, appUpdates.state.value))
+    val state = combine(mutable, appUpdates.state) { value, upgrade -> withAppSessions(value, upgrade) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, withAppSessions(mutable.value, appUpdates.state.value))
     private val notices = Channel<String>(Channel.BUFFERED)
     val messages = notices.receiveAsFlow()
     private var foreground = false
@@ -139,13 +167,34 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(realtime = false) }
     }
     fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab) }; refreshCurrent(false) }
-    fun refreshCurrent(silent: Boolean = false) { when (mutable.value.tab) {
-        MainTab.Sessions -> refreshSessions(silent)
-        MainTab.Downloads -> refreshDownloads(silent)
-        MainTab.Subscriptions -> refreshSubscriptions(silent)
-        MainTab.Frp -> refreshFrp(silent)
-        MainTab.Docker -> { refreshDocker(silent); if (mutable.value.dockerSection != DockerSection.Containers) refreshResources(silent) }
-    } }
+    fun refreshCurrent(silent: Boolean = false) {
+        val current = mutable.value
+        val service = current.chat.session?.managementService
+        if (service != null) {
+            refreshManagement(service, silent)
+            return
+        }
+        when (current.tab) {
+            MainTab.Sessions -> {
+                refreshSessions(silent)
+                if (current.chat.session == null) {
+                    refreshFrp(silent)
+                    refreshDocker(silent)
+                }
+            }
+            MainTab.Downloads -> refreshDownloads(silent)
+            MainTab.Subscriptions -> refreshSubscriptions(silent)
+        }
+    }
+    private fun refreshManagement(service: ManagementService, silent: Boolean = false) {
+        when (service) {
+            ManagementService.Frp -> refreshFrp(silent)
+            ManagementService.Docker -> {
+                refreshDocker(silent)
+                if (mutable.value.dockerSection != DockerSection.Containers) refreshResources(silent)
+            }
+        }
+    }
     private fun refresh(key: String, block: suspend () -> Unit) {
         if (!session.loggedIn || refreshJobs[key]?.isActive == true) return
         refreshJobs[key] = viewModelScope.launch { block() }
@@ -204,10 +253,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var chatGeneration = 0
     private var localId = -1L
     fun openSession(session: Session) {
-        if (session.kind == "upgrade") {
+        if (session.isLocal) {
             closeChat()
+            dismissSheet()
             mutable.update { it.copy(chat = ChatState(session = session)) }
-            checkAppUpdate()
+            val service = session.managementService
+            if (service != null) refreshManagement(service) else checkAppUpdate()
             return
         }
         chatGeneration++; chatJob?.cancel()
@@ -246,7 +297,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun merge(old: List<ChatMessage>, incoming: List<ChatMessage>) = (old + incoming).associateBy { it.id }.values.sortedWith(compareBy<ChatMessage> { if (it.id < 0) Long.MAX_VALUE else it.id }.thenBy { it.createdAt })
     fun refreshChat() {
         val chat = mutable.value.chat; val id = chat.session?.id ?: return
-        if (chat.loading || chat.session?.kind == "upgrade") return
+        if (chat.loading || chat.session?.isLocal == true) return
         val current = chatGeneration
         refresh("chat:$id") {
             try {
@@ -269,7 +320,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun loadEarlier() {
         val chat = mutable.value.chat; val id = chat.session?.id ?: return
-        if (chat.loadingEarlier || !chat.hasEarlier) return
+        if (chat.session?.isLocal == true || chat.loadingEarlier || !chat.hasEarlier) return
         val before = chat.messages.filter { it.id > 0 }.minOfOrNull { it.id } ?: return
         val current = chatGeneration
         mutable.update { it.copy(chat = it.chat.copy(loadingEarlier = true)) }
@@ -281,7 +332,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun send(content: String, retry: ChatMessage? = null) {
         val chat = mutable.value.chat; val selected = chat.session ?: return
-        if (selected.kind in setOf("system", "upgrade") || content.isBlank()) return
+        if (selected.kind == "system" || selected.isLocal || content.isBlank()) return
         val current = chatGeneration; val nonce = retry?.requestId ?: UUID.randomUUID().toString()
         val outgoing = retry?.copy(delivery = Delivery.Sending) ?: ChatMessage(localId--, selected.id, "user", "text", content.trim(), content.trim(), JsonObject(emptyMap()), LocalDateTime.now().toString().replace('T', ' '), Delivery.Sending, nonce)
         processingStarted = System.currentTimeMillis()
@@ -338,7 +389,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun clearChat() {
         val selected = mutable.value.chat.session ?: return
-        if (selected.kind == "system") return
+        if (selected.kind == "system" || selected.isLocal) return
         confirm("清空会话", "确定清空「${selected.title}」的全部消息吗？", "清空") {
             perform("clear-chat", "会话已清空", after = { refreshSessions() }) {
                 repository.clearChat(selected.id); chatGeneration++

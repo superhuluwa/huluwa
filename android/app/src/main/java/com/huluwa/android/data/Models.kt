@@ -34,17 +34,26 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 enum class MainTab(val title: String) {
-    Sessions("我的会话"), Downloads("我的下载"), Subscriptions("我的订阅"), Frp("Frp 管理"), Docker("Docker 管理")
+    Sessions("我的会话"), Downloads("我的下载"), Subscriptions("我的订阅")
+}
+enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
+    Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
+    Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
 }
 enum class DownloadSource(val title: String) { Hls("离线剧集"), Magnet("磁力下载"), XunleiWin("迅雷【Win】") }
 enum class SubscriptionSource(val title: String) { Hls("电影天堂"), Movie("电影港") }
 enum class Delivery { Sent, Sending, Failed }
 
-data class Session(val id: String, val title: String, val kind: String, val unread: Int, val last: ChatMessage?, val previewOverride: String? = null) {
+data class Session(
+    val id: String, val title: String, val kind: String, val unread: Int, val last: ChatMessage?,
+    val previewOverride: String? = null, val updatedAt: String = last?.createdAt.orEmpty(),
+) {
+    val managementService: ManagementService? get() = ManagementService.entries.firstOrNull { it.kind == kind }
+    val isLocal: Boolean get() = kind == "upgrade" || managementService != null
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject) = Session(raw.text("id"), raw.text("title"), raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
-            (raw["last"] as? JsonObject)?.let(ChatMessage::from))
+            (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
     }
 }
 data class ChatMessage(
