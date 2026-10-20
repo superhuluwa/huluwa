@@ -62,7 +62,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
             topBar = {
                 // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
                 PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
-                    onClick = if (ui.tab == MainTab.Mine) onMineTitleTap else null)
+                    onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null)
             },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {

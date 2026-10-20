@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,15 +97,21 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         IconButton(onClick, enabled = enabled, modifier = Modifier.size(48.dp)) { Icon(icon, label, tint = HuluwaColors.Pine) }
     }
 }
-/** 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；onClick 仅用于隐藏手势入口。 */
-@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onClick: (() -> Unit)? = null, action: @Composable () -> Unit = {}) {
+/**
+ * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致。
+ *
+ * onTap 用于隐藏手势入口：关闭水波纹与焦点反馈，点击后外观和操作都与普通标题无异。
+ */
+@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onTap: (() -> Unit)? = null, action: @Composable () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().background(background).statusBarsPadding()
             .heightIn(min = 94.dp).padding(start = 22.dp, end = 22.dp, top = 23.dp, bottom = 24.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
-        val titleModifier = if (onClick != null) Modifier.weight(1f).clickable(onClick = onClick) else Modifier.weight(1f)
+        val titleModifier = if (onTap != null) Modifier.weight(1f).clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap,
+        ) else Modifier.weight(1f)
         Text(title, titleModifier, color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
         action()
     }
