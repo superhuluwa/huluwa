@@ -94,10 +94,16 @@ import com.huluwa.android.data.BrowserAddress
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
             }
-            loadUrl(loadedUrl.ifBlank { "about:blank" })
+            // 屏幕旋转等重建时恢复当前页；首次进入停留在空白起始页。
+            if (loadedUrl.isNotBlank()) loadUrl(loadedUrl)
         }
     }
-    BackHandler { vm.closeHiddenBrowser() }
+    /** 返回统一走网页历史；没有可回退的网页时退回「我的」页面。 */
+    fun goBackOrExit() {
+        if (webView.canGoBack()) webView.goBack() else vm.closeHiddenBrowser()
+    }
+    // 系统返回键与标题栏返回一致：先网页回退，退无可退再回到「我的」。
+    BackHandler { goBackOrExit() }
     val lifecycle = LocalLifecycleOwner.current
     DisposableEffect(lifecycle, webView) {
         val observer = LifecycleEventObserver { _, event -> when (event) {
@@ -139,7 +145,9 @@ import com.huluwa.android.data.BrowserAddress
                         Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconButton(vm::closeHiddenBrowser) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "关闭浏览器") }
+                        IconButton(::goBackOrExit) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回")
+                        }
                         OutlinedTextField(
                             address, { address = it },
                             Modifier.weight(1f).onFocusChanged { editing = it.isFocused },
