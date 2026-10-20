@@ -34,11 +34,12 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 enum class MainTab(val title: String) {
-    Sessions("我的会话"), Downloads("我的下载"), Subscriptions("我的订阅")
+    Sessions("会话"), Downloads("下载"), Subscriptions("订阅"), Mine("我的")
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
     Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
+    AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
 }
 enum class DownloadSource(val title: String) { Hls("离线剧集"), Magnet("磁力下载"), XunleiWin("迅雷【Win】") }
 enum class SubscriptionSource(val title: String) { Hls("电影天堂"), Movie("电影港") }
@@ -182,6 +183,115 @@ enum class DockerSection(val title: String) { Containers("容器"), Images("镜�
 data class ResourceUsage(val cpuPercent: Double? = null, val memoryBytes: Double? = null)
 data class DockerOverview(val online: Boolean = false, val total: Int = 0, val running: Int = 0, val images: Int = 0, val version: String = "", val message: String = "", val usage: ResourceUsage = ResourceUsage())
 
+/** 安卓构建任务：字段与后端 android_build_task 表一一对应。 */
+data class AndroidBuildTask(
+    val id: Long, val type: String, val status: String, val stage: String,
+    val commit: String, val commitSubject: String, val versionCode: Long?, val versionName: String,
+    val artifactName: String, val apkSize: Long, val error: String,
+    val requestedBy: String, val createdAt: String, val startedAt: String, val completedAt: String,
+) {
+    val building get() = type == "BUILD"
+    val active get() = status in setOf("QUEUED", "RUNNING", "CANCELLING")
+    val downloadable get() = building && status == "SUCCESS" && artifactName.isNotBlank() && apkSize > 0
+    val typeLabel get() = if (building) "编译 APK" else "更新代码"
+    val statusLabel get() = when (status) {
+        "QUEUED" -> "等待执行"
+        "RUNNING" -> "执行中"
+        "CANCELLING" -> "正在取消"
+        "SUCCESS" -> "成功"
+        "FAILED" -> "失败"
+        "CANCELLED" -> "已取消"
+        "TIMED_OUT" -> "超时"
+        "INTERRUPTED" -> "意外中断"
+        else -> status
+    }
+    val stageLabel get() = when (stage) {
+        "QUEUED" -> "等待执行"
+        "FETCHING" -> "更新源码"
+        "PREPARING" -> "准备编译"
+        "COMPILING" -> "正在编译"
+        "VERIFYING" -> "校验安装包"
+        "ARCHIVING" -> "归档安装包"
+        "DONE" -> "完成"
+        else -> stage.ifBlank { statusLabel }
+    }
+    /** 任务耗时：未结束的任务以当前时钟兜底。 */
+    fun elapsedLabel(clock: Long): String {
+        val start = parseLocalTime(startedAt.ifBlank { createdAt }) ?: return "—"
+        val end = parseLocalTime(completedAt) ?: clock
+        val seconds = (end - start).coerceAtLeast(0) / 1000
+        return if (seconds < 60) "${seconds} 秒" else "${seconds / 60} 分 ${seconds % 60} 秒"
+    }
+    /** 开始时间：兼容 ISO-8601（带时区）和本地时间两种写法，统一显示为本地时间。 */
+    val startedLabel: String get() = formatLocalTime(startedAt.ifBlank { createdAt })
+    companion object {
+        fun from(raw: JsonObject) = AndroidBuildTask(
+            raw.number("id")?.toLong() ?: 0, raw.text("type", fallback = "UPDATE"),
+            raw.text("status", fallback = "QUEUED"), raw.text("stage"),
+            raw.text("commit"), raw.text("commitSubject"), raw.number("versionCode")?.toLong(), raw.text("versionName"),
+            raw.text("artifactName"), raw.number("apkSize")?.toLong() ?: 0, raw.text("error"),
+            raw.text("requestedBy"), raw.text("createdAt"), raw.text("startedAt"), raw.text("completedAt"),
+        )
+    }
+}
+
+/** 源码快照：构建容器成功执行「更新代码」后写入 source.json。 */
+data class AndroidSource(val commit: String = "", val commitSubject: String = "", val branch: String = "", val updatedAt: String = "") {
+    companion object {
+        fun from(raw: JsonObject) = AndroidSource(raw.text("commit"), raw.text("commitSubject"), raw.text("branch"), raw.text("updatedAt"))
+    }
+}
+
+data class AndroidBuildStatus(
+    val enabled: Boolean = false, val workerOnline: Boolean = false, val signingReady: Boolean = false,
+    val branch: String = "master", val source: AndroidSource = AndroidSource(),
+    val activeTask: AndroidBuildTask? = null, val latestApk: AndroidBuildTask? = null,
+) {
+    /** 只有完整的 40 位提交号才允许发起编译。 */
+    val hasSource get() = Regex("[0-9a-f]{40}").matches(source.commit)
+    val canUpdate get() = enabled && workerOnline && activeTask == null
+    val canBuild get() = canUpdate && hasSource && signingReady
+    val canDownload get() = latestApk?.downloadable == true
+    companion object {
+        fun from(raw: JsonObject) = AndroidBuildStatus(
+            raw.flag("enabled"), raw.flag("workerOnline"), raw.flag("signingReady"),
+            raw.text("branch", fallback = "master"), AndroidSource.from(raw.child("source")),
+            (raw["activeTask"] as? JsonObject)?.let(AndroidBuildTask::from),
+            (raw["latestApk"] as? JsonObject)?.let(AndroidBuildTask::from),
+        )
+    }
+}
+
+/** 增量日志分片：cursor 是下一次请求的字节位置，reset 表示服务端已从头返回。 */
+data class AndroidLogChunk(val task: AndroidBuildTask?, val text: String, val cursor: Long, val hasMore: Boolean, val reset: Boolean) {
+    companion object {
+        fun from(raw: JsonObject) = AndroidLogChunk(
+            (raw["task"] as? JsonObject)?.let(AndroidBuildTask::from), raw.text("text"),
+            raw.number("cursor")?.toLong() ?: 0, raw.flag("hasMore"), raw.flag("reset"),
+        )
+    }
+}
+
+data class AndroidBuildState(
+    val status: AndroidBuildStatus = AndroidBuildStatus(),
+    val tasks: LoadState<List<AndroidBuildTask>> = LoadState(emptyList()),
+    val selectedId: Long? = null, val logs: String = "", val cursor: Long = 0,
+    val logComplete: Boolean = false, val follow: Boolean = true, val submitting: String? = null,
+    val connectionError: Boolean = false, val download: AndroidDownload = AndroidDownload(),
+) {
+    val selectedTask: AndroidBuildTask? get() = selectedId?.let { id -> tasks.data.firstOrNull { it.id == id } }
+}
+
+/** 安装包下载状态：服务端只下发短时票据，App 用系统 DownloadManager 拉取。 */
+data class AndroidDownload(
+    val taskId: Long = 0, val phase: UpgradePhase = UpgradePhase.Idle, val logFile: Boolean = false,
+    val filename: String = "", val received: Long = 0, val total: Long = 0,
+    val message: String = "", val error: String? = null,
+) {
+    val active get() = phase == UpgradePhase.Downloading
+    val progress get() = if (total > 0) (received.toFloat() / total).coerceIn(0f, 1f) else null
+}
+
 data class LoadState<T>(val data: T, val loading: Boolean = false, val error: String? = null, val loaded: Boolean = false)
 data class MultiSourceResult<T>(val items: List<T>, val warnings: List<String> = emptyList(), val failedSources: Set<String> = emptySet())
 
@@ -204,6 +314,21 @@ fun formatBytes(value: Double?): String {
     return String.format(Locale.ROOT, if (index == 0) "%.0f %s" else "%.1f %s", size, units[index])
 }
 
+
+/** 解析后端时间：兼容 ISO-8601（带时区）和本地时间字符串，返回本地毫秒时间戳。 */
+internal fun parseLocalTime(raw: String): Long? {
+    if (raw.isBlank()) return null
+    runCatching { return java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
+    runCatching { return java.time.LocalDateTime.parse(raw.replace(' ', 'T').take(19))
+        .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }
+    return null
+}
+/** 把后端时间格式化为「yyyy-MM-dd HH:mm」。 */
+internal fun formatLocalTime(raw: String): String {
+    val millis = parseLocalTime(raw) ?: return raw.take(16).replace('T', ' ')
+    return java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+}
 
 fun TunnelDraft.validationError(): String? = when {
     name.isBlank() || name.length > 128 || name.any { it == '[' || it == ']' || it.isISOControl() } -> "请填写有效的隧道名称（不超过 128 位）"

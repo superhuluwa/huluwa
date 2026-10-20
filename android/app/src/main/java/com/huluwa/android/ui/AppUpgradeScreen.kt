@@ -80,7 +80,7 @@ import java.time.format.DateTimeFormatter
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回我的会话") }
+                    IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回会话") }
                     RoundIcon(Icons.Outlined.SystemUpdate, modifier = Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Text("在线升级", style = MaterialTheme.typography.titleMedium)
@@ -144,9 +144,8 @@ import java.time.format.DateTimeFormatter
                     if (download.active || ready) {
                         Text(download.message, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(10.dp))
-                        if (download.phase == UpgradePhase.Downloading && download.progress != null)
-                            LinearProgressIndicator(progress = { download.progress ?: 0f }, modifier = Modifier.fillMaxWidth())
-                        else if (download.phase == UpgradePhase.Verifying) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (download.phase == UpgradePhase.Downloading) DownloadProgress(download.progress, Modifier.fillMaxWidth())
+                        else if (download.phase == UpgradePhase.Verifying) DownloadProgress(null, Modifier.fillMaxWidth())
                         if (download.total > 0) {
                             Spacer(Modifier.height(7.dp))
                             Text("${formatBytes(download.received.toDouble())} / ${formatBytes(download.total.toDouble())}",

@@ -4,10 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.FileDownload
@@ -187,6 +187,16 @@ private fun speedBytes(raw: String): Double {
             }
         }
         Spacer(Modifier.height(12.dp))
+        DownloadProgress(
+            when {
+                task.completed -> 1f
+                !task.active -> 0f
+                else -> task.progress?.div(100f)
+            },
+            Modifier.fillMaxWidth(),
+            color = if (failed) HuluwaColors.Danger else HuluwaColors.Pine,
+        )
+        Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(progressText(task), Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall, color = if (failed) HuluwaColors.Danger else HuluwaColors.Muted,
@@ -194,10 +204,6 @@ private fun speedBytes(raw: String): Double {
             task.progress?.let { Text("${it.toInt()}%", style = MaterialTheme.typography.labelMedium,
                 color = if (failed) HuluwaColors.Danger else HuluwaColors.Pine, fontWeight = FontWeight.SemiBold) }
         }
-        Spacer(Modifier.height(7.dp))
-        if (task.progress != null) DownloadProgress(task.progress / 100f, failed)
-        else if (task.active) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(5.dp)),
-            trackColor = HuluwaColors.SoftGreen, color = HuluwaColors.Pine)
         Spacer(Modifier.height(9.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (task.paused) "订阅已暂停" else if (task.message.isNotBlank()) "处理异常" else statusLabel(task.status), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted,
@@ -211,11 +217,6 @@ private fun speedBytes(raw: String): Double {
                 style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
-}
-
-@Composable private fun DownloadProgress(progress: Float, failed: Boolean) {
-    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(5.dp)),
-        trackColor = HuluwaColors.SoftGreen, color = if (failed) HuluwaColors.Danger else HuluwaColors.Pine)
 }
 
 private fun progressText(task: DownloadTask): String = when {

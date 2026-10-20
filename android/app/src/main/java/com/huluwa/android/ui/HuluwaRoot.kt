@@ -24,6 +24,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Sessions -> Icons.Outlined.Forum
     MainTab.Downloads -> Icons.Outlined.FileDownload
     MainTab.Subscriptions -> Icons.Outlined.BookmarkBorder
+    MainTab.Mine -> Icons.Outlined.PersonOutline
 }
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -46,8 +47,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
             containerColor = if (ui.tab == MainTab.Sessions) SessionsBackground else HuluwaColors.Paper,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
-                if (ui.tab == MainTab.Sessions) SessionsHeader { vm.showSheet(AppSheet.Account) }
-                else PageHeader(ui.tab.title) { }
+                PageHeader(ui.tab.title, if (ui.tab == MainTab.Sessions) SessionsBackground else HuluwaColors.Paper)
             },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
@@ -68,6 +68,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                         MainTab.Sessions -> SessionsScreen(ui, vm)
                         MainTab.Downloads -> DownloadsScreen(ui, vm)
                         MainTab.Subscriptions -> SubscriptionsScreen(ui, vm)
+                        MainTab.Mine -> MineScreen(ui, vm)
                     } }
                     if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))
                 }

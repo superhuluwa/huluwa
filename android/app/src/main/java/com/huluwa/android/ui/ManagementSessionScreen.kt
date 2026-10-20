@@ -21,6 +21,7 @@ import com.huluwa.android.data.ManagementService
     val loading = when (service) {
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
+        ManagementService.AppBuild -> ui.androidBuild.tasks.loading
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
@@ -31,7 +32,7 @@ import com.huluwa.android.data.ManagementService
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回我的会话") }
+                    IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回会话") }
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Text(service.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -57,6 +58,12 @@ import com.huluwa.android.data.ManagementService
                             }
                             "连接状态：$connection\n服务端版本：${overview.version.ifBlank { "未知" }}\n${current.containers.error ?: overview.message}"
                         } }) { Icon(Icons.Outlined.Dns, "Docker 主机信息") }
+                        ManagementService.AppBuild -> IconButton({ vm.loadText("构建宿主信息") {
+                            val current = vm.state.value
+                            val status = current.androidBuild.status
+                            "构建服务：${if (status.enabled) "已启用" else "未启用"}\n构建容器：${if (status.workerOnline) "在线" else "离线"}" +
+                                "\n签名配置：${if (status.signingReady) "已配置" else "未配置"}\n分支：${status.branch}"
+                        } }) { Icon(Icons.Outlined.Dns, "构建宿主信息") }
                     }
                 }
             }
@@ -67,6 +74,7 @@ import com.huluwa.android.data.ManagementService
                 when (service) {
                     ManagementService.Frp -> FrpScreen(ui, vm)
                     ManagementService.Docker -> DockerScreen(ui, vm)
+                    ManagementService.AppBuild -> AppBuildScreen(ui, vm, snackbar)
                 }
                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
