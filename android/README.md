@@ -30,7 +30,7 @@
 
 ## 网页构建与下载
 
-网页左侧“安卓 App”提供更新代码、编译签名 Release APK、实时日志、取消任务和历史版本下载。构建服务独立运行在 `huluwa-android-builder` 容器中，配置与部署说明见 [`../android-builder/README.md`](../android-builder/README.md)。构建复用已有 Release 签名，并为每次编译自动分配递增版本代码与显示版本号，例如 `1.0.10`、`1.0.11`，不需要手动修改 Gradle 中的版本。App 根据实际安装的 `versionCode` 与服务端最新成功版本比较，前台自动刷新并识别更新。
+网页左侧“安卓 App”提供更新代码、编译签名 Release APK、实时日志、取消任务和历史版本下载。构建服务独立运行在 `huluwa-android-builder` 容器中，配置与部署说明见 [`../android-builder/README.md`](../android-builder/README.md)。构建复用已有 Release 签名，并为每次编译自动分配递增版本代码与显示版本号，对应关系为 `1010 → 1.0.10`、`1011 → 1.0.11`、`1012 → 1.0.12`，不需要手动修改 Gradle 中的版本。App 根据实际安装的 `versionCode` 与服务端最新成功版本比较，前台自动刷新并识别更新。
 
 ## 导入工程
 

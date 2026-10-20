@@ -135,13 +135,15 @@ public class AndroidBuildService {
                         (rs, row) -> rs.getString(1));
                 long previous = values.isEmpty() ? 0 : Long.parseLong(values.getFirst());
                 Long recorded = jdbc.queryForObject("SELECT MAX(version_code) FROM android_build_task WHERE type='BUILD'", Long.class);
-                long floor = Math.max(previous, recorded == null ? 0 : recorded);
+                // Start this version scheme at 1010; never move behind an allocated build.
+                long floor = Math.max(1009L, Math.max(previous, recorded == null ? 0 : recorded));
                 long next = Math.max(floor, number(source.get("versionCode"), 1)) + 1;
                 if (next > 2_100_000_000L) throw new BusinessException("安卓版本代码已达到上限");
                 versionCode = (int) next;
                 // One durable counter drives both the Android comparison and the visible version.
                 // Do not copy a static versionName from the selected Git revision.
-                versionName = "1.0." + versionCode;
+                // Encode major * 1000 + minor * 100 + patch (minor 0..9, patch 0..99).
+                versionName = (versionCode / 1000) + "." + ((versionCode / 100) % 10) + "." + (versionCode % 100);
                 jdbc.update("INSERT INTO sys_config(cfg_key,cfg_value,updated_at) VALUES('android.build.version-code',?,?) "
                         + "ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value,updated_at=excluded.updated_at",
                         String.valueOf(versionCode), created.toString());

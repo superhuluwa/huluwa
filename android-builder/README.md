@@ -37,7 +37,7 @@ docker compose up -d --no-build android-builder huluwa
 | `huluwa-android-signing` | Release 密钥及配置，只读挂载到构建服务 |
 | `huluwa-android-credentials` | Gitee 凭据或可选 `git-token` 文件，只读挂载到构建服务 |
 
-任务记录与递增版本代码保存在已有 SQLite 数据库中。每次创建编译任务都会自动分配更大的 `versionCode`，并生成对应的显示版本号 `1.0.<versionCode>`（例如 `1.0.10`、`1.0.11`），无需修改安卓源码中的版本号。即使计数配置缺失，也会参考历史任务的最大版本继续递增；失败或取消的任务不会复用已分配的版本号。常规升级使用 `docker compose up -d`，不要使用 `down -v` 删除上述卷。
+任务记录与递增版本代码保存在已有 SQLite 数据库中。每次创建编译任务都会自动分配更大的 `versionCode`，并按 `major × 1000 + minor × 100 + patch` 生成对应的显示版本号，从 `1010 → 1.0.10` 开始，后续为 `1011 → 1.0.11`、`1012 → 1.0.12`。patch 范围为 0–99、minor 范围为 0–9，自动进位，例如 `1099 → 1.0.99`、`1100 → 1.1.0`，无需修改安卓源码中的版本号。即使计数配置缺失，也会参考历史任务的最大版本继续递增；失败或取消的任务不会复用已分配的版本号。常规升级使用 `docker compose up -d`，不要使用 `down -v` 删除上述卷。
 
 ## 配置
 
