@@ -18,6 +18,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.huluwa.android.*
 import com.huluwa.android.data.*
 
+/** 隐藏入口的点击计数：相邻两次点击间隔超过 2 秒就重新计数，累计 10 次后触发。 */
+@Composable private fun rememberHiddenBrowserTap(vm: HuluwaViewModel): () -> Unit {
+    var taps by remember { mutableIntStateOf(0) }
+    var lastTapAt by remember { mutableLongStateOf(0L) }
+    return {
+        val now = System.currentTimeMillis()
+        taps = if (now - lastTapAt > 2_000L) 1 else taps + 1
+        lastTapAt = now
+        if (taps >= 10) { taps = 0; vm.openHiddenBrowser() }
+    }
+}
 private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Functions -> Icons.Outlined.GridView
     MainTab.System -> Icons.Outlined.VerifiedUser
@@ -29,11 +40,14 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
+    val onMineTitleTap = rememberHiddenBrowserTap(vm)
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(ui.chat.session != null && ui.sheet == null) { vm.closeChat() }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
+    } else if (ui.browserVisible) {
+        HiddenBrowserScreen(vm)
     } else {
         val activeSession = ui.chat.session
         if (activeSession?.kind == "upgrade") AppUpgradeScreen(ui, vm, snackbar)
@@ -46,7 +60,9 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
             containerColor = if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
-                PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper)
+                // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
+                PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
+                    onClick = if (ui.tab == MainTab.Mine) onMineTitleTap else null)
             },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {

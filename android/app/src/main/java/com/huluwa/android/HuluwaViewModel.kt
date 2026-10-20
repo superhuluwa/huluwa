@@ -39,6 +39,7 @@ data class AppState(
     val dockerSection: DockerSection = DockerSection.Containers, val resources: Map<DockerSection, LoadState<List<DockerResource>>> = emptyMap(),
     val realtime: Boolean = false, val sheet: AppSheet? = null, val busy: String? = null, val actionError: String? = null,
     val androidBuild: AndroidBuildState = AndroidBuildState(), val clock: Long = System.currentTimeMillis(),
+    val browserVisible: Boolean = false,
 )
 
 class HuluwaViewModel(application: Application) : AndroidViewModel(application) {
@@ -144,6 +145,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         generation++; stopForegroundWork(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
         appUpdates.reset(); buildDownloads.reset(); session.clear(); repository.clearCaches()
+        // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
         mutable.value = AppState(auth = AuthState(session.server, session.username, error = message))
         if (message != null) notify(message)
     }
@@ -187,6 +189,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(realtime = false) }
     }
     fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab) }; refreshCurrent(false) }
+
+    /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true) } }
+    fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
         val service = current.chat.session?.managementService
