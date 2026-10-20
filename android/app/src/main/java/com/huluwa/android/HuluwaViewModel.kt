@@ -30,7 +30,7 @@ data class AuthState(val server: String = "", val username: String = "admin", va
 data class ChatState(val session: Session? = null, val messages: List<ChatMessage> = emptyList(), val loading: Boolean = false, val loadingEarlier: Boolean = false,
     val hasEarlier: Boolean = false, val error: String? = null, val processing: Boolean = false)
 data class AppState(
-    val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Sessions,
+    val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
     val upgrade: AppUpgradeState = AppUpgradeState(),
     val downloads: LoadState<List<DownloadTask>> = LoadState(emptyList()), val subscriptions: LoadState<List<Subscription>> = LoadState(emptyList()),
@@ -195,7 +195,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         when (current.tab) {
-            MainTab.Sessions -> {
+            MainTab.Functions, MainTab.System -> {
                 refreshSessions(silent)
                 if (current.chat.session == null) {
                     refreshFrp(silent)

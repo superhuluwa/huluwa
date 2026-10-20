@@ -33,8 +33,8 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
     val compression: Boolean = false, val enabled: Boolean = true,
 )
 
-enum class MainTab(val title: String) {
-    Sessions("会话"), Downloads("下载"), Subscriptions("订阅"), Mine("我的")
+enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
+    Functions("功能", true), System("系统", true), Downloads("下载"), Subscriptions("订阅"), Mine("我的")
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
@@ -51,6 +51,8 @@ data class Session(
 ) {
     val managementService: ManagementService? get() = ManagementService.entries.firstOrNull { it.kind == kind }
     val isLocal: Boolean get() = kind == "upgrade" || managementService != null
+    /** 只有本地服务会话归入系统会话，其余内置会话（含系统通知）都属于功能会话。 */
+    val isSystemSession: Boolean get() = isLocal
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject) = Session(raw.text("id"), raw.text("title"), raw.text("kind"), raw.number("unread")?.toInt() ?: 0,

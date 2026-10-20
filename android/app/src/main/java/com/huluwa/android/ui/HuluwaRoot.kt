@@ -1,10 +1,8 @@
 package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,7 +19,8 @@ import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
-    MainTab.Sessions -> Icons.Outlined.Forum
+    MainTab.Functions -> Icons.Outlined.GridView
+    MainTab.System -> Icons.Outlined.VerifiedUser
     MainTab.Downloads -> Icons.Outlined.FileDownload
     MainTab.Subscriptions -> Icons.Outlined.BookmarkBorder
     MainTab.Mine -> Icons.Outlined.PersonOutline
@@ -44,17 +43,21 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
         else if (activeSession != null) ChatScreen(ui, vm, snackbar)
         else Scaffold(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-            containerColor = if (ui.tab == MainTab.Sessions) SessionsBackground else HuluwaColors.Paper,
+            containerColor = if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
-                PageHeader(ui.tab.title, if (ui.tab == MainTab.Sessions) SessionsBackground else HuluwaColors.Paper)
+                PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper)
             },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
                     MainTab.entries.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
                         icon = { BadgedBox(badge = {
-                            val unread = ui.sessions.data.sumOf { it.unread }
-                            if (tab == MainTab.Sessions && unread > 0) Badge(containerColor = HuluwaColors.Pine, contentColor = Color.White) { Text(if (unread > 99) "99+" else unread.toString()) }
+                            val unread = when (tab) {
+                                MainTab.Functions -> ui.sessions.data.filterNot { it.isSystemSession }.sumOf { it.unread }
+                                MainTab.System -> ui.sessions.data.filter { it.isSystemSession }.sumOf { it.unread }
+                                else -> 0
+                            }
+                            if (unread > 0) Badge(containerColor = HuluwaColors.Pine, contentColor = Color.White) { Text(if (unread > 99) "99+" else unread.toString()) }
                         }) { Icon(tabIcon(tab), null) } },
                         label = { Text(tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = NavigationBarItemDefaults.colors(selectedIconColor = HuluwaColors.Pine, selectedTextColor = HuluwaColors.Pine,
@@ -65,7 +68,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
             BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
                 Box(Modifier.widthIn(max = 660.dp).fillMaxSize().align(androidx.compose.ui.Alignment.TopCenter)) {
                     holder.SaveableStateProvider(ui.tab.name) { when (ui.tab) {
-                        MainTab.Sessions -> SessionsScreen(ui, vm)
+                        MainTab.Functions -> SessionsScreen(ui, vm)
+                        MainTab.System -> SessionsScreen(ui, vm, system = true)
                         MainTab.Downloads -> DownloadsScreen(ui, vm)
                         MainTab.Subscriptions -> SubscriptionsScreen(ui, vm)
                         MainTab.Mine -> MineScreen(ui, vm)
