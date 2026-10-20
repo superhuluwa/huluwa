@@ -48,8 +48,9 @@ private enum class SessionCategory(val title: String) {
     Function("功能会话"), System("系统会话")
 }
 
+/** 系统通知属于日常可读消息，放在功能会话；只有本地服务会话归入系统会话。 */
 private val Session.category: SessionCategory
-    get() = if (kind == "system" || isLocal) SessionCategory.System else SessionCategory.Function
+    get() = if (isLocal) SessionCategory.System else SessionCategory.Function
 
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel) {
     var categoryIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -177,14 +178,12 @@ private val Session.category: SessionCategory
         SessionIcon(session.kind)
     } else {
         val background = when (session.kind) {
-            "system" -> Color(0xFFE8EAF4)
             "upgrade" -> Color(0xFFE4EDE8)
             "docker" -> Color(0xFFE4EBF4)
             "android-build" -> Color(0xFFE4F0E7)
             else -> Color(0xFFE9E5F1)
         }
         val tone = when (session.kind) {
-            "system" -> Color(0xFF7480AD)
             "upgrade" -> Color(0xFF5F8D77)
             "docker" -> Color(0xFF6A87B2)
             "android-build" -> Color(0xFF4E8C68)
