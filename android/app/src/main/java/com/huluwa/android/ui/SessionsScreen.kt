@@ -180,12 +180,14 @@ private val Session.category: SessionCategory
             "system" -> Color(0xFFE8EAF4)
             "upgrade" -> Color(0xFFE4EDE8)
             "docker" -> Color(0xFFE4EBF4)
+            "android-build" -> Color(0xFFE4F0E7)
             else -> Color(0xFFE9E5F1)
         }
         val tone = when (session.kind) {
             "system" -> Color(0xFF7480AD)
             "upgrade" -> Color(0xFF5F8D77)
             "docker" -> Color(0xFF6A87B2)
+            "android-build" -> Color(0xFF4E8C68)
             else -> Color(0xFF8E7BAC)
         }
         Box(

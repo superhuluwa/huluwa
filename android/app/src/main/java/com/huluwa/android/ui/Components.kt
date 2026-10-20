@@ -50,6 +50,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "upgrade" -> Icons.Outlined.SystemUpdate
     "frp" -> Icons.Outlined.AccountTree
     "docker" -> Icons.Outlined.DirectionsBoat
+    "android-build" -> Icons.Outlined.Android
     "system" -> Icons.Outlined.NotificationsNone
     else -> Icons.AutoMirrored.Outlined.Chat
 }

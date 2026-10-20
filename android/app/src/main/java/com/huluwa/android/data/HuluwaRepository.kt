@@ -208,4 +208,14 @@ class HuluwaRepository(val api: ApiClient) {
             else -> api.post("hls", "settings", body = body)
         }.requireSuccess()
     }
+
+    // ---- 安卓 App 构建管理（对应网页端「安卓 App」页面） ----
+    suspend fun androidStatus(): JsonObject = api.get("android", "status").asObject()
+    suspend fun androidTasks(limit: Int = 30): List<AndroidBuildTask> =
+        api.get("android", "tasks", query = mapOf("limit" to limit.toString())).asArray().map { AndroidBuildTask.from(it.asObject()) }
+    suspend fun androidUpdate(): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "update").asObject())
+    suspend fun androidBuild(): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "build").asObject())
+    suspend fun androidCancel(id: Long): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "tasks", id.toString(), "cancel").asObject())
+    suspend fun androidLogs(id: Long, cursor: Long): AndroidLogChunk =
+        AndroidLogChunk.from(api.get("android", "tasks", id.toString(), "logs", query = mapOf("cursor" to cursor.toString())).asObject())
 }
