@@ -67,8 +67,15 @@ import com.huluwa.android.data.*
             }
         }
         Spacer(Modifier.height(13.dp))
-        if (task.progress != null) LinearProgressIndicator(progress = { task.progress / 100f }, modifier = Modifier.fillMaxWidth(), trackColor = HuluwaColors.SoftGreen)
-        else if (task.active) LinearProgressIndicator(Modifier.fillMaxWidth(), trackColor = HuluwaColors.SoftGreen)
+        // 已完成画满；进行中按百分比（暂无进度时显示扫描色带）；失败等终态只保留空轨道。
+        DownloadProgress(
+            when {
+                task.completed -> 1f
+                !task.active -> 0f
+                else -> task.progress?.div(100f)
+            },
+            Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(if (task.total != null || task.downloaded != null) "${formatBytes(task.downloaded)} / ${formatBytes(task.total)}" else if (task.paused) "订阅已暂停" else statusLabel(task.status),

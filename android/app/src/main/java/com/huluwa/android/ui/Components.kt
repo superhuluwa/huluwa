@@ -1,5 +1,11 @@
 package com.huluwa.android.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -11,9 +17,13 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -21,6 +31,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -140,8 +151,42 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         Spacer(Modifier.height(4.dp)); Text(title, color = if (color == Color.White) Color.White.copy(alpha = .8f) else HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
     }
 }
+/**
+ * 下载进度条：自绘一条连续圆角色带。
+ *
+ * Material3 1.4 的 LinearProgressIndicator 默认会在进度与轨道之间留断口，并在轨道末端
+ * 画一个悬浮圆点，0% 时也可见；下载卡片里看起来像是“断成两截”，因此这里统一自绘。
+ *
+ * @param progress 0..1 的进度；传 null 表示进度未知，显示一段循环扫描的色带
+ */
+@Composable fun DownloadProgress(
+    progress: Float?, modifier: Modifier = Modifier, color: Color = HuluwaColors.Pine,
+    trackColor: Color = HuluwaColors.SoftGreen, height: Dp = 6.dp,
+) {
+    val value by animateFloatAsState((progress ?: 0f).coerceIn(0f, 1f), animationSpec = tween(320), label = "下载进度")
+    // 只在进度未知时启动循环扫描，已知进度不额外刷新。
+    val scan = if (progress == null) {
+        val transition = rememberInfiniteTransition(label = "等待进度")
+        transition.animateFloat(0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "进度扫描").value
+    } else 0f
+    Canvas(modifier.fillMaxWidth().height(height)) {
+        val corner = CornerRadius(size.height / 2)
+        fun band(start: Float, end: Float, tint: Color) {
+            val left = start.coerceIn(0f, 1f) * size.width
+            val right = end.coerceIn(0f, 1f) * size.width
+            if (right > left) drawRoundRect(tint, Offset(left, 0f), Size(right - left, size.height), corner)
+        }
+        band(0f, 1f, trackColor)
+        if (progress == null) {
+            // 进度未知：约轨道三分之一宽的色带从左侧扫到右侧。
+            val width = 0.32f
+            val start = scan * (1f + width) - width
+            band(start, start + width, color)
+        } else band(0f, value, color)
+    }
+}
 @Composable fun Feedback(loading: Boolean, error: String?, onRetry: () -> Unit) {
-    if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(CircleShape))
+    if (loading) DownloadProgress(null, Modifier.fillMaxWidth(), height = 4.dp)
     if (error != null) Panel(Modifier.fillMaxWidth(), Color(0xFFF8F0E4)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Outlined.Info, null, tint = HuluwaColors.Amber, modifier = Modifier.size(20.dp))

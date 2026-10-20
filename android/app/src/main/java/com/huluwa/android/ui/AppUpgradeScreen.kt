@@ -144,9 +144,8 @@ import java.time.format.DateTimeFormatter
                     if (download.active || ready) {
                         Text(download.message, style = MaterialTheme.typography.bodyMedium)
                         Spacer(Modifier.height(10.dp))
-                        if (download.phase == UpgradePhase.Downloading && download.progress != null)
-                            LinearProgressIndicator(progress = { download.progress ?: 0f }, modifier = Modifier.fillMaxWidth())
-                        else if (download.phase == UpgradePhase.Verifying) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (download.phase == UpgradePhase.Downloading) DownloadProgress(download.progress, Modifier.fillMaxWidth())
+                        else if (download.phase == UpgradePhase.Verifying) DownloadProgress(null, Modifier.fillMaxWidth())
                         if (download.total > 0) {
                             Spacer(Modifier.height(7.dp))
                             Text("${formatBytes(download.received.toDouble())} / ${formatBytes(download.total.toDouble())}",
