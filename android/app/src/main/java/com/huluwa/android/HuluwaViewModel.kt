@@ -184,6 +184,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
             MainTab.Downloads -> refreshDownloads(silent)
             MainTab.Subscriptions -> refreshSubscriptions(silent)
+            // 「我的」页只读取已登录信息，按会话未读数刷新即可。
+            MainTab.Mine -> refreshSessions(silent)
         }
     }
     private fun refreshManagement(service: ManagementService, silent: Boolean = false) {

@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,30 +50,6 @@ private enum class SessionCategory(val title: String) {
 
 private val Session.category: SessionCategory
     get() = if (kind == "system" || isLocal) SessionCategory.System else SessionCategory.Function
-
-@Composable internal fun SessionsHeader(onAccountClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(SessionsBackground).statusBarsPadding()
-            .heightIn(min = 94.dp).padding(start = 22.dp, end = 22.dp, top = 23.dp, bottom = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            "我的会话", Modifier.weight(1f), color = SessionsColors.Ink,
-            fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold,
-        )
-        Surface(
-            modifier = Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onAccountClick),
-            shape = CircleShape,
-            color = Color(0xFFE8F0E1), contentColor = Color(0xFF49633B),
-            border = BorderStroke(1.dp, Color(0xFFD8E7D4)),
-        ) {
-            Box(Modifier.fillMaxSize().semantics { contentDescription = "账户与服务器" }, contentAlignment = Alignment.Center) {
-                Text("葫", fontSize = 20.sp, lineHeight = 24.sp, fontFamily = FontFamily.Serif)
-            }
-        }
-    }
-}
 
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel) {
     var categoryIndex by rememberSaveable { mutableIntStateOf(0) }

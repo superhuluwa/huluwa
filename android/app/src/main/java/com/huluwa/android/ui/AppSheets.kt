@@ -32,7 +32,7 @@ import com.huluwa.android.*
             verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(when (sheet) {
-                    AppSheet.Account -> "我的家庭服务器"
+                    AppSheet.Account -> "连接配置"
                     AppSheet.NewDownload -> "新建下载"
                     is AppSheet.TunnelEdit -> if (sheet.tunnel == null) "新增隧道" else "编辑隧道"
                     is AppSheet.Settings -> settingsTitle(sheet.kind)

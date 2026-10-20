@@ -83,10 +83,15 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         IconButton(onClick, enabled = enabled, modifier = Modifier.size(48.dp)) { Icon(icon, label, tint = HuluwaColors.Pine) }
     }
 }
-@Composable fun PageHeader(title: String, action: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 22.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+/** 各主标签共用同一套标题栏，保证字号、行高和上下留白一致。 */
+@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, action: @Composable () -> Unit = {}) {
+    Row(
+        Modifier.fillMaxWidth().background(background).statusBarsPadding()
+            .heightIn(min = 94.dp).padding(start = 22.dp, end = 22.dp, top = 23.dp, bottom = 24.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
+        Text(title, Modifier.weight(1f), color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
         action()
     }
 }
