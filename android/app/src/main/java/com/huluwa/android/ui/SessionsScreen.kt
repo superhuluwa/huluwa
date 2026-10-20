@@ -41,7 +41,8 @@ private object SessionsColors {
     val rows = ui.sessions.data.filter { it.isSystemSession == system }
     val listState = rememberLazyListState()
 
-    LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState) {
+    LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState,
+        overscrollEffect = rememberBounceOverscroll()) {
         if (ui.sessions.loading || ui.sessions.error != null) item {
             Feedback(ui.sessions.loading, ui.sessions.error, { vm.refreshSessions() })
         }
