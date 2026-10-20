@@ -58,7 +58,7 @@ private object SessionsColors {
     val tone = if (session.isSystemSession) SessionsColors.System else SessionsColors.Function
     Box(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 83.dp).padding(horizontal = 21.dp, vertical = 17.dp),
+            Modifier.fillMaxWidth().heightIn(min = 66.4.dp).padding(horizontal = 21.dp, vertical = 9.2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(13.dp),
         ) {
