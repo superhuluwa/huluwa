@@ -267,8 +267,10 @@ class Job:
                 raise RuntimeError('APK 签名与配置的 Release 证书不一致。')
             badging = self.run(['aapt', 'dump', 'badging', str(apk)], capture=True)
             package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
-            if not package or package.group(1) != 'com.huluwa.android' or int(package.group(2)) != self.request['versionCode']:
-                raise RuntimeError('APK 包名或版本代码不符合本次构建参数。')
+            if (not package or package.group(1) != 'com.huluwa.android'
+                    or int(package.group(2)) != self.request['versionCode']
+                    or package.group(3) != self.request['versionName']):
+                raise RuntimeError('APK 包名、版本号或版本代码不符合本次自动分配的构建参数。')
             self.stage('ARCHIVING', '归档已签名 APK……')
             version = re.sub(r'[^A-Za-z0-9._-]', '_', package.group(3))[:60]
             filename = f'huluwa-{version}-{self.request["versionCode"]}-{commit[:8]}.apk'

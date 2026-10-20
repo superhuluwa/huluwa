@@ -97,15 +97,6 @@ import java.time.format.DateTimeFormatter
         LazyColumn(Modifier.fillMaxSize().padding(padding).navigationBarsPadding(),
             contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RoundIcon(Icons.Outlined.SystemUpdate)
-                    Column {
-                        Text("葫芦娃升级助手", style = MaterialTheme.typography.titleMedium)
-                        Text("下载新版本，保留你的账号和设置", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                    }
-                }
-            }
-            item {
                 Panel(Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Outlined.PhoneAndroid, null, Modifier.size(18.dp), tint = HuluwaColors.Pine)

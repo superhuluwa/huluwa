@@ -129,13 +129,19 @@ public class AndroidBuildService {
         long deadline = created.getEpochSecond() + Math.max(60, config.timeoutSeconds());
         Long id = transactions.execute(transaction -> {
             Integer versionCode = null;
+            String versionName = null;
             if ("BUILD".equals(type)) {
                 List<String> values = jdbc.query("SELECT cfg_value FROM sys_config WHERE cfg_key='android.build.version-code'",
                         (rs, row) -> rs.getString(1));
-                int previous = values.isEmpty() ? 0 : Integer.parseInt(values.getFirst());
-                long next = Math.max(previous + 1L, number(source.get("versionCode"), 1) + 1);
+                long previous = values.isEmpty() ? 0 : Long.parseLong(values.getFirst());
+                Long recorded = jdbc.queryForObject("SELECT MAX(version_code) FROM android_build_task WHERE type='BUILD'", Long.class);
+                long floor = Math.max(previous, recorded == null ? 0 : recorded);
+                long next = Math.max(floor, number(source.get("versionCode"), 1)) + 1;
                 if (next > 2_100_000_000L) throw new BusinessException("安卓版本代码已达到上限");
                 versionCode = (int) next;
+                // One durable counter drives both the Android comparison and the visible version.
+                // Do not copy a static versionName from the selected Git revision.
+                versionName = "1.0." + versionCode;
                 jdbc.update("INSERT INTO sys_config(cfg_key,cfg_value,updated_at) VALUES('android.build.version-code',?,?) "
                         + "ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value,updated_at=excluded.updated_at",
                         String.valueOf(versionCode), created.toString());
@@ -144,7 +150,7 @@ public class AndroidBuildService {
                             + "VALUES(?,'QUEUED',?,?,?,?,?,?,?) RETURNING id", Long.class,
                     type, "BUILD".equals(type) ? source.get("commit") : null,
                     "BUILD".equals(type) ? source.get("commitSubject") : null, versionCode,
-                    "BUILD".equals(type) ? source.getOrDefault("versionName", "1.0.0") : null,
+                    versionName,
                     username, created.toString(), deadline);
         });
         if (id == null) throw new BusinessException(500, "创建任务失败");
