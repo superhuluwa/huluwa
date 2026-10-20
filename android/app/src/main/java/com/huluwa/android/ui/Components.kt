@@ -84,13 +84,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
 @Composable fun PageHeader(title: String, action: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 22.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(Icons.Outlined.Eco, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
-                Text("葫芦娃 · 家庭服务", color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-            }
-            Spacer(Modifier.height(5.dp)); Text(title, style = MaterialTheme.typography.headlineMedium)
-        }
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
         action()
     }
 }

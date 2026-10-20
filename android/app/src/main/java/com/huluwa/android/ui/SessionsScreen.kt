@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,19 +16,13 @@ import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel) {
-    var unreadOnly by rememberSaveable { mutableStateOf(false) }
-    val rows = ui.sessions.data.filter { !unreadOnly || it.unread > 0 }
+    val rows = ui.sessions.data
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp)) {
-        item {
-            SectionTitle("全部会话 ${ui.sessions.data.size}") {
-                FilterChip(!unreadOnly, { unreadOnly = false }, label = { Text("全部") })
-                Spacer(Modifier.width(6.dp)); FilterChip(unreadOnly, { unreadOnly = true }, label = { Text("未读 ${ui.sessions.data.count { it.unread > 0 }}") })
-            }
+        if (ui.sessions.error != null) item {
             Feedback(false, ui.sessions.error, { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
-            EmptyContent(if (unreadOnly) "消息都已读完" else "暂无会话",
-                if (ui.sessions.error != null) "连接成功后，会话会自动显示在这里" else "内置服务会由服务器自动提供", loading = !ui.sessions.loaded)
+            EmptyContent("暂无会话", "内置服务会由服务器自动提供", loading = !ui.sessions.loaded)
         }
         itemsIndexed(rows, key = { _, row -> row.id }) { index, session ->
             val shape = RoundedCornerShape(topStart = if (index == 0) 20.dp else 0.dp, topEnd = if (index == 0) 20.dp else 0.dp,
