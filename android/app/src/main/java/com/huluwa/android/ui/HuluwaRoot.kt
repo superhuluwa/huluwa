@@ -3,7 +3,6 @@ package com.huluwa.android.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.*
@@ -44,20 +43,18 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
         else if (activeSession != null) ChatScreen(ui, vm, snackbar)
         else Scaffold(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-            containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            topBar = { PageHeader(ui.tab.title) { when (ui.tab) {
-                MainTab.Sessions -> Surface(shape = CircleShape, color = HuluwaColors.SoftGreen) {
-                    TextButton({ vm.showSheet(AppSheet.Account) }, modifier = Modifier.size(48.dp)) { Text("葫", fontSize = 18.sp) }
-                }
-                MainTab.Downloads -> Unit
-                MainTab.Subscriptions -> Unit
-            } } },
+            containerColor = if (ui.tab == MainTab.Sessions) SessionsBackground else HuluwaColors.Paper,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                if (ui.tab == MainTab.Sessions) SessionsHeader { vm.showSheet(AppSheet.Account) }
+                else PageHeader(ui.tab.title) { }
+            },
             bottomBar = {
                 NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
                     MainTab.entries.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
                         icon = { BadgedBox(badge = {
                             val unread = ui.sessions.data.sumOf { it.unread }
-                            if (tab == MainTab.Sessions && unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) }
+                            if (tab == MainTab.Sessions && unread > 0) Badge(containerColor = HuluwaColors.Pine, contentColor = Color.White) { Text(if (unread > 99) "99+" else unread.toString()) }
                         }) { Icon(tabIcon(tab), null) } },
                         label = { Text(tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         colors = NavigationBarItemDefaults.colors(selectedIconColor = HuluwaColors.Pine, selectedTextColor = HuluwaColors.Pine,
