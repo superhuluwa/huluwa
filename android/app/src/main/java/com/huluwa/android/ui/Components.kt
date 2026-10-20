@@ -28,9 +28,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -115,6 +119,31 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
         Text(title, Modifier.weight(1f), color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
         action()
+    }
+}
+/** 标题右侧的小菊花加载图标，逐瓣轮转亮度。 */
+@Composable fun HeaderLoadingIndicator(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "标题加载")
+    val phase by transition.animateFloat(
+        initialValue = 0f, targetValue = 12f,
+        animationSpec = infiniteRepeatable(tween(durationMillis = 960, easing = LinearEasing)),
+        label = "加载轮转",
+    )
+    val color = HuluwaColors.Muted
+    Canvas(modifier.size(20.dp).progressSemantics().semantics { contentDescription = "正在加载" }) {
+        val radius = size.minDimension * .42f
+        repeat(12) { index ->
+            val age = (phase.toInt() - index + 12) % 12
+            rotate(degrees = index * 30f) {
+                drawLine(
+                    color = color.copy(alpha = 1f - age * .065f),
+                    start = Offset(center.x, center.y - radius),
+                    end = Offset(center.x, center.y - radius * .55f),
+                    strokeWidth = size.minDimension * .08f,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
     }
 }
 @Composable fun SearchBox(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {

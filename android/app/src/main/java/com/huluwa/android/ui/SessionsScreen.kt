@@ -43,8 +43,9 @@ private object SessionsColors {
 
     LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState,
         overscrollEffect = rememberBounceOverscroll()) {
-        if (ui.sessions.loading || ui.sessions.error != null) item {
-            Feedback(ui.sessions.loading, ui.sessions.error, { vm.refreshSessions() })
+        // 加载状态显示在标题右侧，列表只保留错误反馈，避免切换标签时挤动内容。
+        if (ui.sessions.error != null) item {
+            Feedback(loading = false, error = ui.sessions.error, onRetry = { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
             EmptyContent(if (system) "暂无系统会话" else "暂无功能会话", "", loading = !ui.sessions.loaded)
