@@ -32,7 +32,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -99,7 +98,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     }
 }
 /**
- * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；标题水平居中。
+ * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；标题左对齐。
  *
  * onTap 用于隐藏手势入口：关闭水波纹与焦点反馈，点击后外观和操作都与普通标题无异。
  */
@@ -108,15 +107,14 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap,
     ) else Modifier
     // 高度为原来的三分之二（94dp → 63dp）：上下留白 15dp + 16dp，标题行高 32sp。
-    Box(
+    Row(
         Modifier.fillMaxWidth().background(background).statusBarsPadding()
             .heightIn(min = 63.dp).padding(start = 22.dp, end = 22.dp, top = 15.dp, bottom = 16.dp).then(tapModifier),
-        contentAlignment = Alignment.Center,
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
-        Text(title, color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center)
-        Box(Modifier.align(Alignment.CenterEnd)) { action() }
+        Text(title, Modifier.weight(1f), color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
+        action()
     }
 }
 @Composable fun SearchBox(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
