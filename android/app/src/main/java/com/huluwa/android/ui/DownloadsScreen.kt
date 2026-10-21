@@ -2,13 +2,10 @@ package com.huluwa.android.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.FileDownload
@@ -34,11 +31,10 @@ import com.huluwa.android.data.*
 
 @Composable fun DownloadsScreen(ui: AppState, vm: HuluwaViewModel) {
     var filter by rememberSaveable { mutableIntStateOf(0) }
-    var source by rememberSaveable { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
     val all = ui.downloads.data
-    val selectedSource = DownloadSource.entries.getOrNull(source - 1)
-    val tasks = all.filter { (selectedSource == null || it.source == selectedSource) && when (filter) { 0 -> it.active; 1 -> it.completed; else -> true } }
+    // 三个来源合并成一个列表：不再按来源分区或筛选，来源改由卡片上的标签区分
+    val tasks = all.filter { when (filter) { 0 -> it.active; 1 -> it.completed; else -> true } }
     val busy = ui.busy == null && !ui.downloads.loading
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -46,9 +42,7 @@ import com.huluwa.android.data.*
             DownloadHero(all)
             Spacer(Modifier.height(14.dp))
             FilterRow(listOf("进行中 ${all.count { it.active }}", "已完成 ${all.count { it.completed }}", "全部任务 ${all.size}"), filter, { filter = it })
-            Spacer(Modifier.height(8.dp))
-            SourceFilterRow(source, { source = it })
-            SectionTitle("下载任务", Modifier.padding(top = 4.dp)) {
+            SectionTitle("下载任务", Modifier.padding(top = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
                     Box {
@@ -68,7 +62,7 @@ import com.huluwa.android.data.*
         }
         if (tasks.isEmpty()) item {
             DownloadEmptyState(if (all.isEmpty()) "这里还没有下载任务" else "当前筛选下暂无任务",
-                if (all.isEmpty()) "订阅追更或提交磁力链接后，可在这里查看进度" else "可以切换状态或来源查看其他下载任务",
+                if (all.isEmpty()) "订阅追更或提交磁力链接后，可在这里查看进度" else "可以切换状态查看其他下载任务",
                 !ui.downloads.loaded)
         }
         items(tasks, key = { it.key }) { task -> DownloadCard(task, busy, vm) }
@@ -114,22 +108,6 @@ import com.huluwa.android.data.*
     }
 }
 
-@Composable private fun SourceFilterRow(selected: Int, onSelect: (Int) -> Unit) {
-    val labels = listOf("全部来源") + DownloadSource.entries.map { it.title }
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        labels.forEachIndexed { index, label ->
-            val active = selected == index
-            Column(Modifier.clickable { onSelect(index) }.padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(label, color = if (active) HuluwaColors.Pine else HuluwaColors.Muted,
-                    style = MaterialTheme.typography.labelMedium, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium)
-                Spacer(Modifier.height(6.dp))
-                Box(Modifier.width(20.dp).height(2.dp).clip(RoundedCornerShape(2.dp))
-                    .background(if (active) HuluwaColors.Pine else Color.Transparent))
-            }
-        }
-    }
-}
-
 @Composable private fun DownloadToolButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Surface(shape = RoundedCornerShape(13.dp), color = Color.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
         IconButton(onClick, enabled = enabled, modifier = Modifier.size(40.dp)) { Icon(icon, label, tint = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted) }
@@ -168,13 +146,16 @@ private fun speedBytes(raw: String): Double {
     Panel(Modifier.fillMaxWidth(), if (failed) Color(0xFFFFFDFD) else if (done) Color(0xFFFBFCFA) else Color.White) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             RoundIcon(if (task.source == DownloadSource.Hls) Icons.Outlined.InsertDriveFile else Icons.Outlined.CloudDownload,
-                if (task.source == DownloadSource.Hls) HuluwaColors.Pine else HuluwaColors.Blue, Modifier.size(38.dp))
+                task.source.tagTone(), Modifier.size(38.dp))
             Column(Modifier.weight(1f)) {
                 Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(3.dp))
-                Text(listOf(task.episode, task.source.title).filter(String::isNotBlank).joinToString(" · "),
-                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // 来源统一用标签标注，不再和集数拼成一行文字
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Tag(task.source.title, task.source.tagTone())
+                    if (task.episode.isNotBlank()) Text(task.episode, Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             Box {
                 IconButton({ menu = true }, Modifier.size(36.dp)) { Icon(Icons.Outlined.MoreHoriz, "任务操作") }
@@ -219,6 +200,13 @@ private fun speedBytes(raw: String): Double {
                 style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
+}
+
+/** 来源标签的配色：离线剧集松柏绿、磁力蓝、迅雷【Win】紫，与卡片左侧图标保持一致。 */
+private fun DownloadSource.tagTone(): Color = when (this) {
+    DownloadSource.Hls -> HuluwaColors.Pine
+    DownloadSource.Magnet -> HuluwaColors.Blue
+    DownloadSource.XunleiWin -> HuluwaColors.Lilac
 }
 
 private fun progressText(task: DownloadTask): String = when {

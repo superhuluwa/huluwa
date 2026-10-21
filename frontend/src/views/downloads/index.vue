@@ -21,15 +21,7 @@
                 :class="{ active: filter === index }" @click="filter = index">{{ item.label }}</button>
         </div>
 
-        <!-- 来源筛选：下划线式标签页（对齐安卓 SourceFilterRow） -->
-        <div class="source-row">
-            <button v-for="(item, index) in sourceFilters" :key="item.label" type="button" class="source-tab"
-                :class="{ active: source === index }" @click="source = index">
-                <span>{{ item.label }}</span>
-                <i></i>
-            </button>
-        </div>
-
+        <!-- 三个来源合并为一份列表，不再按来源分区或筛选；来源由卡片上的标签区分 -->
         <div class="section-head">
             <h2>下载任务</h2>
             <div class="section-actions">
@@ -57,7 +49,7 @@
         <div v-if="!tasks.length" class="empty-state">
             <span class="empty-icon"><i class="fa-solid fa-file-arrow-down"></i></span>
             <strong>{{ all.length ? '当前筛选下暂无任务' : '这里还没有下载任务' }}</strong>
-            <span>{{ all.length ? '可以切换状态或来源查看其他下载任务' : '订阅追更或提交磁力链接后，可在这里查看进度' }}</span>
+            <span>{{ all.length ? '可以切换状态查看其他下载任务' : '订阅追更或提交磁力链接后，可在这里查看进度' }}</span>
         </div>
 
         <article v-for="task in tasks" :key="task.key" class="task-card"
@@ -68,7 +60,11 @@
                 </span>
                 <div class="task-title">
                     <strong>{{ task.title }}</strong>
-                    <span>{{ [task.episode, sourceLabel(task.source)].filter(Boolean).join(' · ') }}</span>
+                    <!-- 来源统一用标签标注，不再和集数拼成一行文字 -->
+                    <div class="task-tags">
+                        <span class="source-tag" :class="sourceTone(task.source)">{{ sourceLabel(task.source) }}</span>
+                        <span v-if="task.episode" class="task-episode">{{ task.episode }}</span>
+                    </div>
                 </div>
                 <div class="more-wrap">
                     <button class="icon-btn" type="button" title="任务操作" @click="toggleTaskMenu(task.key)">
@@ -224,7 +220,6 @@ export default {
             loading: false,
             error: '',
             filter: 0,
-            source: 0,
             menu: false,
             taskMenu: '',
             settingsOpen: false,
@@ -243,16 +238,10 @@ export default {
         }
     },
     computed: {
-        sourceFilters() {
-            return [{ key: '', label: '全部来源' }].concat(SOURCES.map((item) => ({ key: item.key, label: item.label })))
-        },
-        filteredBySource() {
-            const key = this.sourceFilters[this.source] ? this.sourceFilters[this.source].key : ''
-            return this.all.filter((task) => !key || task.source === key)
-        },
+        /** 三个来源合并为一个列表，只按状态筛选 */
         tasks() {
             const match = this.statusFilters[this.filter].match
-            return this.filteredBySource.filter(match)
+            return this.all.filter(match)
         },
         activeCount() {
             return this.all.filter((task) => task.active).length
@@ -293,6 +282,11 @@ export default {
         sourceLabel(key) {
             const matched = SOURCES.find((item) => item.key === key)
             return matched ? matched.label : key
+        },
+        /** 来源标签配色：离线剧集松柏绿、磁力蓝、迅雷【Win】紫，与卡片左侧图标一致 */
+        sourceTone(key) {
+            if (key === 'Hls') return 'pine'
+            return key === 'XunleiWin' ? 'lilac' : 'blue'
         },
         statusLabel,
         formatBytes,
@@ -543,50 +537,6 @@ export default {
     font-weight: 600;
 }
 
-.source-row {
-    display: flex;
-    gap: 18px;
-    margin-top: 14px;
-    overflow-x: auto;
-    scrollbar-width: none;
-}
-
-.source-row::-webkit-scrollbar {
-    display: none;
-}
-
-.source-tab {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 0;
-    border: 0;
-    background: none;
-    color: var(--muted);
-    font-family: inherit;
-    font-size: 11.5px;
-    font-weight: 500;
-    cursor: pointer;
-}
-
-.source-tab i {
-    width: 20px;
-    height: 2px;
-    border-radius: 2px;
-    background: transparent;
-}
-
-.source-tab.active {
-    color: var(--pine);
-    font-weight: 600;
-}
-
-.source-tab.active i {
-    background: var(--pine);
-}
-
 /* ---------- 列表 ---------- */
 .section-head {
     display: flex;
@@ -765,7 +715,40 @@ export default {
     text-overflow: ellipsis;
 }
 
-.task-title span {
+/* 来源标签 + 集数：与安卓卡片上的 Tag 一致 */
+.task-tags {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.source-tag {
+    flex: none;
+    padding: 2px 7px;
+    border-radius: 7px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
+}
+
+.source-tag.pine {
+    background: rgba(32, 108, 84, .08);
+    color: var(--pine);
+}
+
+.source-tag.blue {
+    background: rgba(78, 120, 167, .12);
+    color: var(--blue);
+}
+
+.source-tag.lilac {
+    background: rgba(130, 96, 161, .12);
+    color: var(--lilac);
+}
+
+.task-episode {
+    min-width: 0;
     font-size: 11px;
     color: var(--muted);
     white-space: nowrap;
