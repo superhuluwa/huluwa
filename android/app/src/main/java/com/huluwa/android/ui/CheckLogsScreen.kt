@@ -48,7 +48,8 @@ import com.huluwa.android.data.isServerUnreachable
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Feedback(logs.loading, logs.error.takeUnless { it.isServerUnreachable() }, { vm.refreshCheckLogs() })
+            // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
+            Feedback(loading = false, error = logs.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshCheckLogs() })
         }
         if (rows.isEmpty() && logs.loaded) item {
             EmptyContent("还没有巡检记录", "添加订阅后，每个巡检周期都会在这里留一条结果", Icons.AutoMirrored.Outlined.ListAlt)

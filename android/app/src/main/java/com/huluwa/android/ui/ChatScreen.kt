@@ -48,7 +48,9 @@ import com.huluwa.android.data.*
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // 标题按剩余宽度省略，确保右侧的加载菊花与重连徽标始终可见。
+                            Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TitleLoadingIndicator(chat.loading)
                             TitleReconnectBadge(reconnecting)
                         }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -79,7 +81,8 @@ import com.huluwa.android.data.*
         }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), state = list, contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             item("history") {
-                Feedback(chat.loading, chat.error.takeUnless { it.isServerUnreachable() }, { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
+                // 加载状态统一显示在标题栏菊花上，消息区只保留错误反馈，避免列表被进度条挤动。
+                Feedback(loading = false, error = chat.error.takeUnless { it.isServerUnreachable() }, onRetry = { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
                 if (chat.hasEarlier) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }

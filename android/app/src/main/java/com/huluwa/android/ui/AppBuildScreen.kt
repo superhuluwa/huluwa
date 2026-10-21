@@ -81,7 +81,8 @@ import kotlinx.coroutines.launch
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             BuildOverview(build, ui.clock)
-            Feedback(build.tasks.loading && !build.tasks.loaded, build.tasks.error.takeUnless { it.isServerUnreachable() }, { vm.refreshAndroidBuild() })
+            // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
+            Feedback(loading = false, error = build.tasks.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshAndroidBuild() })
             val notice = when {
                 build.connectionError -> "暂时无法连接构建服务，正在自动重连。服务器上的任务会继续执行。"
                 build.tasks.loaded && !status.enabled -> "安卓构建服务尚未启用，请配置并启动构建容器。"

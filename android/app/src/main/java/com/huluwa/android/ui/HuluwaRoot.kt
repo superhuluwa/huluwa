@@ -84,11 +84,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                             PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
                                 onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
                                 reconnecting = reconnecting) {
-                                if (ui.tab.isSessionTab) {
-                                    Box(Modifier.size(20.dp)) {
-                                        if (!ui.sessions.loaded || ui.sessions.loading) HeaderLoadingIndicator()
-                                    }
-                                }
+                                // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
+                                if (ui.tab.isSessionTab) TitleLoadingIndicator(!ui.sessions.loaded || ui.sessions.loading)
                             }
                         },
                         bottomBar = {

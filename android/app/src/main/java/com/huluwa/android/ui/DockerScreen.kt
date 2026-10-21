@@ -70,9 +70,10 @@ import java.util.Locale
                 IconButton({ if (section == DockerSection.Containers) vm.refreshDocker() else vm.refreshResources() }, enabled = !ui.containers.loading && !resourceState.loading) { Icon(Icons.Outlined.Refresh, "刷新资源") }
                 if (section != DockerSection.Containers) IconButton({ vm.showSheet(AppSheet.CreateResource(section)) }, enabled = enabled) { Icon(Icons.Outlined.Add, if (section == DockerSection.Images) "拉取镜像" else "新增${section.title}") }
             }
-            Feedback(if (section == DockerSection.Containers) ui.containers.loading else resourceState.loading,
-                (if (section == DockerSection.Containers) ui.containers.error else resourceState.error).takeUnless { it.isServerUnreachable() },
-                { if (section == DockerSection.Containers) vm.refreshDocker() else vm.refreshResources() })
+            // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
+            Feedback(loading = false,
+                error = (if (section == DockerSection.Containers) ui.containers.error else resourceState.error).takeUnless { it.isServerUnreachable() },
+                onRetry = { if (section == DockerSection.Containers) vm.refreshDocker() else vm.refreshResources() })
         }
         if (section == DockerSection.Containers) {
             if (containers.isEmpty()) item { EmptyContent("没有找到容器", "容器由当前服务器的 Docker 守护进程提供", Icons.Outlined.Inventory2, !ui.containers.loaded) }

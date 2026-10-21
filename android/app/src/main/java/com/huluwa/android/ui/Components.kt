@@ -151,6 +151,17 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         ReconnectingBadge()
     }
 }
+/**
+ * 标题右侧的加载菊花：二级页（会话 / 管理会话 / 在线升级）拉取数据时淡入并横向展开，
+ * 加载完成后淡出收起。取代原先内容区顶部的扫描进度条与刷新按钮里的小圆圈，
+ * 让所有页面只在标题行展示加载状态。
+ */
+@Composable fun TitleLoadingIndicator(loading: Boolean) {
+    AnimatedVisibility(loading, enter = fadeIn(tween(180)) + expandHorizontally(tween(180)),
+        exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220)), label = "加载提示") {
+        HeaderLoadingIndicator()
+    }
+}
 /** 订阅服务器可达性，返回「是否正在重连」，供各页面标题行直接使用。 */
 @Composable fun rememberReconnecting(vm: HuluwaViewModel): Boolean {
     val reachable by vm.serverReachable.collectAsStateWithLifecycle()

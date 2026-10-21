@@ -51,7 +51,8 @@ import com.huluwa.android.data.*
             }
         }
         item {
-            Feedback(tunnels.loading, tunnels.error.takeUnless { it.isServerUnreachable() }, { vm.refreshFrp() })
+            // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
+            Feedback(loading = false, error = tunnels.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshFrp() })
             if (known && ui.runtime.message.isNotBlank()) Text(ui.runtime.message, style = MaterialTheme.typography.bodySmall,
                 color = HuluwaColors.Muted, modifier = Modifier.padding(bottom = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
