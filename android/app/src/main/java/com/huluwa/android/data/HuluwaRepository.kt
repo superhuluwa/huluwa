@@ -1,12 +1,14 @@
 package com.huluwa.android.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.util.concurrent.ConcurrentHashMap
 
-class HuluwaRepository(val api: ApiClient) {
+class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     private val previousCpu = ConcurrentHashMap<String, JsonObject>()
     suspend fun authStatus(server: String) = api.request("GET", listOf("auth", "status"), server = server, token = "").asObject()
     suspend fun login(server: String, username: String, password: String, setup: Boolean): JsonObject = api.request(
@@ -14,8 +16,23 @@ class HuluwaRepository(val api: ApiClient) {
     ).asObject()
     suspend fun me() = api.get("auth", "me").asObject()
     suspend fun changePassword(old: String, new: String) = api.post("auth", "password", body = jsonBody { put("oldPassword", old); put("newPassword", new) })
-    fun clearCaches() { previousCpu.clear() }
+    fun clearCaches() { previousCpu.clear(); chatCache.clear() }
     suspend fun sessions() = api.get("chat", "sessions").asArray().map { Session.from(it.asObject()) }
+
+    /** 进入会话时先取本地缓存，命中即可立即渲染，不必等网络返回。 */
+    suspend fun cachedMessages(id: String): List<ChatMessage> = withContext(Dispatchers.IO) { chatCache.read(id) }
+
+    /** 同一个进程内反复进出会话时，直接同步拿到上次渲染过的一页，转场第一帧就有内容。 */
+    fun warmMessages(id: String): List<ChatMessage>? = chatCache.peek(id)
+
+    /** 消息落盘放 IO 线程，失败不影响正常收发（缓存只是锦上添花）。 */
+    suspend fun cacheMessages(id: String, rows: List<ChatMessage>) {
+        withContext(Dispatchers.IO) { runCatching { chatCache.write(id, rows) } }
+    }
+
+    /** 清空会话后同步删掉本地缓存，避免下次进入又短暂显示已清空的消息。 */
+    suspend fun forgetMessages(id: String) = withContext(Dispatchers.IO) { chatCache.remove(id) }
+
     suspend fun messages(id: String, before: Long? = null) = api.get("chat", "sessions", id, "messages", query = buildMap {
         put("limit", "50"); if (before != null) put("beforeId", before.toString())
     }).asArray().map { ChatMessage.from(it.asObject()) }

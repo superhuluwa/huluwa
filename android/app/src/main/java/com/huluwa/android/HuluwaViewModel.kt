@@ -29,6 +29,8 @@ sealed interface AppSheet {
 data class AuthState(val server: String = "", val username: String = "admin", val loggedIn: Boolean = false, val working: Boolean = false, val setup: Boolean = false, val error: String? = null)
 data class ChatState(val session: Session? = null, val messages: List<ChatMessage> = emptyList(), val loading: Boolean = false, val loadingEarlier: Boolean = false,
     val hasEarlier: Boolean = false, val error: String? = null, val processing: Boolean = false)
+/** 消息分页大小：与接口 limit 和本地缓存的一页保持一致。 */
+private const val CHAT_PAGE_SIZE = 50
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
@@ -485,12 +487,32 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
         chatGeneration++; chatJob?.cancel()
         val current = chatGeneration
-        mutable.update { it.copy(chat = ChatState(session = session, loading = true)) }
+        // 先同步切到会话页（保证转场立即开始）；进程内已有这一页时直接同步渲染，第一帧就是完整内容。
+        val warm = repository.warmMessages(session.id)
+        mutable.update { it.copy(chat = ChatState(session = session, messages = warm.orEmpty(), loading = warm == null,
+            hasEarlier = warm != null && warm.size >= CHAT_PAGE_SIZE)) }
         chatJob = viewModelScope.launch {
+            // 没有进程内缓存时再读磁盘，命中即关闭加载态；随后请求服务器在后台无感刷新。
+            if (warm == null) {
+                val cached = repository.cachedMessages(session.id)
+                if (current != chatGeneration) return@launch
+                if (cached.isNotEmpty()) mutable.update { it.copy(chat = it.chat.copy(messages = cached, loading = false,
+                    hasEarlier = cached.size >= CHAT_PAGE_SIZE)) }
+            }
             try {
                 val rows = repository.messages(session.id)
                 if (current != chatGeneration) return@launch
-                mutable.update { it.copy(chat = it.chat.copy(messages = rows, loading = false, hasEarlier = rows.size >= 50)) }
+                // 服务器返回空页面说明消息已被清空，本地缓存一并作废；否则写入最新一页。
+                if (rows.isEmpty()) repository.forgetMessages(session.id) else repository.cacheMessages(session.id, rows)
+                mutable.update { old ->
+                    val sent = old.chat.messages.filter { it.delivery == Delivery.Sent }
+                    // 与既有刷新逻辑一致：最新一页和本地完全不重叠时（离线太久 / 记录被清空）以服务器为准重建。
+                    val gap = rows.size >= 50 && sent.isNotEmpty() && rows.none { row -> sent.any { it.id == row.id } }
+                    // 服务器返回空页面说明消息已被清空，此时不能用缓存兜底，否则会一直显示旧消息。
+                    val base = if (gap || rows.isEmpty()) emptyList() else old.chat.messages
+                    old.copy(chat = old.chat.copy(messages = merge(base, rows), loading = false, error = null,
+                        hasEarlier = gap || rows.size >= 50))
+                }
                 sourceResult { repository.markRead(session.id) }.exceptionOrNull()?.let { if (it is ApiException && it.code == 401) handleError(it) }
                 if (current == chatGeneration) refreshSessions(true)
             } catch (error: CancellationException) { throw error }
@@ -519,7 +541,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun merge(old: List<ChatMessage>, incoming: List<ChatMessage>) = (old + incoming).associateBy { it.id }.values.sortedWith(compareBy<ChatMessage> { if (it.id < 0) Long.MAX_VALUE else it.id }.thenBy { it.createdAt })
     fun refreshChat() {
         val chat = mutable.value.chat; val id = chat.session?.id ?: return
-        if (chat.loading || chat.session?.isLocal == true) return
+        // 正在进入会话（读缓存 / 首屏请求）时不重复请求：缓存命中后 loading 已为 false，
+        // 但 openSession 的请求可能还没回来，这里靠 chatJob 拦住，避免两个请求并发。
+        if (chat.loading || chatJob?.isActive == true || chat.session?.isLocal == true) return
         val current = chatGeneration
         refresh("chat:$id") {
             try {
@@ -534,6 +558,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                             hasEarlier = if (gap) true else old.chat.hasEarlier,
                             processing = old.chat.processing && rows.none { row -> row.role == "bot" && old.chat.messages.none { it.id == row.id } }))
                     }
+                    // 轮询合并后的结果同步进缓存，保证下次进入时看到的与当前一致；
+                    // 服务器返回空页说明会话已被清空，直接作废缓存，避免下次进入回显旧消息。
+                    if (rows.isEmpty()) repository.forgetMessages(id) else {
+                        val snapshot = mutable.value.chat.messages
+                        viewModelScope.launch { repository.cacheMessages(id, snapshot) }
+                    }
                     sourceResult { repository.markRead(id) }.exceptionOrNull()?.let { if (it is ApiException && it.code == 401) handleError(it) }
                 }
             } catch (error: CancellationException) { throw error }
@@ -547,7 +577,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val current = chatGeneration
         mutable.update { it.copy(chat = it.chat.copy(loadingEarlier = true)) }
         viewModelScope.launch {
-            try { val rows = repository.messages(id, before); if (current == chatGeneration) mutable.update { it.copy(chat = it.chat.copy(messages = merge(rows, it.chat.messages), loadingEarlier = false, hasEarlier = rows.size >= 50)) } }
+            try {
+                val rows = repository.messages(id, before)
+                if (current == chatGeneration) {
+                    // 只缓存最新一页，翻出来的更早消息不必落盘；下次进入仍会自动刷新补齐。
+                    mutable.update { it.copy(chat = it.chat.copy(messages = merge(rows, it.chat.messages), loadingEarlier = false, hasEarlier = rows.size >= 50)) }
+                }
+            }
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { if (current == chatGeneration) { mutable.update { it.copy(chat = it.chat.copy(loadingEarlier = false)) }; handleError(error) } }
         }
@@ -562,7 +598,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val accepted = repository.send(selected.id, content.trim(), nonce)
-                if (current == chatGeneration) mutable.update { it.copy(chat = it.chat.copy(messages = merge(it.chat.messages.filterNot { item -> item.requestId == nonce }, accepted))) }
+                if (current == chatGeneration) {
+                    mutable.update { it.copy(chat = it.chat.copy(messages = merge(it.chat.messages.filterNot { item -> item.requestId == nonce }, accepted))) }
+                    // 发送成功后立即写缓存，避免刚发完就退出、下次进入看不到这条消息。
+                    val snapshot = mutable.value.chat.messages
+                    viewModelScope.launch { repository.cacheMessages(selected.id, snapshot) }
+                }
                 refreshSessions(true)
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
@@ -579,6 +620,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 val rows = frame.rows("messages").map { ChatMessage.from(it.asObject()) }
                 if (mutable.value.chat.session?.id == id) {
                     mutable.update { it.copy(chat = it.chat.copy(messages = merge(it.chat.messages, rows), processing = false)) }
+                    // 实时推送到达时同步更新缓存，下次进入看到的就是最新的（写盘放后台，不阻塞推送处理）。
+                    val snapshot = mutable.value.chat.messages
+                    viewModelScope.launch { repository.cacheMessages(id, snapshot) }
                     if (foreground) viewModelScope.launch { sourceResult { repository.markRead(id) }.exceptionOrNull()?.let { if (it is ApiException && it.code == 401) handleError(it) } }
                 }
                 refreshSessions(true)
@@ -615,6 +659,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         confirm("清空会话", "确定清空「${selected.title}」的全部消息吗？", "清空") {
             perform("clear-chat", "会话已清空", after = { refreshSessions() }) {
                 repository.clearChat(selected.id); chatGeneration++
+                // 先删本地缓存再清空界面，避免下次进入时缓存里的旧消息短暂回显。
+                repository.forgetMessages(selected.id)
                 mutable.update { it.copy(chat = it.chat.copy(messages = emptyList(), processing = false, hasEarlier = false, loadingEarlier = false)) }
             }
         }
