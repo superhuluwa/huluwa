@@ -100,9 +100,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     value.subscriptions.error != null && value.subscriptions.data.isEmpty() -> "订阅加载失败，点击重试"
                     value.subscriptions.data.isEmpty() -> "电影港与电影天堂的订阅，追更状态与资源列表"
                     else -> {
-                        val enabled = value.subscriptions.data.count { it.enabled }
                         val suffix = if (value.subscriptions.error != null) " · 部分来源加载失败" else ""
-                        "${value.subscriptions.data.size} 个订阅 · $enabled 个追更中$suffix"
+                        "${value.subscriptions.data.size} 个订阅$suffix"
                     }
                 }
             }

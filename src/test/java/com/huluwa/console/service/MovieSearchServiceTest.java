@@ -83,6 +83,16 @@ class MovieSearchServiceTest {
         assertEquals("动画/奇幻", MovieSearchService.fieldAfter(flat, "类别").replace(" ", ""));
     }
 
+    /** 站点新模板在标签后带冒号（◎年　　代:　2026）：去空白后不能把冒号留在值里 */
+    @Test
+    void fieldAfterDropsLeadingColon() {
+        String flat = MovieSearchService.flatten("◎年　　代:　2026◎产　　地:　中国大陆◎类　　别:　剧情 / 爱情");
+        assertEquals("2026", MovieSearchService.fieldAfter(flat, "年代"));
+        assertEquals("中国大陆", MovieSearchService.fieldAfter(flat, "产地"));
+        assertEquals("剧情/爱情", MovieSearchService.fieldAfter(flat, "类别").replace(" ", ""));
+        assertEquals("", MovieSearchService.fieldAfter(flat, "导演"));
+    }
+
     @Test
     void normalizeKeywordStripsCommandPrefixOnly() {
         assertEquals("凡人", ChatService.normalizeKeyword("电影港搜索 凡人"));

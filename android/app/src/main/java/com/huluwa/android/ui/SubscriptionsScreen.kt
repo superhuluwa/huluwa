@@ -50,6 +50,8 @@ import com.huluwa.android.data.*
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(sub.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // 来源以标签形式跟在剧名后；标题已占 weight(1f)，这里不再额外挤压
+                    Tag(sub.source.title, modifier = Modifier.padding(end = 6.dp))
                     // 右上角「取消订阅」：取消即删除订阅记录，已下载文件保留；已暂停的残留项显示「删除订阅」
                     TextButton(
                         onClick = { vm.deleteSubscription(sub) }, enabled = enabled,
@@ -59,10 +61,14 @@ import com.huluwa.android.data.*
                             style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
-                Text(listOf(sub.year, sub.genre, sub.source.title).filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted,
+                Text(listOf(sub.year, sub.genre).filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Tag(if (sub.source == SubscriptionSource.Hls) "已收录 ${sub.count} 集" else "${sub.count} 条磁力"); Tag(if (sub.enabled) "追更中" else "已暂停", outlined = true) }
+                // 电影港与电影天堂统一为「已收录 N 条」；追更中的状态不再单独标注，仅历史遗留的暂停项保留提示
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Tag("已收录 ${sub.count} 条")
+                    if (!sub.enabled) Tag("已暂停", outlined = true)
+                }
             }
         }
         if (sub.lastCheck.isNotBlank()) Text("上次检查：${sub.lastCheck}", Modifier.padding(top = 11.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)

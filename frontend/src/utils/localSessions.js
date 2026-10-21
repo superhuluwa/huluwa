@@ -219,12 +219,10 @@ async function loadSubscriptions() {
     try {
         const [movie, hls] = await Promise.allSettled([GetSubscriptions(true), GetHlsSubscriptions()])
         const failed = []
-        let enabled = 0
         let total = 0
         if (movie.status === 'fulfilled') {
             for (const item of Array.isArray(movie.value) ? movie.value : []) {
                 total += 1
-                if (item.enabled !== false) enabled += 1
             }
         } else {
             failed.push('电影港')
@@ -232,7 +230,6 @@ async function loadSubscriptions() {
         if (hls.status === 'fulfilled') {
             for (const item of Array.isArray(hls.value) ? hls.value : []) {
                 total += 1
-                if (item.enabled !== false) enabled += 1
             }
         } else {
             failed.push('电影天堂')
@@ -241,7 +238,7 @@ async function loadSubscriptions() {
             return localSession(LOCAL_SESSIONS.subscriptions, '订阅加载失败，点击重试')
         }
         const preview = total
-            ? `${total} 个订阅 · ${enabled} 个追更中${failed.length ? ` · ${failed.join('、')}加载失败` : ''}`
+            ? `${total} 个订阅${failed.length ? ` · ${failed.join('、')}加载失败` : ''}`
             : '电影港与电影天堂的订阅，追更状态与资源列表'
         return localSession(LOCAL_SESSIONS.subscriptions, preview)
     } catch (error) {

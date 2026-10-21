@@ -44,6 +44,7 @@ public class DatabaseInitializer implements ApplicationRunner {
         migrateDownloadHistory();
         migrateXunleiWinDownloads();
         refreshMovieMagnetEpisodes();
+        refreshMovieSubscriptionMeta();
         // 旧库的 HLS 订阅没有海报字段，补列后由订阅巡检按需回填。
         addColumnIfMissing("hls_subscription", "cover", "TEXT");
         boolean hasSubscriptionTool = jdbcTemplate.queryForList("PRAGMA table_info(movie_subscription)").stream()
@@ -103,6 +104,24 @@ public class DatabaseInitializer implements ApplicationRunner {
         }
         if (fixed > 0) {
             log.info("已修正 {} 条订阅磁力的历史集号", fixed);
+        }
+    }
+
+    /**
+     * 旧版解析在「◎年　　代:」这种带冒号的模板上会把冒号当值存下来（如「:2026」）。
+     * 每次启动剥掉前导冒号：只改文本不改行数，可重复执行。
+     */
+    private void refreshMovieSubscriptionMeta() {
+        int fixed = 0;
+        for (String column : new String[]{"year", "origin", "genre"}) {
+            fixed += jdbcTemplate.update("""
+                    UPDATE movie_subscription
+                       SET %s = LTRIM(%s, ':：')
+                     WHERE %s LIKE ':%%' OR %s LIKE '：%%'
+                    """.formatted(column, column, column, column));
+        }
+        if (fixed > 0) {
+            log.info("已修正 {} 处电影港订阅的年代 / 产地 / 类型字段", fixed);
         }
     }
 

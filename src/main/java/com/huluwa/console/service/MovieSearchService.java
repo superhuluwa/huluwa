@@ -517,7 +517,13 @@ public class MovieSearchService {
         }
         start += label.length() + 1;
         int end = flat.indexOf('◎', start);
-        return (end < 0 ? flat.substring(start) : flat.substring(start, end)).trim();
+        String value = (end < 0 ? flat.substring(start) : flat.substring(start, end)).trim();
+        // 站点模板带冒号（◎年　　代:　2026）：去空白后即为「:2026」，这里去掉前导冒号
+        int cut = 0;
+        while (cut < value.length() && (value.charAt(cut) == ':' || value.charAt(cut) == '：')) {
+            cut++;
+        }
+        return value.substring(cut).trim();
     }
 
     private static String stripTags(String html) {

@@ -19,18 +19,19 @@
                     <div class="sub-info">
                         <div class="sub-title-row">
                             <strong>{{ item.title }}</strong>
+                            <!-- 来源以标签形式跟在剧名后，不再混在剧名下方的年份 / 类型里 -->
+                            <span class="tag source-tag">{{ sourceLabel(item) }}</span>
                             <!-- 取消订阅即删除订阅记录（已下载文件保留）；历史遗留的已暂停项显示「删除订阅」 -->
                             <button class="unsub-btn" type="button" :disabled="busy || deleting === item.subscriptionKey"
                                 @click="cancel(item)">
                                 {{ item.enabled ? '取消订阅' : '删除订阅' }}
                             </button>
                         </div>
-                        <p class="sub-meta">{{ [item.year, item.genre, sourceLabel(item)].filter(Boolean).join(' · ') }}</p>
+                        <p class="sub-meta">{{ [item.year, item.genre].filter(Boolean).join(' · ') }}</p>
                         <div class="sub-tags">
-                            <span class="tag">{{ isHls(item) ? `已收录 ${item.count || 0} 集` : `${item.count || 0} 条磁力` }}</span>
-                            <span class="tag outline" :class="{ paused: !item.enabled }">
-                                {{ item.enabled ? '追更中' : (isHls(item) ? '已暂停' : '已取消') }}
-                            </span>
+                            <!-- 电影港与电影天堂统一为「已收录 N 条」；追更中的状态不再单独标注，仅历史遗留的暂停项保留提示 -->
+                            <span class="tag">{{ `已收录 ${item.count || 0} 条` }}</span>
+                            <span v-if="!item.enabled" class="tag outline paused">已暂停</span>
                         </div>
                     </div>
                 </div>
@@ -358,6 +359,19 @@ export default {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* 来源标签跟在剧名后：与标题首行对齐，宽度不压缩 */
+.source-tag {
+    flex: none;
+    margin: 2px 0 0;
+    background: var(--soft-green);
+    color: var(--pine);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 7px;
+    border-radius: 7px;
+    white-space: nowrap;
 }
 
 /* 右上角「取消订阅」：次要文字按钮，删除类操作用警示色区分 */
