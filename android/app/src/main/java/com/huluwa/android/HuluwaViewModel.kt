@@ -686,8 +686,28 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { if (current == sheetGeneration) { mutable.update { it.copy(sheet = AppSheet.Films(card, LoadState(JsonObject(emptyMap()), error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } } }
     }
+    /** 弹框标题上的「重新抓取」：保留当前数据继续显示，只在原地换成加载态并重新拉一遍 */
+    fun reloadFilmResources(card: FilmCard) {
+        val sheet = mutable.value.sheet as? AppSheet.Films ?: return
+        if (sheet.card.key() != card.key()) return
+        mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = true, error = null))) }
+        val current = sheetGeneration
+        sheetJob?.cancel()
+        sheetJob = viewModelScope.launch { try {
+            val result = repository.filmResources(card)
+            if (current == sheetGeneration) mutable.update { it.copy(sheet = AppSheet.Films(card, LoadState(result, loaded = true))) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) { if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = false, error = error.userMessage(), loaded = true))) } } }
+    }
     fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) = perform("episode", "已加入离线下载", after = { refreshDownloads() }) { repository.enqueueEpisode(card, source, item, season, episode) }
-    fun enqueueMagnet(card: FilmCard, item: JsonObject) = perform("magnet", "下载任务已提交", after = { refreshDownloads() }) { repository.enqueueMagnet(card, item) }
+    fun enqueueMagnet(card: FilmCard, item: JsonObject) = perform("magnet", "下载任务已提交", after = { markMagnetDownloaded(card, item); refreshDownloads() }) { repository.enqueueMagnet(card, item) }
+    /** 提交成功后把弹框里的这一行标成「已下载」，与网页端弹框一致，不必等重新抓取 */
+    private fun markMagnetDownloaded(card: FilmCard, item: JsonObject) {
+        val sheet = mutable.value.sheet as? AppSheet.Films ?: return
+        if (sheet.card.key() != card.key()) return
+        val marked = sheet.data.data.markDownloaded(item.text("hash").ifBlank { item.text("magnet") })
+        if (marked !== sheet.data.data) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(data = marked))) }
+    }
     fun saveTunnel(original: String?, draft: TunnelDraft) = perform("tunnel-save", "隧道已保存并应用", after = { refreshFrp() }) { require(draft.validationError() == null) { draft.validationError().orEmpty() }; repository.saveTunnel(original, draft) }
     fun toggleTunnel(tunnel: Tunnel) = confirm(if (tunnel.enabled) "停用隧道" else "启用隧道", "确定${if (tunnel.enabled) "停用" else "启用"}「${tunnel.name}」？保存后会热加载配置。") {
         perform("tunnel:${tunnel.name}", "隧道状态已更新", after = { refreshFrp() }) { repository.toggleTunnel(tunnel) }

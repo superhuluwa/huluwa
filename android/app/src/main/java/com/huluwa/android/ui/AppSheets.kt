@@ -27,6 +27,12 @@ import com.huluwa.android.data.isServerUnreachable
         return
     }
     var media by remember { mutableStateOf<String?>(null) }
+    // 资源列表（对齐网页端 n-modal）：独立居中弹框，不再套底部弹层
+    if (sheet is AppSheet.Films) {
+        FilmResources(sheet, ui.busy != null, ui.actionError, vm, onPlay = { media = it })
+        media?.let { MediaViewer(it, true) { media = null } }
+        return
+    }
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = vm::dismissSheet, sheetState = state, containerColor = HuluwaColors.Paper) {
         val maxHeight = LocalConfiguration.current.screenHeightDp.dp * .86f
@@ -38,7 +44,6 @@ import com.huluwa.android.data.isServerUnreachable
                     AppSheet.NewDownload -> "新建下载"
                     is AppSheet.TunnelEdit -> if (sheet.tunnel == null) "新增隧道" else "编辑隧道"
                     is AppSheet.Settings -> settingsTitle(sheet.kind)
-                    is AppSheet.Films -> sheet.card.title
                     is AppSheet.Episode -> "离线下载"
                     is AppSheet.Text -> sheet.title
                     is AppSheet.ContainerDetail -> sheet.container.name
@@ -59,7 +64,6 @@ import com.huluwa.android.data.isServerUnreachable
                 AppSheet.NewDownload -> NewDownloadSheet(ui.busy != null, vm)
                 is AppSheet.TunnelEdit -> TunnelEditor(sheet.tunnel, ui.busy != null, vm)
                 is AppSheet.Settings -> ServiceSettings(sheet, ui.busy != null, vm)
-                is AppSheet.Films -> FilmResources(sheet, ui.busy != null, vm, onPlay = { media = it })
                 is AppSheet.Episode -> EpisodeForm(sheet, ui.busy != null, vm)
                 is AppSheet.Text -> TextSheet(sheet, ui.busy != null)
                 is AppSheet.ContainerDetail -> ContainerDetail(sheet, ui.busy != null, vm)

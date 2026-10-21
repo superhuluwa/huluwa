@@ -1,60 +1,262 @@
 package com.huluwa.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Magnet
 import androidx.compose.material.icons.outlined.PlayCircleOutline
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.huluwa.android.*
 import com.huluwa.android.data.*
+import com.huluwa.android.data.isServerUnreachable
 import kotlinx.serialization.json.*
 
-@Composable fun FilmResources(sheet: AppSheet.Films, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit) {
+/**
+ * 资源列表弹框（对齐网页端 MagnetListDialog / PlaySourceDialog）：
+ *  - 居中卡片：图标 + 剧名 + 条数标题，正文区内滚动，底部固定「关闭」；
+ *  - 电影港：磁力列表，按清晰度着色，每行「复制 / 下载」；
+ *  - 电影天堂：按线路分页签，每行「复制 / 离线下载」。
+ */
+@Composable fun FilmResources(sheet: AppSheet.Films, busy: Boolean, actionError: String?, vm: HuluwaViewModel, onPlay: (String) -> Unit) {
     val card = sheet.card
-    Feedback(sheet.data.loading, sheet.data.error, { vm.filmResources(card) })
-    if (!sheet.data.loaded || sheet.data.error != null) return
-    if (card.isHls) {
-        val sources = sheet.data.data.rows("playSources").map { PlaySource.from(it.asObject()) }
-        var selected by rememberSaveable(card.id) { mutableIntStateOf(0) }
-        val source = sources.getOrNull(selected) ?: sources.firstOrNull()
-        var limit by remember(source?.name) { mutableIntStateOf(30) }
-        if (sources.isEmpty()) { Text("暂时没有可用的播放线路", color = HuluwaColors.Muted); return }
-        val currentSource = source ?: return
-        FilterRow(sources.map { it.name }, selected.coerceIn(sources.indices), { selected = it })
-        Text("选择剧集播放，或下载到家庭服务器。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-        currentSource.items.asReversed().take(limit).forEach { item ->
-            Panel(Modifier.fillMaxWidth()) {
-                Text(item.title, style = MaterialTheme.typography.titleMedium)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton({ onPlay(item.url) }, enabled = item.url.startsWith("http://") || item.url.startsWith("https://")) { Icon(Icons.Outlined.PlayCircleOutline, null, Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("播放") }
-                    TextButton({ vm.showSheet(AppSheet.Episode(card, currentSource.name, item)) }, enabled = !busy) { Text("离线下载") }
+    val context = LocalContext.current
+    // 复制反馈沿用全局 snackbar（vm.notify → 根界面 SnackbarHost）
+    fun copy(text: String, label: String) {
+        if (text.isBlank()) return
+        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
+        vm.notify("$label已复制")
+    }
+    // 与网页端 n-modal preset="card" 对齐：居中卡片、20dp 圆角、雾绿描边
+    Dialog(onDismissRequest = vm::dismissSheet, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp).heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .88f),
+            shape = RoundedCornerShape(20.dp), color = HuluwaColors.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
+            Column(Modifier.fillMaxWidth()) {
+                FilmDialogHeader(card, sheet.data.data, vm)
+                HorizontalDivider(color = HuluwaColors.Line)
+                Box(Modifier.weight(1f, fill = false)) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        // 下载 / 提交失败在弹框内就地提示（共享的 actionError 会被底部弹层的错误区一起显示）
+                        actionError?.takeUnless { it.isServerUnreachable() }?.let {
+                            Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Feedback(sheet.data.loading, sheet.data.error, { vm.reloadFilmResources(card) })
+                        if (!sheet.data.loaded || sheet.data.error != null) return@Column
+                        if (card.isHls) HlsSourceList(card, sheet.data.data, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        else MagnetSourceList(card, sheet.data.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
+                    }
+                }
+                HorizontalDivider(color = HuluwaColors.Line)
+                FilmDialogFooter(sheet.data.loading, vm)
+            }
+        }
+    }
+}
+
+/** 弹框标题：图标 + 剧名 + 条数，右侧「重新抓取」与关闭 */
+@Composable private fun FilmDialogHeader(card: FilmCard, data: JsonObject, vm: HuluwaViewModel) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(if (card.isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.Magnet, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
+        Text(data.text("title", fallback = card.title), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // 电影港按磁力条数、电影天堂按各线路可复制条目合计（与网页端「可复制 N 条」一致）
+        val count = if (card.isHls) data.rows("playSources").sumOf { source -> source.asObject().rows("items").size }
+        else data.rows("magnets").size
+        if (count > 0) Text(if (card.isHls) "可复制 $count 条" else "$count 条", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+        IconButton({ vm.reloadFilmResources(card) }, enabled = !data.loading) { Icon(Icons.Outlined.Refresh, "重新抓取", Modifier.size(19.dp), tint = HuluwaColors.Pine) }
+        IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
+    }
+}
+
+/** 底部：说明文字 + 「关闭」，与网页端弹框 footer 一致 */
+@Composable private fun FilmDialogFooter(loading: Boolean, vm: HuluwaViewModel) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(if (loading) "正在抓取资源…" else "下载结果会推送到对应下载工具会话；同名剧归入同一文件夹",
+            Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        OutlinedButton(vm::dismissSheet, Modifier.height(36.dp), shape = RoundedCornerShape(11.dp), border = BorderStroke(1.dp, HuluwaColors.Line),
+            contentPadding = PaddingValues(horizontal = 14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = HuluwaColors.Pine)) { Text("关闭", style = MaterialTheme.typography.labelLarge) }
+    }
+}
+
+// ---------------------------------------------------------------- 电影港：磁力
+
+@Composable private fun MagnetSourceList(card: FilmCard, data: JsonObject, busy: Boolean, vm: HuluwaViewModel, onCopy: (String) -> Unit) {
+    val items = data.rows("magnets").map { it.asObject() }
+    // 保存目录与下载器：对应网页端「保存目录 / 使用 xx 下载」提示行
+    val downloader = when (data.text("downloader")) {
+        "xunlei-win" -> "迅雷【Win】"; "xunlei" -> "迅雷"; else -> "qBittorrent"
+    }
+    Text(buildAnnotatedString {
+        withStyle(SpanStyle(color = HuluwaColors.Muted)) { append("保存目录：") }
+        withStyle(SpanStyle(color = HuluwaColors.Pine, fontFamily = FontFamily.Monospace)) { append(data.text("savePath").ifBlank { "（未确定）" }) }
+        withStyle(SpanStyle(color = HuluwaColors.Muted)) { append("　使用$downloader 下载，按剧名创建文件夹") }
+    }, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 12.dp))
+    if (items.isEmpty()) { EmptyHint("该详情页没有解析到磁力链接"); return }
+    items.forEach { item ->
+        val downloaded = item.flag("downloaded")
+        ResourceRow(downloaded = downloaded) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(episodeLabel(item.text("episode")), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                    color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                TinyButton("复制", Icons.Outlined.ContentCopy, primary = true, enabled = item.text("magnet").isNotBlank()) { onCopy(item.text("magnet")) }
+                if (downloaded) TinyButton("已下载", Icons.Outlined.Check, primary = true, enabled = false) {}
+                else TinyButton("下载", Icons.Outlined.Download, primary = true,
+                    enabled = !busy && item.text("magnet").isNotBlank()) { vm.enqueueMagnet(card, item) }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                QualityTag(item.text("quality"))
+                Text(item.text("title").ifBlank { card.title }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                    color = HuluwaColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- 电影天堂：播放线路
+
+@Composable private fun HlsSourceList(card: FilmCard, data: JsonObject, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+    val sources = data.rows("playSources").map { PlaySource.from(it.asObject()) }
+    if (sources.isEmpty()) { EmptyHint("该资源没有解析到可用地址"); return }
+    var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
+    val current = sources[selected.coerceIn(sources.indices)]
+    // 剧集按集号倒序（新集在前）；识别不出集号的条目按原顺序排在最后，与网页端 sortPlayItems 一致
+    val items = current.items.withIndex()
+        .sortedWith(compareByDescending<IndexedValue<PlayItem>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
+        .map { it.value }
+    Text("点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
+        style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+    // 线路分页签：对应网页端 ps-tabs，默认第一条（dyttm3u8 由服务端排在前面）
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        sources.forEachIndexed { index, source ->
+            val active = index == selected.coerceIn(sources.indices)
+            Surface(if (active) HuluwaColors.SoftGreen else HuluwaColors.White, shape = RoundedCornerShape(999.dp),
+                border = BorderStroke(1.dp, if (active) HuluwaColors.Pine else HuluwaColors.Line), modifier = Modifier.clickable { selected = index }) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(source.name, style = MaterialTheme.typography.labelLarge, color = if (active) HuluwaColors.Pine else HuluwaColors.Muted, maxLines = 1)
+                    Text("${source.items.size}", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                 }
             }
         }
-        if (currentSource.items.size > limit) OutlinedButton({ limit += 30 }, Modifier.fillMaxWidth()) { Text("显示更多剧集") }
-    } else {
-        val magnets = sheet.data.data.rows("magnets").map { it.asObject() }
-        var limit by remember(card.url) { mutableIntStateOf(30) }
-        if (magnets.isEmpty()) Text("暂时没有采集到磁力资源", color = HuluwaColors.Muted)
-        magnets.take(limit).forEach { item ->
-            Panel(Modifier.fillMaxWidth()) {
-                Text(item.text("title", fallback = card.title), style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(7.dp))
-                Text(listOf(item.text("episode"), item.text("quality")).filter(String::isNotBlank).joinToString(" · "), color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                TextButton({ vm.confirm("下载资源", "将「${card.title} ${item.text("episode")}" + "」提交到服务器默认下载器。", "下载") { vm.enqueueMagnet(card, item) } },
-                    modifier = Modifier.align(Alignment.End), enabled = !busy && !item.flag("downloaded") && item.text("magnet").isNotBlank()) { Text(if (item.flag("downloaded")) "已提交下载" else "下载到 NAS") }
+    }
+    items.forEach { item ->
+        ResourceRow {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                TinyButton("复制", Icons.Outlined.ContentCopy, primary = true, enabled = item.url.isNotBlank()) { onCopy(item.url) }
+                if (item.url.startsWith("http")) TinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
+                    vm.showSheet(AppSheet.Episode(card, current.name, item))
+                }
             }
+            Spacer(Modifier.height(4.dp))
+            Text(item.url, Modifier.fillMaxWidth().clickable { onPlay(item.url) }, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (magnets.size > limit) OutlinedButton({ limit += 30 }, Modifier.fillMaxWidth()) { Text("显示更多资源") }
     }
 }
+
+// ---------------------------------------------------------------- 共用小组件
+
+/** 行容器：浅底 + 细边框 + 8dp 圆角，对应网页端 mm-row / ps-row；已下载的行整体压暗 */
+@Composable private fun ResourceRow(downloaded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 6.dp).alpha(if (downloaded) .6f else 1f)
+        .background(Color(0x08243D32), RoundedCornerShape(8.dp))
+        .border(1.dp, HuluwaColors.Line, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp), content = content)
+}
+
+/** 清晰度色标：2160P / 4K 绿、1080P 蓝、720P 琥珀、其余灰 */
+@Composable private fun QualityTag(quality: String) {
+    val value = quality.uppercase()
+    val (color, background) = when (value) {
+        "2160P", "4K" -> HuluwaColors.Pine to Color(0x2434D399)
+        "1080P" -> HuluwaColors.Blue to Color(0x2496A5FA)
+        "720P", "480P", "360P" -> HuluwaColors.Amber to Color(0x24FBBF24)
+        else -> HuluwaColors.Muted to Color(0x17243D32)
+    }
+    Surface(background, shape = RoundedCornerShape(999.dp)) {
+        Text(value.ifBlank { "OTHER" }, Modifier.widthIn(min = 58.dp).padding(vertical = 2.dp), textAlign = TextAlign.Center,
+            color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** 小号行内按钮：主操作用松柏绿实心，次要操作用白底细边框 */
+@Composable private fun TinyButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, primary: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, enabled = enabled,
+        shape = RoundedCornerShape(8.dp), color = if (primary) HuluwaColors.Pine else HuluwaColors.White,
+        border = if (primary) null else BorderStroke(1.dp, HuluwaColors.Line),
+    ) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(icon, null, Modifier.size(13.dp), tint = if (primary) HuluwaColors.White else HuluwaColors.Pine)
+            Text(label, color = if (primary) HuluwaColors.White else HuluwaColors.Pine, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        }
+    }
+}
+
+@Composable private fun EmptyHint(text: String) {
+    Text(text, Modifier.fillMaxWidth().padding(vertical = 28.dp), textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+}
+
+/** 集号展示：1-14 → 第1集-第14集，空值 → 未识别集数（与网页端 episodeLabel 一致） */
+private fun episodeLabel(episode: String): String =
+    if (episode.isBlank()) "未识别集数" else episode.split('-').joinToString("-") { "第${it}集" }
+
+/**
+ * 播放条目标题里的集号：第12集 / S02E12 / EP06 / 「12集」；
+ * 识别不到返回 null（正片、预告等），排序时排到最后，与网页端 episodeNumber 对齐。
+ */
+private fun episodeNumber(title: String): Int? {
+    val value = title.trim()
+    if (Regex("预告|花絮|番外|彩蛋|特辑|特别篇|片花|幕后|先导|解说|试看").containsMatchIn(value)) return null
+    // 合并集号（01-14）不参与排序，按原顺序排在后面
+    if (Regex("(?:S\\d+E\\d+(?:[ ._-]*E|[-~])\\d+)|(?:第\\s*\\d+\\s*[-~至]\\s*\\d+\\s*集)", RegexOption.IGNORE_CASE).containsMatchIn(value)) return null
+    val patterns = listOf(
+        Regex("第\\s*(\\d{1,4})\\s*[集话期]"),
+        Regex("(?:S\\d{1,3}E|(?:^|[ ._-])EP?)(\\d{1,4})(?!\\d)", RegexOption.IGNORE_CASE),
+        Regex("^(\\d{1,4})(?:集|话|期)?$"),
+    )
+    patterns.forEach { pattern ->
+        val number = pattern.find(value)?.groupValues?.get(1)?.toIntOrNull()
+        if (number != null && number in 1..9999) return number
+    }
+    return null
+}
+
 @Composable fun EpisodeForm(sheet: AppSheet.Episode, busy: Boolean, vm: HuluwaViewModel) {
     var season by rememberSaveable(sheet.card.id, sheet.item.url) { mutableStateOf("1") }
     var episode by rememberSaveable(sheet.card.id, sheet.item.url) { mutableStateOf(

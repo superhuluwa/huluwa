@@ -19,7 +19,8 @@ import com.huluwa.android.data.*
 
 /**
  * 我的订阅（系统会话，对齐安卓 ManagementSessionScreen + 网页端「我的订阅」）：
- * 由原底部「订阅」标签迁入系统会话，卡片展示封面、来源、追更状态与巡检信息。
+ * 由原底部「订阅」标签迁入系统会话，卡片展示封面、来源与已收录条数。
+ * 剧名下方一行「来源 · 已收录 N 条」，不展示年份 / 类型与巡检时间（只保留失败原因）。
  * 卡片右上角为「取消订阅」（取消即删除记录，已下载 / 已归档文件保留），
  * 原「…」菜单里的立即检查与资源列表改为卡片底部按钮，不再提供暂停 / 恢复追更。
  * 空状态与加载 / 错误反馈沿用系统会话列表的同一套组件。
@@ -50,8 +51,6 @@ import com.huluwa.android.data.*
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(sub.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    // 来源以标签形式跟在剧名后；标题已占 weight(1f)，这里不再额外挤压
-                    Tag(sub.source.title, modifier = Modifier.padding(end = 6.dp))
                     // 右上角「取消订阅」：取消即删除订阅记录，已下载文件保留；已暂停的残留项显示「删除订阅」
                     TextButton(
                         onClick = { vm.deleteSubscription(sub) }, enabled = enabled,
@@ -61,18 +60,12 @@ import com.huluwa.android.data.*
                             style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
-                Text(listOf(sub.year, sub.genre).filter(String::isNotBlank).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(10.dp))
-                // 电影港与电影天堂统一为「已收录 N 条」；追更中的状态不再单独标注，仅历史遗留的暂停项保留提示
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Tag("已收录 ${sub.count} 条")
-                    if (!sub.enabled) Tag("已暂停", outlined = true)
-                }
+                // 来源 + 收录条数合并成一行（原年份 / 类型与下方标签行一并移除），追更中的状态不再标注
+                Text(listOf(sub.source.title, "已收录 ${sub.count} 条", if (sub.enabled) "" else "已暂停").filter(String::isNotBlank).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (sub.lastCheck.isNotBlank()) Text("上次检查：${sub.lastCheck}", Modifier.padding(top = 11.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-        if (sub.enabled && sub.nextCheck.isNotBlank()) Text("下次检查：${sub.nextCheck}", color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
+        // 巡检时间不再展示，只保留上次失败的原文提示
         if (sub.lastError.isNotBlank()) Text(sub.lastError, Modifier.padding(top = 7.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
         // 原「…」菜单里的操作迁到卡片底部：资源列表以按钮形式提供，立即检查只在追更中可用
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

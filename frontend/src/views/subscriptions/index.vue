@@ -19,24 +19,16 @@
                     <div class="sub-info">
                         <div class="sub-title-row">
                             <strong>{{ item.title }}</strong>
-                            <!-- 来源以标签形式跟在剧名后，不再混在剧名下方的年份 / 类型里 -->
-                            <span class="tag source-tag">{{ sourceLabel(item) }}</span>
                             <!-- 取消订阅即删除订阅记录（已下载文件保留）；历史遗留的已暂停项显示「删除订阅」 -->
                             <button class="unsub-btn" type="button" :disabled="busy || deleting === item.subscriptionKey"
                                 @click="cancel(item)">
                                 {{ item.enabled ? '取消订阅' : '删除订阅' }}
                             </button>
                         </div>
-                        <p class="sub-meta">{{ [item.year, item.genre].filter(Boolean).join(' · ') }}</p>
-                        <div class="sub-tags">
-                            <!-- 电影港与电影天堂统一为「已收录 N 条」；追更中的状态不再单独标注，仅历史遗留的暂停项保留提示 -->
-                            <span class="tag">{{ `已收录 ${item.count || 0} 条` }}</span>
-                            <span v-if="!item.enabled" class="tag outline paused">已暂停</span>
-                        </div>
+                        <!-- 来源 + 收录条数合并成一行（原年份 / 类型与下方标签行一并移除），与安卓卡片保持一致 -->
+                        <p class="sub-meta">{{ metaLine(item) }}</p>
                     </div>
                 </div>
-                <p v-if="item.lastCheckAt" class="sub-line">上次检查：{{ item.lastCheckAt }}</p>
-                <p v-if="item.enabled && item.nextCheckAt" class="sub-line">下次检查：{{ item.nextCheckAt }}</p>
                 <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
                 <!-- 原「…」菜单里的操作迁到卡片底部：立即检查与资源列表各占一半宽度 -->
                 <div class="sub-actions">
@@ -63,7 +55,7 @@
 /**
  * 我的订阅（系统会话，对齐安卓 ManagementSessionScreen + SubscriptionsScreen）：
  *  - 电影港（磁力订阅）与电影天堂（离线剧集订阅）合并为一个列表，按加入时间排列；
- *  - 卡片展示封面、来源、追更状态、已收录数量与巡检时间；
+ *  - 卡片展示封面、来源与已收录条数（巡检时间不再展示，只保留失败原因）；
  *  - 卡片右上角为「取消订阅」（取消即删除记录，已下载文件保留），
  *    原「…」菜单里的立即检查与资源列表改为卡片底部按钮；
  *  - 不再提供暂停 / 恢复追更：历史遗留的已暂停项只保留「删除订阅」。
@@ -113,6 +105,11 @@ export default {
         },
         sourceLabel(item) {
             return this.isHls(item) ? '电影天堂' : '电影港'
+        },
+        /** 剧名下方的一行摘要：来源 + 收录条数（历史遗留的暂停项补一个状态），与安卓卡片一致 */
+        metaLine(item) {
+            return [this.sourceLabel(item), `已收录 ${item.count || 0} 条`, item.enabled ? '' : '已暂停']
+                .filter(Boolean).join(' · ')
         },
         async reload() {
             this.loading = true
@@ -361,19 +358,6 @@ export default {
     overflow: hidden;
 }
 
-/* 来源标签跟在剧名后：与标题首行对齐，宽度不压缩 */
-.source-tag {
-    flex: none;
-    margin: 2px 0 0;
-    background: var(--soft-green);
-    color: var(--pine);
-    font-size: 11px;
-    font-weight: 500;
-    padding: 3px 7px;
-    border-radius: 7px;
-    white-space: nowrap;
-}
-
 /* 右上角「取消订阅」：次要文字按钮，删除类操作用警示色区分 */
 .unsub-btn {
     flex: none;
@@ -400,6 +384,7 @@ export default {
     cursor: default;
 }
 
+/* 剧名下方摘要：来源 + 收录条数，与安卓 bodySmall 同字号 */
 .sub-meta {
     margin: 0;
     font-size: 12px;
@@ -409,39 +394,6 @@ export default {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-}
-
-.sub-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 2px;
-}
-
-.tag {
-    padding: 4px 8px;
-    border-radius: 7px;
-    background: rgba(32, 108, 84, .08);
-    color: var(--pine);
-    font-size: 10px;
-    font-weight: 500;
-}
-
-.tag.outline {
-    background: transparent;
-    border: 1px solid var(--line);
-    color: var(--muted);
-}
-
-.tag.outline.paused {
-    color: var(--amber);
-    border-color: #EDDFC8;
-}
-
-.sub-line {
-    margin: 10px 0 0;
-    font-size: 11px;
-    color: var(--muted);
 }
 
 .sub-error {

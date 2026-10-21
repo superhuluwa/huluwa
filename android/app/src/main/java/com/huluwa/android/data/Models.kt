@@ -105,10 +105,25 @@ data class FilmCard(
     val sources: List<PlaySource>, val subscribed: Boolean,
 ) {
     val isHls get() = source == "dytt"
+    /** 同一部作品在两个来源里的唯一键，用于判断弹框是否还停留在同一张卡片上 */
+    fun key(): String = "$source:$id"
     companion object {
         fun from(raw: JsonObject) = FilmCard(raw.text("id", "resId"), raw.text("title"), raw.text("cover"), raw.text("url"), raw.text("source"),
             raw.text("year"), raw.text("genre"), raw.text("origin"), raw.text("apiUrl"), raw.rows("playSources").map { PlaySource.from(it.asObject()) }, raw.flag("subscribed"))
     }
+}
+
+/** 资源列表里把某条磁力标成「已下载」：命中 hash（无 hash 时退回 magnet 原文），未命中返回原对象 */
+fun JsonObject.markDownloaded(key: String): JsonObject {
+    if (key.isBlank()) return this
+    val magnets = rows("magnets")
+    if (magnets.none { it is JsonObject && (it.text("hash").ifBlank { it.text("magnet") }) == key }) return this
+    val updated = magnets.map { element ->
+        if (element is JsonObject && (element.text("hash").ifBlank { element.text("magnet") }) == key)
+            buildJsonObject { element.forEach { (name, value) -> put(name, value) }; put("downloaded", JsonPrimitive(true)) }
+        else element
+    }
+    return buildJsonObject { forEach { (name, value) -> put(name, if (name == "magnets") JsonArray(updated) else value) } }
 }
 data class PlaySource(val name: String, val items: List<PlayItem>) {
     companion object { fun from(raw: JsonObject) = PlaySource(raw.text("name"), raw.rows("items").map { PlayItem(it.asObject().text("title"), it.asObject().text("url")) }) }

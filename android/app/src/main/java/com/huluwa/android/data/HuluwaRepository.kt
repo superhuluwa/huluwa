@@ -102,6 +102,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             put("genre", card.genre); put("cover", card.cover); put("url", card.url)
         }).requireSuccess()
     }
+    /** 资源列表：电影天堂取播放线路，电影港取详情页磁力（与网页端两个弹框使用同一组接口） */
     suspend fun filmResources(card: FilmCard): JsonObject = if (card.isHls) api.get("hls", "detail", query = buildMap {
         put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
     }).asObject() else api.get("chat", "subscriptions", "magnets", "preview", query = mapOf("url" to card.url, "title" to card.title)).asObject()
