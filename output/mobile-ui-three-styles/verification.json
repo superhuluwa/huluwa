@@ -1,0 +1,806 @@
+{
+  "checkedAt": "2026-10-20",
+  "scope": "独立浏览器交互原型",
+  "interactionChecks": [
+    "pine：下载初始队列",
+    "pine：完成状态筛选",
+    "pine：组合筛选空状态",
+    "pine：恢复全部任务",
+    "pine：来源筛选",
+    "pine：任务详情弹层",
+    "pine：失败任务重试",
+    "pine：分行任务日志",
+    "pine：取消离线任务",
+    "pine：磁力链接格式校验",
+    "pine：新增本地示例任务",
+    "pine：暂停追更",
+    "pine：恢复与检查追更",
+    "pine：删除订阅确认",
+    "pine：会话详情入口",
+    "pine：发送消息与展示结果",
+    "pine：从会话添加订阅",
+    "pine：账号连接配置",
+    "pine：键盘关闭弹层",
+    "blue：下载初始队列",
+    "blue：完成状态筛选",
+    "blue：组合筛选空状态",
+    "blue：恢复全部任务",
+    "blue：来源筛选",
+    "blue：任务详情弹层",
+    "blue：失败任务重试",
+    "blue：分行任务日志",
+    "blue：取消离线任务",
+    "blue：磁力链接格式校验",
+    "blue：新增本地示例任务",
+    "blue：暂停追更",
+    "blue：恢复与检查追更",
+    "blue：删除订阅确认",
+    "blue：会话详情入口",
+    "blue：发送消息与展示结果",
+    "blue：从会话添加订阅",
+    "blue：账号连接配置",
+    "blue：键盘关闭弹层",
+    "sand：下载初始队列",
+    "sand：完成状态筛选",
+    "sand：组合筛选空状态",
+    "sand：恢复全部任务",
+    "sand：来源筛选",
+    "sand：任务详情弹层",
+    "sand：失败任务重试",
+    "sand：分行任务日志",
+    "sand：取消离线任务",
+    "sand：磁力链接格式校验",
+    "sand：新增本地示例任务",
+    "sand：暂停追更",
+    "sand：恢复与检查追更",
+    "sand：删除订阅确认",
+    "sand：会话详情入口",
+    "sand：发送消息与展示结果",
+    "sand：从会话添加订阅",
+    "sand：账号连接配置",
+    "sand：键盘关闭弹层",
+    "三版全局空状态",
+    "三版恢复正常页面"
+  ],
+  "interactionPassed": 59,
+  "responsiveChecks": [
+    {
+      "width": 375,
+      "page": "functions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "functions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "functions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "system",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "system",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "system",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "downloads",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "downloads",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "downloads",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "subscriptions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "subscriptions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "subscriptions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "mine",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "mine",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "mine",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "chat",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "chat",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 375,
+      "page": "chat",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "functions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "functions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "functions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "system",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "system",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "system",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "downloads",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "downloads",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "downloads",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "subscriptions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "subscriptions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "subscriptions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "mine",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "mine",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "mine",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "chat",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "chat",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 390,
+      "page": "chat",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "functions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "functions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "functions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "system",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "system",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "system",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "downloads",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "downloads",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "downloads",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "subscriptions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "subscriptions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "subscriptions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "mine",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "mine",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "mine",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "chat",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "chat",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 768,
+      "page": "chat",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "functions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "functions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "functions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "system",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "system",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "system",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "downloads",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "downloads",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "downloads",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "subscriptions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "subscriptions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "subscriptions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "mine",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "mine",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "mine",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "chat",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "chat",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1024,
+      "page": "chat",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "functions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "functions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "functions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "system",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "system",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "system",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "downloads",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "downloads",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "downloads",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "subscriptions",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "subscriptions",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "subscriptions",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "mine",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "mine",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "mine",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "chat",
+      "style": "pine",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "chat",
+      "style": "blue",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    },
+    {
+      "width": 1440,
+      "page": "chat",
+      "style": "sand",
+      "horizontalOverflow": 0,
+      "statusVisible": true,
+      "documentOverflow": 0
+    }
+  ],
+  "responsivePassed": 90,
+  "sourceSemantics": {
+    "movieSource": "磁力下载",
+    "hlsSource": "离线剧集",
+    "movieCountUnit": "条磁力",
+    "hlsCountUnit": "集",
+    "hlsResourceVerified": true,
+    "movieResourceVerified": true
+  },
+  "offline": {
+    "phoneCount": 3,
+    "errors": [],
+    "imagesLoaded": true
+  },
+  "consoleErrors": [],
+  "nativeBuildRun": false,
+  "nativeDeviceVerified": false,
+  "productionCodeChanged": false
+}

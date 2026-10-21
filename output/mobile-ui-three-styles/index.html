@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>葫芦娃 · 三种简约设计</title>
+  <link rel="icon" href="assets/gourd.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="design-board">
+    <header class="board-header">
+      <a class="board-brand" href="#" aria-label="葫芦娃设计首页"><img src="assets/gourd.svg" alt="" width="30" height="30"><strong>葫芦娃</strong><span class="brand-divider"></span><span>手机端设计探索</span></a>
+      <span class="board-meta"><span class="live-dot"></span> 交互原型 · 示例数据</span>
+    </header>
+    <section class="board-intro" aria-labelledby="board-title">
+      <div><p class="board-kicker">三种风格，同样从容。</p><h1 id="board-title">让服务更近，让界面更轻。</h1><p class="board-description">基于当前手机端的真实页面结构，重新梳理留白、层次与操作。</p></div>
+      <div class="style-switch" role="group" aria-label="选择设计风格">
+        <button type="button" class="selected" data-style="all" aria-pressed="true">并排对比</button>
+        <button type="button" data-style="pine" aria-pressed="false"><i class="swatch pine-swatch"></i>松白</button>
+        <button type="button" data-style="blue" aria-pressed="false"><i class="swatch blue-swatch"></i>晴蓝</button>
+        <button type="button" data-style="sand" aria-pressed="false"><i class="swatch sand-swatch"></i>暖砂</button>
+      </div>
+    </section>
+    <nav class="comparison-toolbar" aria-label="同步切换三个方案的页面">
+      <div class="page-switch" role="group" aria-label="页面选择">
+        <button type="button" class="selected" data-global-page="functions" aria-pressed="true">功能</button>
+        <button type="button" data-global-page="system" aria-pressed="false">系统</button>
+        <button type="button" data-global-page="downloads" aria-pressed="false">下载</button>
+        <button type="button" data-global-page="subscriptions" aria-pressed="false">订阅</button>
+        <button type="button" data-global-page="mine" aria-pressed="false">我的</button>
+        <button type="button" data-global-page="chat" aria-pressed="false">会话详情</button>
+      </div>
+      <label class="empty-control"><input id="empty-preview" type="checkbox"><span>查看空状态</span></label>
+    </nav>
+    <section id="directions" class="direction-grid" data-view="all" aria-label="三款手机端交互预览"></section>
+    <footer class="board-footer"><span>沿用现有五个主入口，点击手机内导航即可体验。</span><span>所有交互仅作用于本地示例，不连接服务器。</span></footer>
+  </main>
+</body>
+</html>
