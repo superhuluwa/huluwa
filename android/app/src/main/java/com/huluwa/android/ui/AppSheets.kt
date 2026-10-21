@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
+import com.huluwa.android.data.isServerUnreachable
 
 @Composable fun AppSheets(ui: AppState, vm: HuluwaViewModel) {
     val sheet = ui.sheet ?: return
