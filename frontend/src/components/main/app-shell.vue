@@ -2,45 +2,53 @@
     <div class="app-shell" :class="{ 'chat-open': chatOpen }">
         <!-- 居中手机宽度：桌面浏览器里像原生 App 一样一列居中；手机上铺满 -->
         <div class="app-frame">
-            <template v-if="!chatOpen">
-                <!-- 标题栏已隐藏：底部标签已经标明当前页面，顶部再显示一行「功能 / 系统 / 下载 / 我的」
-                     会与页面内的列表标题重复。加载中的菊花与「我的」头像浮在内容右上角。 -->
-                <header class="page-header" :class="{ 'is-sessions': tab.isSessionTab, 'is-hidden': hidePageTitle }">
-                    <h1 class="page-title">{{ tab.title }}</h1>
-                    <div class="header-action">
-                        <button v-if="tab.key === 'mine'" class="account-chip" type="button" title="连接配置"
-                            @click="openAccount">
-                            <span class="account-avatar">葫</span>
+            <!-- 页面转场：列表标签页与全屏二级页（会话 / 管理会话）之间左右滑动切换。
+                 微信式：进二级页时新页从右侧滑入、列表页向左让出一段；
+                 返回时二级页向右滑出、列表页从左侧归位。方向由路由守卫写入。 -->
+            <transition :name="pageTransition">
+                <div v-if="!chatOpen" key="tabs" class="page-surface">
+                    <!-- 标题栏已隐藏：底部标签已经标明当前页面，顶部再显示一行「功能 / 系统 / 下载 / 我的」
+                         会与页面内的列表标题重复。加载中的菊花与「我的」头像浮在内容右上角。 -->
+                    <header class="page-header" :class="{ 'is-sessions': tab.isSessionTab, 'is-hidden': hidePageTitle }">
+                        <h1 class="page-title">{{ tab.title }}</h1>
+                        <div class="header-action">
+                            <button v-if="tab.key === 'mine'" class="account-chip" type="button" title="连接配置"
+                                @click="openAccount">
+                                <span class="account-avatar">葫</span>
+                            </button>
+                            <span v-else-if="tab.isSessionTab && sessionLoading" class="header-loading" aria-label="正在加载">
+                                <i class="fa-solid fa-spinner fa-spin"></i>
+                            </span>
+                        </div>
+                    </header>
+
+                    <main class="page-body" :class="{ 'is-sessions': tab.isSessionTab }">
+                        <keep-alive>
+                            <component :is="currentPage" :key="activeTab" />
+                        </keep-alive>
+                    </main>
+
+                    <!-- 底部四标签：安卓进入会话后收起导航，这里保持一致（全屏会话只保留页面内返回键） -->
+                    <nav class="tab-bar" aria-label="主导航">
+                        <button v-for="item in tabs" :key="item.key" class="tab-item" :class="{ active: item.key === activeTab }"
+                            type="button" :aria-current="item.key === activeTab ? 'page' : undefined" @click="selectTab(item)">
+                            <span class="tab-icon">
+                                <i :class="item.icon"></i>
+                                <span v-if="badgeOf(item) > 0" class="tab-badge">{{ badgeOf(item) > 99 ? '99+' : badgeOf(item) }}</span>
+                            </span>
+                            <span class="tab-label">{{ item.title }}</span>
                         </button>
-                        <span v-else-if="tab.isSessionTab && sessionLoading" class="header-loading" aria-label="正在加载">
-                            <i class="fa-solid fa-spinner fa-spin"></i>
-                        </span>
-                    </div>
-                </header>
+                    </nav>
+                </div>
 
-                <main class="page-body" :class="{ 'is-sessions': tab.isSessionTab }">
-                    <keep-alive>
-                        <component :is="currentPage" :key="activeTab" />
-                    </keep-alive>
-                </main>
-            </template>
-
-            <!-- 会话 / 管理页：整屏接管（页面自带返回标题栏），底部导航收起，与安卓一致 -->
-            <router-view v-else v-slot="{ Component }">
-                <component :is="Component" :key="$route.fullPath" />
-            </router-view>
-
-            <!-- 底部四标签：安卓进入会话后收起导航，这里保持一致（全屏会话只保留页面内返回键） -->
-            <nav v-if="!chatOpen" class="tab-bar" aria-label="主导航">
-                <button v-for="item in tabs" :key="item.key" class="tab-item" :class="{ active: item.key === activeTab }"
-                    type="button" :aria-current="item.key === activeTab ? 'page' : undefined" @click="selectTab(item)">
-                    <span class="tab-icon">
-                        <i :class="item.icon"></i>
-                        <span v-if="badgeOf(item) > 0" class="tab-badge">{{ badgeOf(item) > 99 ? '99+' : badgeOf(item) }}</span>
-                    </span>
-                    <span class="tab-label">{{ item.title }}</span>
-                </button>
-            </nav>
+                <!-- 会话 / 管理页：整屏接管（页面自带返回标题栏），底部导航收起，与安卓一致。
+                     外面包一层固定 key 的容器：转场作用在容器上，内层仍按 fullPath 重建页面。 -->
+                <div v-else key="detail" class="page-detail">
+                    <router-view v-slot="{ Component }">
+                        <component :is="Component" :key="$route.fullPath" />
+                    </router-view>
+                </div>
+            </transition>
 
             <AccountSheet v-model:show="accountOpen" />
         </div>
@@ -63,6 +71,7 @@
 import { useChatStore } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { setFullscreenPage } from '@/composables/useFullscreenPage'
+import { usePageTransition } from '@/composables/usePageTransition'
 import { isSystemSession } from '@/utils/localSessions'
 import SessionsView from '@/views/sessions/index.vue'
 import DownloadsView from '@/views/downloads/index.vue'
@@ -81,7 +90,7 @@ export default {
     name: 'AppShell',
     components: { SessionsView, DownloadsView, MineView, AccountSheet },
     setup() {
-        return { chatStore: useChatStore(), auth: useAuthStore() }
+        return { chatStore: useChatStore(), auth: useAuthStore(), pageTransition: usePageTransition() }
     },
     data() {
         return {
@@ -197,6 +206,98 @@ export default {
     background: var(--paper);
     box-shadow: 0 0 60px rgba(36, 61, 50, .10);
     overflow: hidden;
+}
+
+/* ---------------- 页面转场（微信式左右滑动） ----------------
+   转场期间两层页面同时存在并叠在框架内，按层级：
+
+     · 列表页（.page-surface）与二级页（.page-detail）默认是框架里的普通流式子元素；
+       带 slide-* 类名的进出场阶段才绝对定位铺满，避免常驻层叠上下文影响滚动定位等既有行为；
+     · 进二级页：二级页 z=2 从右侧滑入，列表页 z=1 同时向左让出 24px（视差，微信列表被顶走的感觉）；
+     · 返回：二级页 z=2 向右滑出，列表页 z=1 从 -24px 归位；
+     · 二级页自带不透明背景，滑入时盖住列表；列表页也有不透明背景，返回时盖住已滑走的二级页。
+
+   只处理列表 ↔ 二级页之间的切换；同级标签页互切不播放转场（微信里切换底部标签也是瞬间切换）。 */
+.page-surface,
+.page-detail {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    background: var(--paper);
+}
+
+/* 二级页容器让页面填满整屏（页面自身是 height:100%） */
+.page-detail > * {
+    flex: 1;
+    min-height: 0;
+}
+
+/* 转场期间两层同时存在：都铺满框架、脱离文档流，避免互相挤压；由 z-index 决定谁在上 */
+.page-surface.slide-forward-enter-active,
+.page-surface.slide-forward-leave-active,
+.page-surface.slide-back-enter-active,
+.page-surface.slide-back-leave-active,
+.page-detail.slide-forward-enter-active,
+.page-detail.slide-forward-leave-active,
+.page-detail.slide-back-enter-active,
+.page-detail.slide-back-leave-active {
+    position: absolute;
+    inset: 0;
+}
+
+.slide-forward-enter-active,
+.slide-forward-leave-active,
+.slide-back-enter-active,
+.slide-back-leave-active {
+    transition: transform .32s cubic-bezier(.32, .72, 0, 1);
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+/* 进入二级页：列表页在底层向左让出一段，二级页从右侧滑入 */
+.slide-forward-enter-from {
+    transform: translate3d(100%, 0, 0);
+}
+
+.slide-forward-leave-to {
+    transform: translate3d(-24%, 0, 0);
+}
+
+.slide-forward-enter-active {
+    z-index: 2;
+}
+
+.slide-forward-leave-active {
+    z-index: 1;
+}
+
+/* 返回列表：二级页向右滑出，列表页从左侧归位 */
+.slide-back-enter-from {
+    transform: translate3d(-24%, 0, 0);
+}
+
+.slide-back-leave-to {
+    transform: translate3d(100%, 0, 0);
+}
+
+.slide-back-enter-active {
+    z-index: 1;
+}
+
+.slide-back-leave-active {
+    z-index: 2;
+}
+
+/* 系统偏好减少动效时不播放滑动 */
+@media (prefers-reduced-motion: reduce) {
+
+    .slide-forward-enter-active,
+    .slide-forward-leave-active,
+    .slide-back-enter-active,
+    .slide-back-leave-active {
+        transition-duration: .01ms;
+    }
 }
 
 /* ---------------- 标题栏（PageHeader） ---------------- */

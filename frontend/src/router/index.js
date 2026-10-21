@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import { loadingBar } from '@/libs/discrete'
 import { createRouteLoader } from '@/utils/routePreload'
 import { setFullscreenPage } from '@/composables/useFullscreenPage'
+import { setPageTransitionName, transitionNameFor } from '@/composables/usePageTransition'
 
 /**
  * 路由结构对齐安卓端 HuluwaRoot：
@@ -152,8 +153,10 @@ router.beforeEach((to) => {
  * 全屏标记：进入会话 / 管理会话时铺满整屏（与安卓「进入会话隐藏标签栏」一致）。
  * 在导航落地前写好，避免先画一帧带标题栏的布局再被覆盖。
  */
-router.beforeResolve((to) => {
+router.beforeResolve((to, from) => {
     setFullscreenPage(Boolean(to.meta && to.meta.chat))
+    // 转场方向：列表 → 二级页从右滑入，二级页 → 列表反向滑出（微信式）
+    setPageTransitionName(transitionNameFor(from, to))
 })
 
 router.afterEach((to) => {
