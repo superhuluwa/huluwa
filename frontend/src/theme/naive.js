@@ -1,61 +1,127 @@
-import { darkTheme } from 'naive-ui'
+import { lightTheme } from 'naive-ui'
 
-// Naive UI 暗色主题覆盖：与 styles/tokens.css 保持同一套色板
-export const theme = darkTheme
+/**
+ * Naive UI 浅色主题覆盖：与 styles/tokens.css 及安卓端 ui/Theme.kt 共用同一套色板
+ * （松柏绿主色 + 雾白纸面 + 深墨绿正文）。安卓端是浅色 Material 3，网页端此前是暗色，
+ * 这里统一切换以保证两端的按钮、输入框、弹窗、表格观感一致。
+ */
+export const theme = lightTheme
+
+/** 与安卓 HuluwaColors 同名同值（便于对照检查） */
+export const palette = {
+    pine: '#206C54',
+    pineDark: '#194F3E',
+    pineSoft: '#2A785F',
+    lime: '#D5E9B8',
+    paper: '#F6F8F5',
+    ink: '#243D32',
+    muted: '#63746A',
+    line: '#E3EAE0',
+    softGreen: '#E6EFE2',
+    danger: '#B44452',
+    amber: '#956223',
+    lilac: '#8260A1',
+    blue: '#4E78A7'
+}
 
 export const themeOverrides = {
     common: {
-        primaryColor: '#0EA5E9',
-        primaryColorHover: '#38BDF8',
-        primaryColorPressed: '#0284C7',
-        primaryColorSuppl: '#38BDF8',
-        infoColor: '#0EA5E9',
-        successColor: '#10B981',
-        warningColor: '#F59E0B',
-        errorColor: '#F43F5E',
-        bodyColor: '#0B0F19',
-        cardColor: '#141C2E',
-        modalColor: '#141C2E',
-        popoverColor: '#141C2E',
-        tableColor: '#141C2E',
-        inputColor: '#182238',
-        borderColor: 'rgba(148, 163, 184, .20)',
-        dividerColor: 'rgba(148, 163, 184, .12)',
-        textColorBase: '#F8FAFC',
-        textColor1: '#F8FAFC',
-        textColor2: '#CBD5E1',
-        textColor3: '#94A3B8',
-        placeholderColor: '#64748B',
-        borderRadius: '10px',
-        fontSize: '13px'
+        primaryColor: palette.pine,
+        primaryColorHover: palette.pineSoft,
+        primaryColorPressed: palette.pineDark,
+        primaryColorSuppl: palette.pineSoft,
+        infoColor: palette.blue,
+        successColor: palette.pine,
+        warningColor: palette.amber,
+        errorColor: palette.danger,
+        bodyColor: palette.paper,
+        cardColor: '#FFFFFF',
+        modalColor: '#FFFFFF',
+        popoverColor: '#FFFFFF',
+        tableColor: '#FFFFFF',
+        inputColor: '#FFFFFF',
+        borderColor: palette.line,
+        dividerColor: palette.line,
+        textColorBase: palette.ink,
+        textColor1: palette.ink,
+        textColor2: palette.muted,
+        textColor3: '#80917F',
+        placeholderColor: '#9AA79A',
+        borderRadius: '14px',
+        borderRadiusSmall: '10px',
+        fontSize: '13px',
+        hoverColor: '#EFF4EC'
     },
     Layout: {
-        color: '#0B0F19',
-        siderColor: '#0E1422',
-        headerColor: 'rgba(13, 21, 38, .7)'
+        color: palette.paper,
+        siderColor: palette.paper,
+        headerColor: '#FFFFFF'
     },
     Menu: {
         color: 'transparent',
-        itemColorHover: 'rgba(14, 165, 233, .08)',
-        itemColorActive: 'rgba(14, 165, 233, .12)',
-        itemColorActiveHover: 'rgba(14, 165, 233, .16)',
-        itemTextColor: '#94A3B8',
-        itemTextColorHover: '#F8FAFC',
-        itemTextColorActive: '#38BDF8',
-        itemTextColorActiveHover: '#38BDF8',
-        itemIconColor: '#94A3B8',
-        itemIconColorActive: '#38BDF8'
+        itemColorHover: palette.softGreen,
+        itemColorActive: palette.softGreen,
+        itemColorActiveHover: palette.softGreen,
+        itemTextColor: palette.muted,
+        itemTextColorHover: palette.ink,
+        itemTextColorActive: palette.pine,
+        itemTextColorActiveHover: palette.pine,
+        itemIconColor: palette.muted,
+        itemIconColorActive: palette.pine
     },
     Button: {
-        fontWeight: '500'
-    },
-    DataTable: {
-        thColor: '#182238',
-        tdColor: '#141C2E',
-        thTextColor: '#94A3B8',
-        borderColor: 'rgba(148, 163, 184, .12)'
+        fontWeight: '500',
+        borderRadiusTiny: '8px',
+        borderRadiusSmall: '10px',
+        borderRadiusMedium: '13px',
+        borderRadiusLarge: '16px'
     },
     Card: {
-        borderColor: 'rgba(148, 163, 184, .12)'
+        borderColor: palette.line,
+        borderRadius: '20px'
+    },
+    DataTable: {
+        thColor: palette.paper,
+        tdColor: '#FFFFFF',
+        thTextColor: palette.muted,
+        borderColor: palette.line,
+        borderRadius: '14px'
+    },
+    Input: {
+        borderRadius: '14px'
+    },
+    Tabs: {
+        tabTextColorLine: palette.muted,
+        tabTextColorActiveLine: palette.pine,
+        barColor: palette.pine
+    },
+    Tag: {
+        borderRadius: '8px'
+    },
+    Dialog: {
+        borderRadius: '20px',
+        titleFontSize: '16px'
+    },
+    Progress: {
+        railColor: palette.softGreen,
+        fillColor: palette.pine
+    },
+    Switch: {
+        railColorActive: palette.pine
+    },
+    Alert: {
+        borderRadius: '14px'
+    },
+    Descriptions: {
+        thColor: palette.paper,
+        tdColor: '#FFFFFF',
+        borderColor: palette.line
+    },
+    Select: {
+        peers: {
+            InternalSelection: {
+                borderRadius: '14px'
+            }
+        }
     }
 }

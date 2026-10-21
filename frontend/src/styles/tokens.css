@@ -1,70 +1,92 @@
-/* 暗夜量子设计 Token（沿用参考项目 quantum-web 的视觉体系） */
+/* ==========================================================================
+   葫芦娃助手 · 松柏绿 × 雾白设计令牌
+   色板与安卓端 ui/Theme.kt（HuluwaColors）、ui/SessionsScreen.kt 保持一致：
+   浅色纸面、松柏绿主色、雾绿分隔线、深墨绿正文。
+   同时保留旧变量名（--bg / --card / --accent ...）作为映射，让历史页面
+   在不逐个改样式的情况下自动切到新色板。
+   ========================================================================== */
 :root {
-    --bg: #0B0F19;
-    --sider: #0E1422;
-    --card: #141C2E;
-    --card-2: #182238;
-    --line: rgba(148, 163, 184, .12);
-    --line-2: rgba(148, 163, 184, .20);
-    --accent: #0EA5E9;
-    --accent-2: #38BDF8;
-    --accent-weak: rgba(14, 165, 233, .10);
-    --text: #F8FAFC;
-    --text-2: #94A3B8;
-    --text-3: #64748B;
-    --ok: #10B981;
-    --warn: #F59E0B;
-    --danger: #F43F5E;
-    --radius: 12px;
-    --glow: 0 0 0 1px rgba(14, 165, 233, .22), 0 0 20px rgba(14, 165, 233, .10);
+    /* ---- 安卓端原生色板（同名变量，供新页面直接使用） ---- */
+    --pine: #206C54;
+    --pine-dark: #194F3E;
+    --pine-soft: #2A785F;
+    --lime: #D5E9B8;
+    --paper: #F6F8F5;
+    --white: #FFFFFF;
+    --ink: #243D32;
+    --muted: #63746A;
+    --line: #E3EAE0;
+    --soft-green: #E6EFE2;
+    --danger: #B44452;
+    --amber: #956223;
+    --lilac: #8260A1;
+    --blue: #4E78A7;
+    --sessions-bg: #F9FBF8;
+    --sessions-ink: #20382C;
+    --sessions-muted: #657367;
+    --system-tone: #4B6A9A;
+    --system-soft: #EAF0FA;
+    /* 框架外底色：桌面浏览器里像手机屏一样居中展示 */
+    --frame-outside: #EDF1EA;
+
+    /* ---- 兼容旧变量名 ---- */
+    --bg: var(--paper);
+    --sider: var(--paper);
+    --card: var(--white);
+    --card-2: var(--white);
+    --line-2: #D7E1D2;
+    --accent: var(--pine);
+    --accent-2: var(--pine-soft);
+    --accent-weak: var(--soft-green);
+    --text: var(--ink);
+    --text-2: var(--muted);
+    --text-3: #80917F;
+    --ok: var(--pine);
+    --warn: var(--amber);
+    --radius: 20px;
+    --glow: 0 0 0 1px rgba(32, 108, 84, .12);
+    /* 聊天气泡 */
+    --bubble-bot: var(--white);
+    --bubble-me: #DFEBD4;
+    --chat-input: var(--paper);
 }
 
-html, body {
+html,
+body {
     -webkit-font-smoothing: antialiased;
+    background: var(--frame-outside);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", "Noto Sans SC", sans-serif;
 }
 
+/* 卡片：白底 + 雾绿描边 + 20px 圆角，对应安卓 Panel() */
 .glass-card {
-    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    background: var(--white);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, .40);
 }
 
 .filter-card {
     padding: 16px 18px;
     margin-bottom: 16px;
-    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    background: var(--white);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, .25);
 }
 
 .filter-card .n-form-item {
     margin-bottom: 0 !important;
 }
 
+/* 旧的背景网格在浅色框架里没有意义，保留空实现避免历史页面引用报错 */
 .grid-bg {
     position: relative;
 }
 
-.grid-bg::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image:
-        linear-gradient(var(--line) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 44px 44px;
-    opacity: .35;
-    mask-image: radial-gradient(1200px 800px at 50% 0%, #000 30%, transparent 100%);
-    -webkit-mask-image: radial-gradient(1200px 800px at 50% 0%, #000 30%, transparent 100%);
-    pointer-events: none;
-}
-
 .page-title {
     font-size: 18px;
-    font-weight: 600;
-    color: var(--text);
+    font-weight: 700;
+    color: var(--ink);
     margin: 0 0 16px;
     display: flex;
     align-items: center;
@@ -91,26 +113,27 @@ html, body {
     height: 6px;
     border-radius: 50%;
     background: currentColor;
-    box-shadow: 0 0 8px currentColor;
 }
 
-.pill.ok { background: rgba(52, 211, 153, .12); color: var(--ok); }
-.pill.off { background: rgba(148, 163, 184, .12); color: var(--text-2); }
-.pill.warn { background: rgba(251, 191, 36, .12); color: var(--warn); }
-.pill.danger { background: rgba(248, 113, 113, .12); color: var(--danger); }
+.pill.ok { background: var(--soft-green); color: var(--pine); }
+.pill.off { background: #EFF2ED; color: var(--muted); }
+.pill.warn { background: #F8F0E4; color: var(--amber); }
+.pill.danger { background: #FBEEF0; color: var(--danger); }
+.pill.accent { background: var(--soft-green); color: var(--pine); }
 
 .mono {
-    font-family: Consolas, "Segoe UI", monospace;
+    font-family: Consolas, "SFMono-Regular", "Segoe UI", monospace;
     font-variant-numeric: tabular-nums;
     font-size: 12px;
-    color: var(--text-2);
+    color: var(--muted);
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .25); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .4); }
+::-webkit-scrollbar-thumb { background: rgba(99, 116, 106, .22); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99, 116, 106, .35); }
 
+/* 旧页面的统计卡片：改为浅色纸卡 */
 .stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -119,13 +142,13 @@ html, body {
 
 .stat-card {
     padding: 18px;
-    background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+    background: var(--white);
     border: 1px solid var(--line);
     border-radius: var(--radius);
 }
 
 .stat-card .stat-label {
-    color: var(--text-2);
+    color: var(--muted);
     font-size: 13px;
     display: flex;
     align-items: center;
@@ -137,6 +160,7 @@ html, body {
     font-weight: 700;
     margin-top: 10px;
     font-variant-numeric: tabular-nums;
+    color: var(--ink);
 }
 
 .stat-card .stat-foot {
@@ -146,11 +170,327 @@ html, body {
 }
 
 /* ==========================================================================
-   移动端通用适配（<= 900px）
-   仅作用于窄屏：桌面端样式与布局完全不变。
+   管理会话共用组件（Frp / Docker / 构建 / 巡检 / 剧集 / 升级）
+   与安卓端的 Panel / ConnectionHero / Metric / Tag / SectionTitle 一一对应。
    ========================================================================== */
 
-/* 弹窗（n-modal preset="card"）在窄屏占满可用宽度，内部留白同步收紧 */
+/* 内容页统一留白：安卓 LazyColumn 的 contentPadding(horizontal = 20, vertical = 16) */
+.mgmt-content {
+    padding: 16px 20px 28px;
+}
+
+/* 白底面板：20px 圆角 + 雾绿描边，对应安卓 Panel() */
+.panel {
+    padding: 16px;
+    margin-bottom: 12px;
+    border-radius: 20px;
+    border: 1px solid var(--line);
+    background: #fff;
+}
+
+.panel.plain {
+    border: 0;
+    background: var(--paper);
+}
+
+/* 松柏绿速览卡：白字、浅绿标签、细分割线，对应安卓 ConnectionHero */
+.hero-panel {
+    position: relative;
+    overflow: hidden;
+    padding: 16px;
+    margin-bottom: 12px;
+    border-radius: 20px;
+    background: var(--pine);
+    color: #fff;
+}
+
+.hero-panel::after {
+    content: "";
+    position: absolute;
+    top: -70px;
+    right: -40px;
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .07);
+    pointer-events: none;
+}
+
+.hero-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.hero-head > i {
+    flex: none;
+    font-size: 26px;
+    color: var(--lime);
+}
+
+.hero-head-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.hero-head-text strong {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.hero-head-text span {
+    font-size: 11px;
+    color: rgba(255, 255, 255, .8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hero-tag {
+    flex: none;
+    padding: 4px 9px;
+    border-radius: 7px;
+    background: var(--lime);
+    color: var(--pine-dark);
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.hero-tag.alert {
+    background: #FFD7BD;
+    color: #7A4218;
+}
+
+.hero-metrics {
+    display: flex;
+    align-items: stretch;
+    margin-top: 16px;
+}
+
+.hero-metric {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    text-align: center;
+}
+
+.hero-metric strong {
+    font-size: 25px;
+    line-height: 30px;
+    font-weight: 600;
+}
+
+.hero-metric span {
+    font-size: 11px;
+    color: rgba(255, 255, 255, .8);
+}
+
+.hero-divider {
+    height: 1px;
+    margin: 14px 0 12px;
+    background: rgba(255, 255, 255, .2);
+}
+
+.hero-foot {
+    font-size: 12px;
+    color: rgba(255, 255, 255, .8);
+    overflow-wrap: anywhere;
+}
+
+/* 区块标题：左标题 + 右侧动作，对应安卓 SectionTitle */
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    margin: 4px 0 8px;
+}
+
+.section-title h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+/* 小标签：对应安卓 Tag() */
+.chip-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 7px;
+    background: rgba(32, 108, 84, .08);
+    color: var(--pine);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
+}
+
+.chip-tag.muted {
+    background: #EFF2ED;
+    color: var(--muted);
+}
+
+.chip-tag.amber {
+    background: #F8F0E4;
+    color: var(--amber);
+}
+
+.chip-tag.danger {
+    background: #FBEEF0;
+    color: var(--danger);
+}
+
+.chip-tag.outline {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+}
+
+/* 提示条 */
+.notice-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    background: #F8F0E4;
+    color: var(--amber);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.notice-line.danger {
+    background: #FBEEF0;
+    color: var(--danger);
+}
+
+/* 行内操作按钮（文字按钮） */
+.link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: var(--pine);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.link-btn:hover:not(:disabled) {
+    background: var(--soft-green);
+}
+
+.link-btn:disabled {
+    color: var(--muted);
+    opacity: .55;
+    cursor: default;
+}
+
+.link-btn.danger {
+    color: var(--danger);
+}
+
+.link-btn.danger:hover:not(:disabled) {
+    background: #FBEEF0;
+}
+
+/* 圆形图标按钮 */
+.round-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    background: #fff;
+    color: var(--pine);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.round-btn:hover:not(:disabled) {
+    background: var(--soft-green);
+}
+
+.round-btn:disabled {
+    color: var(--muted);
+    opacity: .55;
+    cursor: default;
+}
+
+/* 空状态：图标 + 标题 + 说明 */
+.empty-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.empty-panel .empty-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 6px;
+    border-radius: 18px;
+    background: var(--soft-green);
+    color: var(--pine);
+    font-size: 24px;
+}
+
+.empty-panel strong {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.empty-panel span {
+    font-size: 12.5px;
+    color: var(--muted);
+}
+
+/* 键值行 */
+.kv-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 12.5px;
+}
+
+.kv-row .kv-label {
+    flex: none;
+    width: 92px;
+    color: var(--muted);
+}
+
+.kv-row .kv-value {
+    min-width: 0;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+   弹窗（n-modal preset="card"）在窄屏占满可用宽度，内部留白同步收紧
+   ========================================================================== */
 @media (max-width: 900px) {
     .n-modal {
         width: auto !important;

@@ -51,12 +51,13 @@ describe('电影港 / 电影天堂卡片：极简文字订阅按钮固定在右�
         expect(textBranch).toContain('class="subscribe-btn"')
     })
 
-    it('右上角按钮是极简文字：默认无底无框，悬浮才浮出浅底；复制工具条让位到左侧', () => {
+    it('右上角按钮浮在封面上（浅色毛玻璃底），已订阅转为中性色；复制工具条让位到左侧', () => {
         const { source } = parts()
         const style = source.slice(source.lastIndexOf('<style scoped>'))
-        expect(style).toMatch(/\.subscribe-corner\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?border:\s*0;[\s\S]*?background:\s*none;/)
-        expect(style).toMatch(/\.subscribe-corner:hover:not\(:disabled\)\s*\{[\s\S]*?background:\s*rgba\(15, 23, 42, \.58\);/)
-        expect(style).toMatch(/\.subscribe-corner\.subscribed\s*\{[\s\S]*?color:\s*#A7F3D0;/)
+        // 浅色设计下浮层按钮用半透明白底，保证在任意封面上都能看清
+        expect(style).toMatch(/\.subscribe-corner\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?background:\s*rgba\(255, 255, 255, \.82\);/)
+        expect(style).toMatch(/\.subscribe-corner:hover:not\(:disabled\)\s*\{[\s\S]*?background:\s*#fff;/)
+        expect(style).toMatch(/\.subscribe-corner\.subscribed\s*\{[\s\S]*?color:\s*var\(--muted\);/)
         expect(style).toMatch(/\.subscribe-btn\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*none;/)
         expect(style).toMatch(/\.bubble\.has-corner-action \.bubble-tools\s*\{[\s\S]*?right:\s*auto;[\s\S]*?left:\s*8px;/)
     })

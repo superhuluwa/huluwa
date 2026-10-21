@@ -487,7 +487,7 @@ export default {
     border: 0;
     padding: 0;
     background: none;
-    color: #F43F5E;
+    color: var(--danger);
     cursor: pointer;
     font-size: 15px;
 }
@@ -512,8 +512,8 @@ export default {
    品牌图标是方形应用图标，容器用圆角方形；无品牌图标的会话（默认机器人 / 系统）
    保留圆形渐变底 + Font Awesome 图标。 */
 .avatar.bot {
-    background: linear-gradient(135deg, var(--accent), #6366F1);
-    color: #04121B;
+    background: linear-gradient(135deg, var(--pine), #557C46);
+    color: #fff;
     font-size: 16px;
     overflow: hidden;
 }
@@ -529,8 +529,8 @@ export default {
 }
 
 .avatar.mine {
-    background: rgba(99, 102, 241, .20);
-    color: #C7D2FE;
+    background: rgba(32, 108, 84, .14);
+    color: var(--pine-dark);
     font-weight: 600;
 }
 
@@ -575,13 +575,14 @@ export default {
 }
 
 .message-row.mine .bubble {
-    background: var(--bubble-me, #0C4A6E);
+    background: var(--bubble-me, #DFEBD4);
+    border-color: #D3E2C6;
     border-bottom-left-radius: 16px;
     border-bottom-right-radius: 4px;
 }
 
 .bubble.is-error {
-    border: 1px solid rgba(244, 63, 94, .45);
+    border: 1px solid rgba(180, 68, 82, .45);
 }
 
 .bubble-tools {
@@ -592,9 +593,9 @@ export default {
     gap: 2px;
     padding: 2px;
     border-radius: 8px;
-    background: var(--card);
+    background: #fff;
     border: 1px solid var(--line-2);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+    box-shadow: 0 6px 20px rgba(36, 61, 50, .16);
     z-index: 2;
 }
 
@@ -688,9 +689,9 @@ export default {
     height: 30px;
     padding: 0 12px;
     border-radius: 8px;
-    border: 1px solid rgba(96, 165, 250, .4);
-    background: rgba(96, 165, 250, .10);
-    color: var(--accent);
+    border: 1px solid rgba(32, 108, 84, .28);
+    background: rgba(32, 108, 84, .07);
+    color: var(--pine);
     font-family: inherit;
     font-size: 12.5px;
     cursor: pointer;
@@ -698,8 +699,8 @@ export default {
 }
 
 .magnet-btn:hover:not(:disabled) {
-    background: rgba(96, 165, 250, .18);
-    border-color: rgba(96, 165, 250, .6);
+    background: var(--soft-green);
+    border-color: rgba(32, 108, 84, .45);
 }
 
 .magnet-btn:disabled {
@@ -726,7 +727,7 @@ export default {
     border: 0;
     border-radius: 9px;
     background: none;
-    color: #D8E2FF;
+    color: var(--pine);
     font-family: inherit;
     font-size: 13px;
     font-weight: 500;
@@ -735,8 +736,8 @@ export default {
 }
 
 .subscribe-btn:hover:not(:disabled) {
-    background: rgba(15, 23, 42, .58);
-    color: #EFF3FF;
+    background: var(--soft-green);
+    color: var(--pine-dark);
 }
 
 .subscribe-btn:disabled {
@@ -744,7 +745,7 @@ export default {
 }
 
 .subscribe-btn.subscribed {
-    color: #A7F3D0;
+    color: var(--muted);
 }
 
 .subscribe-btn.busy {
@@ -764,19 +765,20 @@ export default {
     padding: 7px 10px;
     border: 0;
     border-radius: 9px;
-    background: none;
-    color: #D8E2FF;
+    background: rgba(255, 255, 255, .82);
+    color: var(--pine);
     font-family: inherit;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
-    text-shadow: 0 1px 6px rgba(2, 6, 23, .7);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(36, 61, 50, .20);
     transition: background .15s, color .15s;
 }
 
 .subscribe-corner:hover:not(:disabled) {
-    background: rgba(15, 23, 42, .58);
-    color: #EFF3FF;
+    background: #fff;
+    color: var(--pine-dark);
 }
 
 .subscribe-corner:disabled {
@@ -784,7 +786,7 @@ export default {
 }
 
 .subscribe-corner.subscribed {
-    color: #A7F3D0;
+    color: var(--muted);
 }
 
 .subscribe-corner.busy {

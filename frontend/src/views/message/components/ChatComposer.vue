@@ -178,7 +178,7 @@ export default {
 
 .composer-inner.focused {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, .14);
+    box-shadow: 0 0 0 3px rgba(32, 108, 84, .12);
 }
 
 .composer-inner.busy {
@@ -201,7 +201,7 @@ export default {
 }
 
 .composer-inner textarea::placeholder {
-    color: rgba(148, 163, 184, .65);
+    color: rgba(99, 116, 106, .65);
 }
 
 .send {
@@ -267,8 +267,8 @@ export default {
     height: 44px;
     margin: 4px 0 4px 2px;
     font-size: 17px;
-    background: var(--accent);
-    color: #04121B;
+    background: var(--pine);
+    color: #fff;
 }
 
 .composer.mobile .send:hover:not(:disabled) {
@@ -276,7 +276,7 @@ export default {
 }
 
 .composer.mobile .send:disabled {
-    background: rgba(148, 163, 184, .18);
+    background: rgba(36, 61, 50, .14);
     color: var(--text-3);
     opacity: 1;
 }

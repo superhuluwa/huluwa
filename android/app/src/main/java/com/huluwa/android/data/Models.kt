@@ -40,6 +40,8 @@ enum class ManagementService(val sessionId: String, val kind: String, val title:
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
     Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
     AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
+    CheckLogs("local-check-logs", "check-logs", "巡检记录", "订阅巡检结果与新增明细"),
+    Library("local-library", "library", "剧集管理", "扫描下载目录 · 管理磁盘空间"),
 }
 enum class DownloadSource(val title: String) { Hls("离线剧集"), Magnet("磁力下载"), XunleiWin("迅雷【Win】") }
 enum class SubscriptionSource(val title: String) { Hls("电影天堂"), Movie("电影港") }
@@ -292,6 +294,87 @@ data class AndroidDownload(
 ) {
     val active get() = phase == UpgradePhase.Downloading
     val progress get() = if (total > 0) (received.toFloat() / total).coerceIn(0f, 1f) else null
+}
+
+/** 订阅巡检记录：电影港（磁力）与电影天堂（离线剧集）共用一条时间线。 */
+data class CheckLog(
+    val id: Long, val source: String, val seriesTitle: String, val trigger: String, val status: String,
+    val foundCount: Int, val submittedCount: Int, val message: String, val details: List<String>,
+    val durationMs: Long, val createdAt: String,
+) {
+    val sourceLabel get() = if (source == "dytt") "电影天堂" else "电影港"
+    val triggerLabel get() = if (trigger == "manual") "立即检查" else "定时巡检"
+    val statusLabel get() = when (status) {
+        "updated" -> "有更新"
+        "ok" -> "无更新"
+        "baseline" -> "补建基线"
+        "failed" -> "巡检失败"
+        else -> status
+    }
+    /** 只有真正发现新条目时才展示「新增 / 提交」，无更新与失败都不展示 0 */
+    val hasUpdate get() = foundCount > 0 || submittedCount > 0
+    /** 耗时展示：小于 1 秒显示毫秒，超过 1 分钟显示分秒 */
+    val durationText get() = when {
+        durationMs <= 0 -> "—"
+        durationMs < 1000 -> "$durationMs ms"
+        durationMs < 60_000 -> String.format(Locale.ROOT, "%.1f s", durationMs / 1000.0)
+        else -> "${durationMs / 60_000} 分 ${Math.round((durationMs % 60_000) / 1000.0)} 秒"
+    }
+    companion object {
+        fun from(raw: JsonObject) = CheckLog(
+            raw.number("id")?.toLong() ?: 0, raw.text("source"), raw.text("seriesTitle"), raw.text("trigger"),
+            raw.text("status"), raw.number("foundCount")?.toInt() ?: 0, raw.number("submittedCount")?.toInt() ?: 0,
+            raw.text("message"), raw.rows("details").mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+            raw.number("durationMs")?.toLong() ?: 0, raw.text("createdAt"),
+        )
+    }
+}
+
+/** 本地下载目录中的一个视频文件（后端只接受本次扫描返回的短期 ID 做删除）。 */
+data class LibraryEntry(
+    val id: String, val seriesTitle: String, val seriesKey: String, val season: Int, val episode: Int,
+    val fileName: String, val relativePath: String, val size: Long, val modifiedAt: String,
+    val episodeRecognized: Boolean,
+) {
+    val episodeLabel get() = if (episodeRecognized && episode > 0) "第 $episode 集" else fileName.substringBeforeLast('.').take(64)
+    companion object {
+        fun from(raw: JsonObject) = LibraryEntry(
+            raw.text("id"), raw.text("seriesTitle"), raw.text("seriesKey"),
+            raw.number("season")?.toInt() ?: 1, raw.number("episode")?.toInt() ?: 0,
+            raw.text("fileName"), raw.text("relativePath"), raw.number("size")?.toLong() ?: 0,
+            raw.text("modifiedAt"), raw.flag("episodeRecognized"),
+        )
+    }
+}
+
+/** 扫描结果：下载根目录、可写状态、文件清单与统计。 */
+data class LibraryScan(
+    val mediaRoot: String = "", val writable: Boolean = false, val entries: List<LibraryEntry> = emptyList(),
+    val totalBytes: Long = 0, val scannedFiles: Int = 0, val seriesCount: Int = 0,
+    val scannedAt: String = "", val warning: String = "",
+) {
+    companion object {
+        fun from(raw: JsonObject) = LibraryScan(
+            raw.text("mediaRoot"), raw.flag("writable"), raw.rows("entries").map { LibraryEntry.from(it.asObject()) },
+            raw.number("totalBytes")?.toLong() ?: 0, raw.number("scannedFiles")?.toInt() ?: 0,
+            raw.number("seriesCount")?.toInt() ?: 0, raw.text("scannedAt"), raw.text("warning"),
+        )
+    }
+}
+
+/** 删除结果：后端只报告实际删掉的 ID，失败项逐条给出原因。 */
+data class LibraryDeleteResult(
+    val deleted: Int = 0, val failed: Int = 0, val freedBytes: Long = 0,
+    val deletedIds: Set<String> = emptySet(), val message: String = "",
+) {
+    companion object {
+        fun from(raw: JsonObject) = LibraryDeleteResult(
+            raw.number("deleted")?.toInt() ?: 0, raw.number("failed")?.toInt() ?: 0,
+            raw.number("freedBytes")?.toLong() ?: 0,
+            raw.rows("deletedIds").mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet(),
+            raw.text("message"),
+        )
+    }
 }
 
 data class LoadState<T>(val data: T, val loading: Boolean = false, val error: String? = null, val loaded: Boolean = false)

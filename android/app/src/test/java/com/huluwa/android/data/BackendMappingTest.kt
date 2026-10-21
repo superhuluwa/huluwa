@@ -50,4 +50,50 @@ class BackendMappingTest {
         assertEquals("测试片名", message.film?.title)
         assertEquals("", message.film?.cover)
     }
+
+    @Test fun mapsCheckLogFieldsLabelsAndDuration() {
+        val raw = ApiJson.parseToJsonElement(
+            """{"id":31,"source":"dytt","seriesTitle":"测试剧集","trigger":"manual","status":"updated",
+               "foundCount":2,"submittedCount":1,"message":"发现新剧集","details":["第 5 集","第 6 集"],
+               "durationMs":2500,"createdAt":"2026-10-20 08:00:00"}""").asObject()
+        val log = CheckLog.from(raw)
+        assertEquals("电影天堂", log.sourceLabel)
+        assertEquals("立即检查", log.triggerLabel)
+        assertEquals("有更新", log.statusLabel)
+        assertTrue(log.hasUpdate)
+        assertEquals(listOf("第 5 集", "第 6 集"), log.details)
+        assertEquals("2.5 s", log.durationText)
+    }
+
+    @Test fun checkLogWithoutNewEntriesHidesUpdateCounts() {
+        val raw = ApiJson.parseToJsonElement(
+            """{"id":32,"source":"dygangs","seriesTitle":"无更新剧集","trigger":"scheduled","status":"ok","foundCount":0,"submittedCount":0}""").asObject()
+        val log = CheckLog.from(raw)
+        assertEquals("电影港", log.sourceLabel)
+        assertEquals("定时巡检", log.triggerLabel)
+        assertEquals("无更新", log.statusLabel)
+        assertFalse(log.hasUpdate)
+        assertEquals("—", log.durationText)
+    }
+
+    @Test fun mapsLibraryScanAndDeleteResult() {
+        val scan = LibraryScan.from(ApiJson.parseToJsonElement(
+            """{"mediaRoot":"/vol1/1000/downloads","writable":true,"totalBytes":2048,"scannedFiles":2,"seriesCount":1,
+               "scannedAt":"2026-10-20 09:00:00","warning":"已跳过 1 个非视频文件",
+               "entries":[{"id":"tok-1","seriesTitle":"测试剧集","seriesKey":"测试剧集","season":1,"episode":3,
+                           "fileName":"测试剧集 S01E03.mp4","relativePath":"测试剧集/测试剧集 S01E03.mp4",
+                           "size":2048,"modifiedAt":"2026-10-19 20:00:00","episodeRecognized":true}]}""").asObject())
+        assertEquals("/vol1/1000/downloads", scan.mediaRoot)
+        assertTrue(scan.writable)
+        assertEquals(1, scan.entries.size)
+        val entry = scan.entries.first()
+        assertEquals("第 3 集", entry.episodeLabel)
+        // 集数识别失败时退回文件名主标题，避免整行只剩「集数待识别」
+        assertEquals("测试剧集 S01E03", entry.copy(episodeRecognized = false, episode = 0).episodeLabel)
+
+        val result = LibraryDeleteResult.from(ApiJson.parseToJsonElement(
+            """{"deleted":1,"failed":0,"freedBytes":2048,"deletedIds":["tok-1"],"message":"已删除 1 个文件"}""").asObject())
+        assertEquals(setOf("tok-1"), result.deletedIds)
+        assertEquals(2048L, result.freedBytes)
+    }
 }

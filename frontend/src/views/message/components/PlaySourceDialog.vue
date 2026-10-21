@@ -270,7 +270,7 @@ export default {
     padding: 5px 12px;
     border-radius: 999px;
     border: 1px solid var(--line);
-    background: rgba(148, 163, 184, .06);
+    background: rgba(36, 61, 50, .05);
     color: var(--text-2);
     font-size: 12.5px;
     cursor: pointer;
@@ -291,7 +291,7 @@ export default {
 .ps-tab-num {
     padding: 0 6px;
     border-radius: 999px;
-    background: rgba(148, 163, 184, .16);
+    background: rgba(36, 61, 50, .12);
     font-size: 11px;
 }
 
@@ -317,7 +317,7 @@ export default {
     padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: 8px;
-    background: rgba(148, 163, 184, .04);
+    background: rgba(36, 61, 50, .03);
 }
 
 .ps-ep {

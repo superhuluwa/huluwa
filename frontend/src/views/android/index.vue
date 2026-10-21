@@ -1,341 +1,694 @@
 <template>
-    <div class="android-page">
-        <div class="page-heading">
-            <div>
-                <h3 class="page-title"><i class="fa-brands fa-android"></i> 安卓 App</h3>
-                <p class="page-subtitle">更新源码、构建 Release 安装包，随时查看执行日志。</p>
-            </div>
-            <span class="worker-status" :class="{ online: status.workerOnline }">
-                <span class="status-dot"></span>{{ status.workerOnline ? '构建服务在线' : '构建服务离线' }}
-            </span>
-        </div>
+    <ManagementShell kind="android-build" title="App 构建管理" subtitle="更新源码 · 编译安装包 · 执行日志"
+        :loading="tasks.loading" :busy="Boolean(submitting) || cancelling" @refresh="load">
+        <template #actions>
+            <button class="header-icon" type="button" title="构建宿主信息" @click="showHostInfo">
+                <i class="fa-solid fa-server"></i>
+            </button>
+        </template>
 
-        <n-alert v-if="connectionError" type="warning" :bordered="false" class="notice">
-            暂时无法连接服务器，正在自动重连。服务器上的任务会继续执行。
-        </n-alert>
-        <n-alert v-else-if="loaded && !status.enabled" type="info" :bordered="false" class="notice">
-            安卓构建服务尚未启用，请配置并启动构建容器。
-        </n-alert>
-        <n-alert v-else-if="loaded && !status.workerOnline" type="warning" :bordered="false" class="notice">
-            构建容器暂时离线，恢复后即可更新代码和编译。已生成的 APK 仍可下载。
-        </n-alert>
+        <div class="mgmt-content">
+            <!-- 速览：构建服务状态 + 源码 / 安装包 / 任务 / 签名 -->
+            <section class="hero-panel">
+                <div class="hero-head">
+                    <i class="fa-brands fa-android"></i>
+                    <div class="hero-head-text">
+                        <strong>App 构建服务</strong>
+                        <span>{{ status.workerOnline ? '构建容器在线' : '构建容器离线' }} · {{ status.branch || 'master' }}</span>
+                    </div>
+                    <span class="hero-tag" :class="{ alert: !status.workerOnline }">{{ status.workerOnline ? '在线' : '离线' }}</span>
+                </div>
+                <div class="build-grid">
+                    <div class="build-cell">
+                        <span>当前源码</span>
+                        <strong class="mono">{{ shortCommit || '尚未更新' }}</strong>
+                        <em>{{ sourceSubject }}</em>
+                    </div>
+                    <div class="build-cell">
+                        <span>最近构建</span>
+                        <strong>{{ status.latestApk ? `v${status.latestApk.versionName}` : '暂无安装包' }}</strong>
+                        <em>{{ status.latestApk ? `代码 ${status.latestApk.versionCode} · ${formatBytes(status.latestApk.apkSize)}` : '编译成功后即可下载' }}</em>
+                    </div>
+                    <div class="build-cell">
+                        <span>当前任务</span>
+                        <strong>{{ activeTask ? stageLabel(activeTask.stage) : '空闲' }}</strong>
+                        <em>{{ activeTask ? `${typeLabel(activeTask.type)} #${activeTask.id} · ${elapsed(activeTask)}` : '就绪后可以开始新的任务' }}</em>
+                    </div>
+                    <div class="build-cell">
+                        <span>签名配置</span>
+                        <strong>{{ status.signingReady ? '已配置' : '未配置' }}</strong>
+                        <em>{{ status.signingReady ? '可以编译 Release 安装包' : '需先恢复 Release 签名' }}</em>
+                    </div>
+                </div>
+            </section>
 
-        <div class="overview-grid">
-            <div class="glass-card overview-card">
-                <span class="eyebrow">当前源码</span>
-                <div class="overview-value mono">{{ status.source?.commit?.slice(0, 8) || '尚未更新' }}</div>
-                <div class="overview-detail" :title="status.source?.commitSubject">{{ status.source?.commitSubject || '点击更新代码，获取最新安卓源码' }}</div>
-                <div class="muted">{{ status.branch || 'master' }}<span v-if="status.source?.updatedAt"> · {{ date(status.source.updatedAt) }}</span></div>
+            <div v-if="connectionError" class="notice-line">
+                <i class="fa-solid fa-triangle-exclamation"></i>暂时无法连接构建服务，正在自动重连。服务器上的任务会继续执行。
             </div>
-            <div class="glass-card overview-card">
-                <span class="eyebrow">最近成功构建</span>
-                <div class="overview-value">{{ status.latestApk ? `v${status.latestApk.versionName}` : '暂无安装包' }}</div>
-                <div class="overview-detail">{{ status.latestApk ? `版本代码 ${status.latestApk.versionCode} · ${size(status.latestApk.apkSize)}` : '完成编译后即可下载到手机安装' }}</div>
-                <div class="muted">{{ status.latestApk ? date(status.latestApk.completedAt) : 'Release 签名安装包' }}</div>
+            <div v-else-if="loaded && !status.enabled" class="notice-line">
+                <i class="fa-solid fa-circle-info"></i>安卓构建服务尚未启用，请配置并启动构建容器。
             </div>
-            <div class="glass-card overview-card">
-                <span class="eyebrow">当前任务</span>
-                <div class="overview-value">{{ activeTask ? stageName(activeTask.stage) : '空闲' }}</div>
-                <div class="overview-detail">{{ activeTask ? `${typeName(activeTask.type)} #${activeTask.id} · ${duration(activeTask)}` : '就绪后可以开始新的任务' }}</div>
-                <div class="muted">{{ status.signingReady ? 'Release 签名已配置' : 'Release 签名未配置' }}</div>
+            <div v-else-if="loaded && !status.workerOnline" class="notice-line">
+                <i class="fa-solid fa-triangle-exclamation"></i>构建容器暂时离线，恢复后即可更新代码和编译。
             </div>
-        </div>
 
-        <div class="glass-card action-panel">
-            <div class="action-copy"><strong>构建操作</strong><span>先更新代码，再编译 APK；每次编译固定使用当前源码版本。</span></div>
-            <div class="action-buttons">
-                <n-button :disabled="!canSubmit" :loading="submitting === 'UPDATE'" @click="submit('UPDATE')">
+            <!-- 构建操作 -->
+            <section class="panel action-panel">
+                <strong class="action-title">构建操作</strong>
+                <p class="action-tip">先更新代码，再编译 APK；每次编译固定使用当前源码版本。</p>
+                <n-button type="primary" size="large" block :loading="submitting === 'UPDATE'" :disabled="!canUpdate"
+                    @click="submit('UPDATE')">
                     <template #icon><i class="fa-solid fa-code-pull-request"></i></template>更新代码
                 </n-button>
-                <n-button type="primary" :disabled="!canSubmit || !status.source?.commit || !status.signingReady" :loading="submitting === 'BUILD'" @click="submit('BUILD')">
+                <n-button type="primary" size="large" block :loading="submitting === 'BUILD'" :disabled="!canBuild"
+                    class="action-gap" @click="submit('BUILD')">
                     <template #icon><i class="fa-solid fa-hammer"></i></template>编译 APK
                 </n-button>
-                <n-button :disabled="!status.latestApk || !!downloading" :loading="downloading === status.latestApk?.id" @click="download(status.latestApk)">
-                    <template #icon><i class="fa-solid fa-download"></i></template>{{ downloading === status.latestApk?.id ? '准备下载…' : '下载 APK' }}
-                </n-button>
-                <n-button v-if="activeTask" type="error" secondary :loading="cancelling" :disabled="activeTask.status === 'CANCELLING'" @click="cancel">
-                    {{ activeTask.status === 'CANCELLING' ? '正在取消' : '取消任务' }}
-                </n-button>
-            </div>
-        </div>
+                <p v-if="reason" class="action-reason">{{ reason }}</p>
+                <div class="action-foot">
+                    <button class="link-btn" type="button" :disabled="!status.latestApk || downloading"
+                        @click="downloadApk(status.latestApk)">
+                        <i class="fa-solid fa-download"></i>下载 APK
+                    </button>
+                    <span class="action-spacer"></span>
+                    <button v-if="activeTask" class="link-btn danger" type="button"
+                        :disabled="activeTask.status === 'CANCELLING' || cancelling" @click="cancelTask(activeTask)">
+                        {{ activeTask.status === 'CANCELLING' ? '正在取消' : '取消任务' }}
+                    </button>
+                </div>
+            </section>
 
-        <n-alert v-if="lastDownload" type="success" :bordered="false" class="download-notice" closable @close="lastDownload = null">
-            <div>下载已准备好：{{ lastDownload.filename }}</div>
-            <div class="download-help">如果浏览器没有开始下载，请点击链接，或复制到系统浏览器打开。</div>
-            <div class="download-links">
-                <a :href="lastDownload.url" :download="lastDownload.filename" target="_blank" rel="noopener noreferrer">点击下载文件</a>
-                <n-button size="small" text @click="copyDownloadLink">复制下载链接</n-button>
-                <span class="muted">链接 10 分钟内有效，过期后重新点击下载按钮即可</span>
-            </div>
-        </n-alert>
+            <!-- 下载提示（浏览器未自动开始下载时的手动链接） -->
+            <section v-if="lastDownload" class="panel download-panel">
+                <strong>下载已准备好：{{ lastDownload.filename }}</strong>
+                <p>如果浏览器没有开始下载，请点击链接或复制到系统浏览器打开；链接 10 分钟内有效。</p>
+                <div class="download-links">
+                    <a :href="lastDownload.url" :download="lastDownload.filename" target="_blank" rel="noopener noreferrer">点击下载文件</a>
+                    <button class="link-btn" type="button" @click="copyLink">复制下载链接</button>
+                </div>
+            </section>
 
-        <div class="glass-card log-panel">
-            <div class="panel-toolbar">
-                <div class="panel-title">执行日志 <span v-if="selectedTask" class="muted">{{ typeName(selectedTask.type) }} #{{ selectedTask.id }}</span>
-                    <n-tag v-if="selectedTask" :type="tagType(selectedTask.status)" size="small" :bordered="false">{{ statusName(selectedTask.status) }}</n-tag>
+            <!-- 执行日志 -->
+            <section class="panel log-panel">
+                <div class="log-head">
+                    <strong>执行日志</strong>
+                    <span v-if="selectedTask">{{ typeLabel(selectedTask.type) }} #{{ selectedTask.id }}</span>
+                    <span v-if="selectedTask" class="chip-tag" :class="taskTone(selectedTask.status)">
+                        {{ taskStatusLabel(selectedTask.status) }}
+                    </span>
+                    <span class="log-spacer"></span>
+                    <span v-if="selectedTask" class="log-elapsed">{{ elapsed(selectedTask) }}</span>
                 </div>
                 <div class="log-actions">
-                    <n-button size="small" quaternary @click="follow = !follow">{{ follow ? '暂停滚动' : '自动滚动' }}</n-button>
-                    <n-button size="small" quaternary :disabled="!logText" @click="copyLogs">复制</n-button>
-                    <n-button size="small" quaternary :disabled="!selectedTask || !logText" @click="download(selectedTask, true)">下载日志</n-button>
+                    <button class="link-btn" type="button" @click="follow = !follow">{{ follow ? '暂停滚动' : '自动滚动' }}</button>
+                    <button class="link-btn" type="button" :disabled="!logText" @click="copyLogs">复制</button>
+                    <button class="link-btn" type="button" :disabled="!selectedTask || !logText" @click="downloadLog">下载日志</button>
                 </div>
-            </div>
-            <div v-if="selectedTask?.error" class="task-error">{{ selectedTask.error }}</div>
-            <pre ref="logElement" class="log-content" tabindex="0" aria-label="构建执行日志">{{ logText || (selectedTask ? '等待任务输出日志…' : '开始更新代码或编译后，这里会显示执行日志。') }}</pre>
-            <div class="log-footer"><span>日志每秒增量更新，完整内容可下载</span><span v-if="selectedTask">{{ duration(selectedTask) }}</span></div>
-        </div>
+                <p v-if="selectedTask && selectedTask.error" class="log-error">{{ selectedTask.error }}</p>
+                <pre ref="logBox" class="log-content">{{ logText || (selectedTask ? '等待任务输出日志…' : '开始更新代码或编译后，这里会显示执行日志。') }}</pre>
+                <p class="log-foot">{{ logComplete ? '日志已全部加载，完整内容可下载' : '日志每秒增量更新，完整内容可下载' }}</p>
+            </section>
 
-        <div class="glass-card history-panel">
-            <div class="panel-toolbar"><strong>任务历史</strong><span class="muted">点击任务查看日志</span></div>
-            <div v-if="!tasks.length" class="empty-history">暂无任务记录</div>
-            <div v-else class="history-scroll">
-                <table class="history-table">
-                    <thead><tr><th>任务</th><th>源码 / 版本</th><th>状态</th><th>开始时间</th><th>耗时</th><th>操作</th></tr></thead>
-                    <tbody>
-                        <tr v-for="task in tasks" :key="task.id" :class="{ selected: task.id === selectedTask?.id }" @click="selectTask(task)">
-                            <td><span class="task-id">#{{ task.id }}</span> {{ typeName(task.type) }}</td>
-                            <td><span class="mono">{{ task.commit?.slice(0, 8) || '—' }}</span><span v-if="task.type === 'BUILD'" class="history-version">v{{ task.versionName }} ({{ task.versionCode }})</span></td>
-                            <td><n-tag :type="tagType(task.status)" size="small" :bordered="false">{{ statusName(task.status) }}</n-tag></td>
-                            <td class="muted">{{ date(task.startedAt || task.createdAt) }}</td><td>{{ duration(task) }}</td>
-                            <td><n-button v-if="task.artifactName && task.status === 'SUCCESS'" size="small" text type="primary" :loading="downloading === task.id" :disabled="!!downloading" @click.stop="download(task)">下载 {{ size(task.apkSize) }}</n-button><n-button v-else size="small" text @click.stop="selectTask(task)">查看日志</n-button></td>
-                        </tr>
-                    </tbody>
-                </table>
+            <!-- 任务历史 -->
+            <div class="section-title"><h2>任务历史</h2><span class="history-tip">点击任务查看日志</span></div>
+            <div v-if="loaded && !tasks.data.length" class="empty-panel">
+                <span class="empty-icon"><i class="fa-brands fa-android"></i></span>
+                <strong>暂无任务记录</strong>
+                <span>先更新代码，再编译安装包</span>
             </div>
+            <article v-for="task in tasks.data" :key="task.id" class="panel task-row"
+                :class="{ selected: selectedId === task.id }" @click="selectTask(task)">
+                <div class="task-head">
+                    <span class="task-id">#{{ task.id }}</span>
+                    <strong>{{ typeLabel(task.type) }}</strong>
+                    <span class="chip-tag" :class="taskTone(task.status)">{{ taskStatusLabel(task.status) }}</span>
+                </div>
+                <div class="task-meta">
+                    <span class="mono">{{ short(task.commit) }}</span>
+                    <span v-if="task.type === 'BUILD' && task.versionName">v{{ task.versionName }}（{{ task.versionCode }}）</span>
+                    <span class="task-spacer"></span>
+                    <span v-if="isDownloadable(task)" class="chip-tag outline">{{ formatBytes(task.apkSize) }}</span>
+                </div>
+                <div class="task-foot">
+                    <span>{{ formatTime(task.startedAt || task.createdAt) }}</span>
+                    <span>{{ elapsed(task) }}</span>
+                    <span class="task-spacer"></span>
+                    <button v-if="isDownloadable(task)" class="link-btn" type="button" @click.stop="downloadApk(task)">
+                        <i class="fa-solid fa-download"></i>下载
+                    </button>
+                    <span v-else class="task-hint">{{ selectedId === task.id ? '正在查看日志' : '点击查看日志' }}</span>
+                </div>
+            </article>
         </div>
-    </div>
+    </ManagementShell>
 </template>
 
-<script setup>
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
-import { NAlert, NButton, NTag } from 'naive-ui'
+<script>
+/**
+ * App 构建管理会话（对齐安卓 AppBuildScreen）：
+ *  - 速览：当前源码、最近构建、当前任务、签名配置；
+ *  - 构建操作：更新代码 / 编译 APK / 下载 APK / 取消任务；
+ *  - 执行日志：按游标增量拉取，支持跟随滚动、复制、下载日志；
+ *  - 任务历史：点击切换日志，可下载成功产物。
+ */
+import { NButton } from 'naive-ui'
+import ManagementShell from '@/components/main/management-shell.vue'
 import { message } from '@/libs/discrete'
-import { getAndroidStatus, getAndroidTasks, updateAndroidCode, buildAndroidApk, cancelAndroidTask, getAndroidLogs, prepareAndroidDownload, startAndroidDownload } from '@/api/android'
+import {
+    getAndroidStatus, getAndroidTasks, updateAndroidCode, buildAndroidApk,
+    cancelAndroidTask, getAndroidLogs, prepareAndroidDownload, startAndroidDownload
+} from '@/api/android'
+import { formatBytes } from '@/utils/format'
 
-defineOptions({ name: 'AndroidApp' })
-const status = ref({}), tasks = ref([]), selectedTask = ref(null), logText = ref(''), logElement = ref(null)
-const loaded = ref(false), connectionError = ref(false), follow = ref(true), submitting = ref(''), cancelling = ref(false)
-const downloading = ref(null), lastDownload = ref(null), clock = ref(Date.now())
-const activeTask = computed(() => status.value.activeTask)
-const canSubmit = computed(() => loaded.value && status.value.enabled && status.value.workerOnline && !activeTask.value && !submitting.value)
-const activeStatuses = ['QUEUED', 'RUNNING', 'CANCELLING']
-let pageActive = false, generation = 0, logGeneration = 0, timer, controller, cursor = 0, logComplete = false
-const typeName = (type) => type === 'BUILD' ? '编译 APK' : '更新代码'
-const statusName = (value) => ({ QUEUED: '等待执行', RUNNING: '执行中', CANCELLING: '正在取消', SUCCESS: '成功', FAILED: '失败', CANCELLED: '已取消', TIMED_OUT: '超时', INTERRUPTED: '意外中断' }[value] || value)
-const stageName = (value) => ({ QUEUED: '等待执行', FETCHING: '更新源码', PREPARING: '准备编译', COMPILING: '正在编译', VERIFYING: '校验安装包', ARCHIVING: '归档安装包', DONE: '完成' }[value] || value)
-const tagType = (value) => value === 'SUCCESS' ? 'success' : ['FAILED', 'TIMED_OUT', 'INTERRUPTED'].includes(value) ? 'error' : activeStatuses.includes(value) ? 'info' : 'default'
-const date = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
-const size = (bytes) => bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '—'
-function duration(task) {
-    const start = new Date(task.startedAt || task.createdAt).getTime()
-    const end = task.completedAt ? new Date(task.completedAt).getTime() : clock.value
-    const seconds = Math.max(0, Math.floor((end - start) / 1000))
-    return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+const STATUS_LABEL = {
+    QUEUED: '等待执行', RUNNING: '执行中', CANCELLING: '正在取消', SUCCESS: '成功',
+    FAILED: '失败', CANCELLED: '已取消', TIMED_OUT: '超时', INTERRUPTED: '意外中断'
 }
-function selectTask(task) {
-    if (!task) return
-    if (selectedTask.value?.id === task.id) { selectedTask.value = task; return }
-    logGeneration++
-    selectedTask.value = task
-    logText.value = ''
-    cursor = 0
-    logComplete = false
-    follow.value = true
-    if (pageActive) schedule(0)
+const STAGE_LABEL = {
+    QUEUED: '等待执行', FETCHING: '更新源码', PREPARING: '准备编译', COMPILING: '正在编译',
+    VERIFYING: '校验安装包', ARCHIVING: '归档安装包', DONE: '完成'
 }
-function schedule(delay) {
-    clearTimeout(timer)
-    if (pageActive && !controller) timer = setTimeout(poll, delay)
-}
-async function poll() {
-    if (!pageActive || controller || document.hidden) return
-    const currentGeneration = generation
-    const currentController = new AbortController()
-    controller = currentController
-    let delay = 1000
-    try {
-        const config = { silent: true, signal: currentController.signal }
-        const [snapshot, history] = await Promise.all([getAndroidStatus(config), getAndroidTasks(config)])
-        if (!pageActive || generation !== currentGeneration) return
-        status.value = snapshot
-        tasks.value = history
-        loaded.value = true
-        connectionError.value = false
-        clock.value = Date.now()
-        if (selectedTask.value && !history.some((task) => task.id === selectedTask.value.id)) {
-            selectedTask.value = null
-            logText.value = ''
-            logGeneration++
+
+export default {
+    name: 'AppBuildPage',
+    components: { ManagementShell, NButton },
+    data() {
+        return {
+            status: {
+                enabled: false, workerOnline: false, signingReady: false, branch: 'master',
+                source: {}, activeTask: null, latestApk: null
+            },
+            tasks: { data: [], loading: false, loaded: false },
+            selectedId: null,
+            logs: '',
+            cursor: 0,
+            logComplete: false,
+            follow: true,
+            submitting: '',
+            cancelling: false,
+            downloading: false,
+            lastDownload: null,
+            connectionError: false,
+            clock: Date.now(),
+            timer: null,
+            clockTimer: null
         }
-        if (!selectedTask.value) selectTask(snapshot.activeTask || history[0] || snapshot.latestApk)
-        if (selectedTask.value) {
-            const updated = history.find((task) => task.id === selectedTask.value.id)
-            if (updated) selectedTask.value = updated
-            if (!logComplete) {
-                const selectedId = selectedTask.value.id
-                const currentLogGeneration = logGeneration
-                const logs = await getAndroidLogs(selectedId, cursor, config)
-                if (!pageActive || generation !== currentGeneration || currentLogGeneration !== logGeneration) return
-                selectedTask.value = logs.task
-                logText.value = ((logs.reset ? '' : logText.value) + logs.text).slice(-200000)
-                cursor = logs.cursor
-                logComplete = !logs.hasMore && !activeStatuses.includes(logs.task.status)
-                if (logs.hasMore) delay = 50
-                await nextTick()
-                if (follow.value && logElement.value) logElement.value.scrollTop = logElement.value.scrollHeight
+    },
+    computed: {
+        loaded() {
+            return this.tasks.loaded
+        },
+        activeTask() {
+            return this.status.activeTask
+        },
+        selectedTask() {
+            return this.tasks.data.find((task) => task.id === this.selectedId) || null
+        },
+        logText() {
+            return this.logs
+        },
+        shortCommit() {
+            return (this.status.source && this.status.source.commit || '').slice(0, 8)
+        },
+        sourceSubject() {
+            const source = this.status.source || {}
+            return source.commitSubject || '点击更新代码获取最新源码'
+        },
+        canUpdate() {
+            return this.loaded && this.status.enabled && this.status.workerOnline && !this.activeTask && !this.submitting
+        },
+        canBuild() {
+            return this.canUpdate && /^[0-9a-f]{40}$/.test((this.status.source && this.status.source.commit) || '') && this.status.signingReady
+        },
+        reason() {
+            if (this.submitting || this.activeTask || this.canBuild) return ''
+            if (!this.status.enabled) return '安卓构建服务尚未启用'
+            if (!this.status.workerOnline) return '构建容器离线，暂时无法编译'
+            if (!/^[0-9a-f]{40}$/.test((this.status.source && this.status.source.commit) || '')) return '请先更新代码，获取最新安卓源码'
+            if (!this.status.signingReady) return '尚未配置 Release 签名，暂时无法编译'
+            return ''
+        }
+    },
+    mounted() {
+        this.load()
+        this.timer = setInterval(() => this.poll(), 1000)
+        this.clockTimer = setInterval(() => { this.clock = Date.now() }, 1000)
+    },
+    beforeUnmount() {
+        clearInterval(this.timer)
+        clearInterval(this.clockTimer)
+    },
+    methods: {
+        formatBytes,
+        short(commit) {
+            return (commit || '').slice(0, 8) || '—'
+        },
+        typeLabel(type) {
+            return type === 'BUILD' ? '编译 APK' : '更新代码'
+        },
+        taskStatusLabel(status) {
+            return STATUS_LABEL[status] || status
+        },
+        stageLabel(stage) {
+            return STAGE_LABEL[stage] || stage || '处理中'
+        },
+        taskTone(status) {
+            if (status === 'SUCCESS') return ''
+            if (['FAILED', 'TIMED_OUT', 'INTERRUPTED'].includes(status)) return 'danger'
+            if (['QUEUED', 'RUNNING', 'CANCELLING'].includes(status)) return 'amber'
+            return 'muted'
+        },
+        formatTime(value) {
+            if (!value) return '—'
+            return String(value).replace('T', ' ').slice(0, 16)
+        },
+        /** 任务耗时：未结束的任务以当前时钟兜底（对齐安卓 elapsedLabel） */
+        elapsed(task) {
+            const start = Date.parse(String(task.startedAt || task.createdAt || '').replace(' ', 'T'))
+            if (!Number.isFinite(start)) return '—'
+            const end = task.completedAt ? Date.parse(String(task.completedAt).replace(' ', 'T')) : this.clock
+            const seconds = Math.max(0, Math.floor((end - start) / 1000))
+            return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+        },
+        isDownloadable(task) {
+            return Boolean(task && task.type === 'BUILD' && task.status === 'SUCCESS' && task.artifactName && task.apkSize > 0)
+        },
+        async load() {
+            this.tasks = { ...this.tasks, loading: true }
+            try {
+                const status = await getAndroidStatus()
+                this.status = { ...this.status, ...(status || {}) }
+                this.connectionError = false
+                const tasks = await getAndroidTasks()
+                this.tasks = { data: Array.isArray(tasks) ? tasks : [], loading: false, loaded: true }
+                if (!this.selectedId) {
+                    this.selectedId = (this.activeTask && this.activeTask.id) || (this.tasks.data[0] && this.tasks.data[0].id) || null
+                }
+                this.tasks = { data: Array.isArray(tasks) ? tasks : [], loading: false, loaded: true }
+                await this.refreshLogs()
+            } catch (error) {
+                this.connectionError = true
+                this.tasks = { ...this.tasks, loading: false, loaded: true }
             }
+        },
+        /** 每秒轮询：状态 + 任务 + 选中任务的增量日志 */
+        async poll() {
+            if (this.connectionError) {
+                this.load()
+                return
+            }
+            try {
+                const status = await getAndroidStatus()
+                this.status = { ...this.status, ...(status || {}) }
+                if (!this.selectedId) {
+                    this.selectedId = (this.activeTask && this.activeTask.id) || (this.tasks.data[0] && this.tasks.data[0].id) || null
+                }
+                await this.refreshLogs()
+                const active = this.activeTask
+                if (!active && (this.logComplete || !this.selectedId)) {
+                    // 空闲时降低刷新频率：每 5 次（5 秒）拉一次任务历史
+                    this.pollCount = (this.pollCount || 0) + 1
+                    if (this.pollCount % 5 !== 0) return
+                }
+                const tasks = await getAndroidTasks()
+                this.tasks = { data: Array.isArray(tasks) ? tasks : [], loading: false, loaded: true }
+            } catch (error) {
+                this.connectionError = true
+            }
+        },
+        async refreshLogs() {
+            const id = this.selectedId
+            if (!id || this.logComplete) return
+            try {
+                const chunk = await getAndroidLogs(id, this.cursor)
+                if (!chunk) return
+                if (chunk.reset) {
+                    this.logs = ''
+                    this.cursor = 0
+                }
+                const merged = this.logs + (chunk.text || '')
+                this.logs = merged.length > 200000 ? merged.slice(-200000) : merged
+                this.cursor = chunk.cursor || this.cursor
+                this.logComplete = !chunk.hasMore && !(chunk.task && chunk.task.active)
+                if (chunk.task) {
+                    this.tasks = {
+                        data: [chunk.task, ...this.tasks.data.filter((item) => item.id !== chunk.task.id)],
+                        loading: this.tasks.loading,
+                        loaded: true
+                    }
+                }
+                if (this.follow) {
+                    this.$nextTick(() => {
+                        const box = this.$refs.logBox
+                        if (box) box.scrollTop = box.scrollHeight
+                    })
+                }
+            } catch (error) {
+                // 日志接口失败下一轮自动重试
+            }
+        },
+        selectTask(task) {
+            if (this.selectedId === task.id) return
+            this.selectedId = task.id
+            this.logs = ''
+            this.cursor = 0
+            this.logComplete = false
+            this.follow = true
+            this.refreshLogs()
+        },
+        async submit(type) {
+            if (!this.canUpdate || this.submitting) return
+            this.submitting = type
+            try {
+                const task = type === 'BUILD' ? await buildAndroidApk() : await updateAndroidCode()
+                message.success(type === 'BUILD' ? '已提交 APK 编译任务' : '已提交代码更新任务')
+                this.selectedId = task.id
+                this.logs = ''
+                this.cursor = 0
+                this.logComplete = false
+                await this.load()
+            } catch (error) {
+                // 拦截器已提示
+            } finally {
+                this.submitting = ''
+            }
+        },
+        cancelTask(task) {
+            this.$dialog.warning({
+                title: '取消构建任务',
+                content: `确定取消「${this.typeLabel(task.type)} #${task.id}」？构建容器会停止当前进程，未完成的产物会被清理。`,
+                positiveText: '取消任务',
+                negativeText: '再等等',
+                onPositiveClick: async () => {
+                    this.cancelling = true
+                    try {
+                        await cancelAndroidTask(task.id)
+                        message.success('已发送取消请求')
+                        await this.load()
+                    } catch (error) {
+                        // 拦截器已提示
+                    } finally {
+                        this.cancelling = false
+                    }
+                }
+            })
+        },
+        async downloadApk(task) {
+            if (!task || this.downloading) return
+            this.downloading = true
+            try {
+                const download = await prepareAndroidDownload(task, false)
+                this.lastDownload = download
+                startAndroidDownload(download)
+            } catch (error) {
+                message.error(error.message || '下载准备失败，请稍后重试')
+            } finally {
+                this.downloading = false
+            }
+        },
+        async downloadLog() {
+            if (!this.selectedTask || this.downloading) return
+            this.downloading = true
+            try {
+                const download = await prepareAndroidDownload(this.selectedTask, true)
+                this.lastDownload = download
+                startAndroidDownload(download)
+            } catch (error) {
+                message.error(error.message || '日志下载准备失败')
+            } finally {
+                this.downloading = false
+            }
+        },
+        copyLink() {
+            const url = this.lastDownload && this.lastDownload.url
+            if (!url) return
+            navigator.clipboard?.writeText(url)
+                .then(() => message.success('下载链接已复制'))
+                .catch(() => message.error('复制失败，请手动选择链接'))
+        },
+        async copyLogs() {
+            if (!this.logs) return
+            try {
+                await navigator.clipboard.writeText(this.logs)
+                message.success('日志已复制')
+            } catch (error) {
+                message.error('复制失败，请手动选择文本')
+            }
+        },
+        showHostInfo() {
+            const status = this.status
+            const lines = [
+                `构建服务：${status.enabled ? '已启用' : '未启用'}`,
+                `构建容器：${status.workerOnline ? '在线' : '离线'}`,
+                `签名配置：${status.signingReady ? '已配置' : '未配置'}`,
+                `分支：${status.branch || 'master'}`
+            ]
+            this.$dialog.info({
+                title: '构建宿主信息',
+                content: lines.join('\n'),
+                positiveText: '关闭',
+                style: { whiteSpace: 'pre-line' }
+            })
         }
-        if (!snapshot.activeTask && delay !== 50) delay = 5000
-    } catch (error) {
-        if (generation === currentGeneration && !currentController.signal.aborted) {
-            connectionError.value = true
-            delay = 3000
-        }
-    } finally {
-        if (controller === currentController) controller = null
-        if (generation === currentGeneration) schedule(delay)
     }
 }
-async function submit(type) {
-    submitting.value = type
-    try {
-        const task = await (type === 'BUILD' ? buildAndroidApk() : updateAndroidCode())
-        status.value = { ...status.value, activeTask: task }
-        tasks.value = [task, ...tasks.value.filter((item) => item.id !== task.id)]
-        selectTask(task)
-        message.success(type === 'BUILD' ? '已提交 APK 编译任务' : '已提交代码更新任务')
-    } catch (error) {
-        // The shared HTTP interceptor displays the server error.
-    } finally { submitting.value = ''; schedule(0) }
-}
-async function cancel() {
-    if (!activeTask.value) return
-    cancelling.value = true
-    try {
-        const task = await cancelAndroidTask(activeTask.value.id)
-        status.value = { ...status.value, activeTask: task }
-        if (selectedTask.value?.id === task.id) selectedTask.value = task
-    } catch (error) {
-        // The shared HTTP interceptor displays the server error.
-    } finally { cancelling.value = false; schedule(0) }
-}
-async function download(task, logFile = false) {
-    if (!task || downloading.value) return
-    downloading.value = task.id
-    try {
-        const prepared = await prepareAndroidDownload(task, logFile)
-        lastDownload.value = prepared
-        startAndroidDownload(prepared)
-    } catch (error) {
-        if (error.response?.status !== 401) {
-            message.error(error.response?.data?.message || error.message || '下载准备失败，请刷新后重试')
-        }
-    } finally { downloading.value = null }
-}
-async function copyDownloadLink() {
-    if (!lastDownload.value) return
-    try {
-        await copyText(lastDownload.value.url)
-        message.success('下载链接已复制，可在系统浏览器打开')
-    } catch (error) { message.warning('复制失败，请长按下载链接复制') }
-}
-async function copyText(text) {
-    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text)
-    else {
-        const input = document.createElement('textarea')
-        input.value = text
-        input.style.position = 'fixed'; input.style.opacity = '0'
-        document.body.appendChild(input); input.select()
-        const copied = document.execCommand('copy')
-        input.remove()
-        if (!copied) throw new Error('copy failed')
-    }
-}
-async function copyLogs() {
-    try {
-        await copyText(logText.value)
-        message.success('日志已复制')
-    } catch (error) { message.warning('复制失败，请选择日志文本复制或下载日志') }
-}
-function activate() {
-    if (pageActive) return
-    pageActive = true
-    generation++
-    schedule(0)
-}
-function deactivate() {
-    pageActive = false
-    generation++
-    clearTimeout(timer)
-    controller?.abort()
-    controller = null
-}
-function visibilityChanged() {
-    if (document.hidden) {
-        clearTimeout(timer)
-        generation++
-        controller?.abort()
-        controller = null
-    } else if (pageActive) schedule(0)
-}
-onMounted(() => { document.addEventListener('visibilitychange', visibilityChanged); activate() })
-onActivated(activate)
-onDeactivated(deactivate)
-onBeforeUnmount(() => { deactivate(); document.removeEventListener('visibilitychange', visibilityChanged) })
 </script>
 
 <style scoped>
-.android-page { max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-.page-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.page-title { margin: 0 0 6px; display: flex; align-items: center; gap: 10px; }
-.page-title i { color: var(--ok); }
-.page-subtitle, .muted, .eyebrow { color: var(--text-3); font-size: 12px; }
-.page-subtitle { margin: 0; }
-.worker-status { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: 12px; white-space: nowrap; }
-.worker-status.online { color: var(--ok); }
-.status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.overview-card { padding: 20px; min-width: 0; }
-.overview-value { font-size: 25px; font-weight: 650; margin: 12px 0 7px; }
-.overview-detail { font-size: 13px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mono { font-family: var(--font-mono, monospace); }
-.action-panel { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 18px 20px; }
-.action-copy { display: flex; flex-direction: column; gap: 6px; }
-.action-copy strong, .panel-toolbar strong { font-size: 14px; }
-.action-copy span { font-size: 12px; color: var(--text-3); }
-.action-buttons, .log-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.panel-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
-.panel-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-weight: 600; font-size: 14px; }
-.panel-title .muted { font-weight: 400; }
-.log-panel, .history-panel { overflow: hidden; }
-.log-content { margin: 0; padding: 18px; height: 360px; overflow: auto; background: #080f19; color: #c7d9ca; font: 12px/1.8 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
-.log-footer { display: flex; justify-content: space-between; padding: 9px 18px; color: var(--text-3); font-size: 11px; }
-.task-error { padding: 10px 18px; color: var(--danger); background: rgba(230, 70, 70, .08); overflow-wrap: anywhere; }
-.download-help { font-size: 12px; margin-top: 5px; }
-.download-links { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
-.download-links a { color: var(--accent); font-weight: 600; text-decoration: underline; }
-.history-scroll { overflow-x: auto; }
-.history-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; white-space: nowrap; }
-.history-table th { color: var(--text-3); font-weight: 500; padding: 10px 18px; background: rgba(255,255,255,.02); }
-.history-table td { padding: 12px 18px; border-top: 1px solid var(--line); }
-.history-table tbody tr { cursor: pointer; transition: background .15s; }
-.history-table tbody tr:hover, .history-table tbody tr.selected { background: rgba(100,160,180,.07); }
-.task-id { color: var(--text-3); margin-right: 6px; }
-.history-version { display: block; color: var(--text-3); font-size: 11px; margin-top: 4px; }
-.empty-history { padding: 32px; color: var(--text-3); text-align: center; font-size: 13px; }
-@media (max-width: 900px) {
-    .android-page { gap: 12px; }
-    .page-heading { align-items: flex-start; }
-    .page-title { font-size: 17px; }
-    .page-subtitle { max-width: 230px; line-height: 1.6; }
-    .overview-grid { gap: 10px; grid-template-columns: 1fr; }
-    .overview-card { padding: 14px 16px; }
-    .overview-value { font-size: 22px; margin: 8px 0 5px; }
-    .action-panel { align-items: flex-start; flex-direction: column; padding: 16px; gap: 14px; }
-    .action-buttons { width: 100%; }
-    .panel-toolbar { flex-wrap: wrap; padding: 12px; }
-    .log-actions { margin-left: auto; gap: 2px; }
-    .log-content { height: 320px; padding: 12px; font-size: 11px; }
-    .log-footer { padding: 8px 12px; }
+.header-icon {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: var(--muted);
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.header-icon:hover {
+    background: var(--soft-green);
+    color: var(--pine);
+}
+
+/* 速览卡的 2×2 信息格 */
+.build-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 16px;
+}
+
+.build-cell {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.build-cell > span {
+    font-size: 10px;
+    color: rgba(255, 255, 255, .72);
+}
+
+.build-cell strong {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.build-cell em {
+    font-style: normal;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, .72);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.action-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.action-tip {
+    margin: 5px 0 14px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.55;
+}
+
+.action-gap {
+    margin-top: 9px;
+}
+
+.action-reason {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--amber);
+}
+
+.action-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.action-spacer {
+    flex: 1;
+}
+
+.download-panel strong {
+    font-size: 14px;
+    color: var(--ink);
+}
+
+.download-panel p {
+    margin: 6px 0 10px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.55;
+}
+
+.download-links {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.download-links a {
+    color: var(--pine);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.log-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.log-head strong {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.log-head > span {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.log-spacer {
+    flex: 1;
+}
+
+.log-elapsed {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.log-actions {
+    display: flex;
+    gap: 2px;
+    margin: 6px 0;
+}
+
+.log-error {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--danger);
+    overflow-wrap: anywhere;
+}
+
+.log-content {
+    max-height: 260px;
+    min-height: 160px;
+    overflow: auto;
+    margin: 0;
+    padding: 14px;
+    border-radius: 12px;
+    background: #0A1220;
+    color: #C7D9CA;
+    font-family: Consolas, "SFMono-Regular", monospace;
+    font-size: 11px;
+    line-height: 17px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.log-foot {
+    margin: 7px 0 0;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.history-tip {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.task-row {
+    cursor: pointer;
+    padding: 14px;
+}
+
+.task-row.selected {
+    background: var(--soft-green);
+    border-color: rgba(32, 108, 84, .35);
+}
+
+.task-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.task-id {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.task-head strong {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.task-meta,
+.task-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    flex-wrap: wrap;
+}
+
+.task-spacer {
+    flex: 1;
+}
+
+.task-hint {
+    font-size: 11px;
+    color: var(--muted);
 }
 </style>

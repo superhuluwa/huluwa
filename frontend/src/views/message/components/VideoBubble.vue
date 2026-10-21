@@ -330,7 +330,7 @@ export default {
     gap: 10px;
     padding: 18px;
     border-radius: 11px;
-    background: rgba(148, 163, 184, .08);
+    background: rgba(36, 61, 50, .06);
     color: var(--text-2);
     font-size: 12.5px;
 }

@@ -209,6 +209,21 @@ class HuluwaRepository(val api: ApiClient) {
         }.requireSuccess()
     }
 
+    // ---- 巡检记录（订阅巡检结果，与网页端「巡检记录」同一接口） ----
+    suspend fun checkLogs(limit: Int = 200, source: String = ""): List<CheckLog> =
+        api.get("chat", "check-logs", query = buildMap {
+            put("limit", limit.toString()); if (source.isNotBlank()) put("source", source)
+        }).asArray().map { CheckLog.from(it.asObject()) }
+    suspend fun clearCheckLogs() { api.delete("chat", "check-logs").requireSuccess() }
+
+    // ---- 剧集管理（扫描共享下载目录并批量删除） ----
+    suspend fun libraryScan(): LibraryScan = LibraryScan.from(api.get("library", "episodes").asObject())
+    suspend fun libraryDelete(ids: List<String>): LibraryDeleteResult {
+        require(ids.isNotEmpty()) { "请选择要删除的剧集" }
+        return LibraryDeleteResult.from(api.request("DELETE", listOf("library", "episodes"),
+            jsonBody { put("ids", JsonArray(ids.map(::JsonPrimitive))) }).asObject())
+    }
+
     // ---- 安卓 App 构建管理（对应网页端「安卓 App」页面） ----
     suspend fun androidStatus(): JsonObject = api.get("android", "status").asObject()
     suspend fun androidTasks(limit: Int = 30): List<AndroidBuildTask> =

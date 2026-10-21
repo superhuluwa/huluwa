@@ -39,7 +39,15 @@ data class AppState(
     val dockerSection: DockerSection = DockerSection.Containers, val resources: Map<DockerSection, LoadState<List<DockerResource>>> = emptyMap(),
     val realtime: Boolean = false, val sheet: AppSheet? = null, val busy: String? = null, val actionError: String? = null,
     val androidBuild: AndroidBuildState = AndroidBuildState(), val clock: Long = System.currentTimeMillis(),
+    val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
+    val library: LibraryState = LibraryState(),
     val browserVisible: Boolean = false,
+)
+
+/** 剧集管理：扫描结果 + 当前展开的剧集分组（UI 层可自行维护更细的状态） */
+data class LibraryState(
+    val scan: LoadState<LibraryScan> = LoadState(LibraryScan()),
+    val deleting: Boolean = false,
 )
 
 class HuluwaViewModel(application: Application) : AndroidViewModel(application) {
@@ -70,6 +78,20 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     else -> "${value.overview.running}/${value.overview.total} 个容器运行中 · ${value.overview.images} 个镜像"
                 }
                 ManagementService.AppBuild -> androidBuildPreview(value.androidBuild)
+                ManagementService.CheckLogs -> when {
+                    value.checkLogs.error != null -> "巡检记录加载失败，点击重试"
+                    !value.checkLogs.loaded -> if (value.checkLogs.loading) "正在同步巡检记录…" else "电影港与电影天堂的订阅巡检历史"
+                    value.checkLogs.data.isEmpty() -> "还没有巡检记录，订阅后每个周期都会留一条结果"
+                    else -> value.checkLogs.data.firstOrNull()?.let { log ->
+                        "${log.sourceLabel} · ${log.seriesTitle} · ${log.statusLabel}"
+                    } ?: "订阅巡检历史"
+                }
+                ManagementService.Library -> when {
+                    value.library.scan.error != null -> "下载目录扫描失败，点击重试"
+                    !value.library.scan.loaded -> if (value.library.scan.loading) "正在扫描下载目录…" else "扫描共享下载目录，管理磁盘空间"
+                    value.library.scan.data.entries.isEmpty() -> "下载目录里还没有可管理的剧集"
+                    else -> "${value.library.scan.data.seriesCount} 部作品 · ${value.library.scan.data.entries.size} 个视频 · ${formatBytes(value.library.scan.data.totalBytes.toDouble())}"
+                }
             }
             Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
@@ -208,6 +230,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     refreshDocker(silent)
                     // 构建会话摘要与 Frp / Docker 一样在前台自动同步。
                     refreshAndroidBuild(silent)
+                    // 巡检与剧集摘要同样在会话列表常驻刷新（安卓新增的两条系统会话）。
+                    refreshCheckLogs(silent)
+                    refreshLibrary(silent)
                 }
             }
             MainTab.Downloads -> refreshDownloads(silent)
@@ -224,6 +249,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 if (mutable.value.dockerSection != DockerSection.Containers) refreshResources(silent)
             }
             ManagementService.AppBuild -> refreshAndroidBuild(silent)
+            ManagementService.CheckLogs -> refreshCheckLogs(silent)
+            ManagementService.Library -> refreshLibrary(silent)
         }
     }
     private fun refresh(key: String, block: suspend () -> Unit) {
@@ -237,8 +264,63 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(sessions = it.sessions.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
     }
-    fun refreshDownloads(silent: Boolean = false) = refresh("downloads") {
+    /** 巡检记录：列表 + 会话摘要共用同一份缓存（limit 200，与网页端一致） */
+    fun refreshCheckLogs(silent: Boolean = false) = refresh("check-logs") {
         val epoch = generation
+        if (!silent) mutable.update { it.copy(checkLogs = it.checkLogs.copy(loading = true, error = null)) }
+        try {
+            val rows = repository.checkLogs()
+            if (epoch == generation) mutable.update { it.copy(checkLogs = LoadState(rows, loaded = true)) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(checkLogs = it.checkLogs.copy(loading = false, error = error.userMessage(), loaded = true)) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+    fun clearCheckLogs() = confirm("清空巡检记录", "将删除全部巡检历史，订阅本身与下载任务不受影响。", "清空") {
+        perform("check-logs-clear", "已清空巡检记录", after = { refreshCheckLogs() }) { repository.clearCheckLogs() }
+    }
+    /** 剧集管理：扫描共享下载目录（后端只接受本次扫描返回的短期 ID 做删除） */
+    fun refreshLibrary(silent: Boolean = false) = refresh("library") {
+        val epoch = generation
+        if (!silent) mutable.update { it.copy(library = it.library.copy(scan = it.library.scan.copy(loading = true, error = null))) }
+        try {
+            val scan = repository.libraryScan()
+            if (epoch == generation) mutable.update { it.copy(library = it.library.copy(scan = LoadState(scan, loaded = true))) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(library = it.library.copy(scan = it.library.scan.copy(loading = false, error = error.userMessage(), loaded = true))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+    fun deleteLibrary(entries: List<LibraryEntry>) {
+        if (entries.isEmpty()) return
+        val bytes = entries.sumOf { it.size }
+        val preview = entries.take(6).joinToString("、") { "${it.seriesTitle} ${it.episodeLabel}" }
+        val extra = if (entries.size > 6) "等 ${entries.size} 个文件" else ""
+        confirm("删除 ${entries.size} 个剧集文件", "$preview$extra\n将释放约 ${formatBytes(bytes.toDouble())}，删除后无法恢复。", "确认删除") {
+            perform("library-delete", "", close = false, after = { refreshLibrary() }) {
+                val result = repository.libraryDelete(entries.map { it.id })
+                val removed = result.deletedIds
+                // 先在本地剔除已删除项，避免后台刷新期间列表仍然显示旧文件
+                if (removed.isNotEmpty()) {
+                    mutable.update { state ->
+                        val scan = state.library.scan
+                        state.copy(library = state.library.copy(scan = scan.copy(
+                            data = scan.data.copy(entries = scan.data.entries.filterNot { it.id in removed }))))
+                    }
+                }
+                notify(if (result.failed > 0) "${result.message}，释放 ${formatBytes(result.freedBytes.toDouble())}"
+                    else "已删除 ${result.deleted} 个文件，释放 ${formatBytes(result.freedBytes.toDouble())}")
+            }
+        }
+    }
+
+    fun refreshDownloads(silent: Boolean = false) = refresh("downloads") {        val epoch = generation
         if (!silent) mutable.update { it.copy(downloads = it.downloads.copy(loading = true, error = null)) }
         try {
             val result = repository.downloads(!silent)

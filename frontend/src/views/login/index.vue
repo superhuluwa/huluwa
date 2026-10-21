@@ -129,7 +129,7 @@ export default {
                         await this.auth.setup(payload)
                         this.$message.success('管理员账号密码设置成功')
                     }
-                    const redirect = this.$route.query.redirect || '/messages'
+                    const redirect = this.$route.query.redirect || '/functions'
                     this.$router.push(redirect)
                 } catch (error) {
                     if (!this.initialized) {
@@ -146,6 +146,7 @@ export default {
 </script>
 
 <style scoped>
+/* 登录页：雾白纸面 + 松柏绿光晕，与安卓登录页同一套浅色观感 */
 .login {
     height: 100%;
     position: relative;
@@ -153,23 +154,10 @@ export default {
     align-items: center;
     justify-content: center;
     background:
-        radial-gradient(1200px 600px at 20% -10%, #1e293b 0%, transparent 60%),
-        radial-gradient(900px 500px at 110% 110%, #134e4a 0%, transparent 55%),
-        var(--bg);
+        radial-gradient(900px 500px at 15% -10%, #E3EBDF 0%, transparent 60%),
+        radial-gradient(700px 420px at 110% 110%, #DCE9D6 0%, transparent 55%),
+        var(--paper);
     overflow: auto;
-}
-
-.login::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image:
-        linear-gradient(var(--line) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 44px 44px;
-    opacity: .35;
-    mask-image: radial-gradient(600px 400px at 50% 50%, #000 20%, transparent 100%);
-    -webkit-mask-image: radial-gradient(600px 400px at 50% 50%, #000 20%, transparent 100%);
 }
 
 .login-card {
@@ -178,6 +166,10 @@ export default {
     padding: 34px 32px 26px;
     text-align: center;
     z-index: 1;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    box-shadow: 0 18px 48px rgba(36, 61, 50, .10);
 }
 
 .logo-mark {
@@ -187,26 +179,26 @@ export default {
     border-radius: 16px;
     display: block;
     object-fit: contain;
-    box-shadow: 0 8px 24px rgba(14, 165, 233, .35);
+    box-shadow: 0 8px 24px rgba(32, 108, 84, .20);
 }
 
 h2 {
     margin: 0;
     font-size: 21px;
-    color: var(--text);
+    color: var(--ink);
 }
 
 .sub {
     margin-top: 6px;
     font-size: 11px;
     letter-spacing: 1.4px;
-    color: var(--text-3);
+    color: var(--muted);
 }
 
 .tip {
     margin: 22px 0 12px;
     font-size: 13px;
-    color: var(--text-2);
+    color: var(--muted);
 }
 
 .foot {

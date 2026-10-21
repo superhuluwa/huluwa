@@ -11,14 +11,17 @@
  */
 export const MAX_MARKS = 50
 
-/** 颜色枚举 → 实际色值（与量子端 RichMessageText 的映射同值） */
+/**
+ * 颜色枚举 → 实际色值：与 styles/tokens.css 的浅色松柏绿色板对齐
+ * （红 / 绿 / 橙 / 蓝 / 紫 / 灰在雾白底上均保持足够对比度）。
+ */
 export const RICH_COLORS = {
-    red: '#F43F5E',
-    green: '#10B981',
-    orange: '#F59E0B',
-    blue: '#0EA5E9',
-    purple: '#6366F1',
-    gray: '#94A3B8'
+    red: '#B44452',
+    green: '#206C54',
+    orange: '#956223',
+    blue: '#4E78A7',
+    purple: '#8260A1',
+    gray: '#63746A'
 }
 
 export const SPAN_PLAIN = 'plain'

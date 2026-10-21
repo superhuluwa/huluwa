@@ -320,8 +320,8 @@ export default {
     justify-content: center;
     font-size: 16px;
     font-weight: 700;
-    background: linear-gradient(135deg, var(--accent), #6366F1);
-    color: #04121B;
+    background: linear-gradient(135deg, var(--pine), #557C46);
+    color: #fff;
 }
 
 .typing-bubble {
@@ -331,7 +331,7 @@ export default {
     padding: 14px 16px;
     border-radius: 16px;
     border-bottom-left-radius: 4px;
-    background: var(--bubble-bot, #1E293B);
+    background: var(--bubble-bot, #FFFFFF);
 }
 
 .typing-bubble .dot {
@@ -377,13 +377,13 @@ export default {
     font-size: 12px;
     font-family: inherit;
     cursor: pointer;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    box-shadow: 0 10px 30px rgba(36, 61, 50, .16);
     margin-top: 6px;
 }
 
 .jump-bottom:hover {
     color: var(--text);
-    border-color: rgba(14, 165, 233, .45);
+    border-color: rgba(32, 108, 84, .45);
 }
 
 /* 手机端：消息流左右留白收紧、气泡吃满更多宽度，回到底部按钮放大触控目标 */

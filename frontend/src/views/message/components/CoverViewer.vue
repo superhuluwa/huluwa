@@ -149,7 +149,7 @@ export default {
 }
 
 .bar-btn:hover {
-    background: rgba(148, 163, 184, .12);
+    background: rgba(36, 61, 50, .09);
     color: var(--text);
 }
 

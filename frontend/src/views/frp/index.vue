@@ -1,103 +1,118 @@
 <template>
-    <div>
-        <h3 class="page-title">
-            <i class="fa-solid fa-network-wired"></i>
-            Frp 管理
-            <span class="sub">通过 frpc.ini 管理内网穿透隧道</span>
-        </h3>
-
-        <div class="stat-grid" style="margin-bottom: 16px">
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-diagram-project" style="color: var(--accent)"></i> 隧道总数</div>
-                <div class="stat-value">{{ runtime.total }}</div>
-                <div class="stat-foot">启用 {{ runtime.enabled }} · 停用 {{ runtime.disabled }}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-tower-broadcast" style="color: var(--ok)"></i> 运行中</div>
-                <div class="stat-value" style="color: var(--ok)">{{ runtime.running }}</div>
-                <div class="stat-foot">
-                    <template v-if="runtime.error">异常 {{ runtime.error }} 条</template>
-                    <template v-else>无异常隧道</template>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label"><i class="fa-solid fa-cube" style="color: var(--accent-2)"></i> frpc 容器</div>
-                <div class="stat-value" style="font-size: 17px; margin-top: 14px">
-                    <span class="pill" :class="runtime.containerRunning ? 'ok' : 'off'">
-                        <span class="dot"></span>
-                        {{ runtime.containerRunning ? '运行中' : (runtime.containerStatus || '未知') }}
+    <ManagementShell kind="frp" title="Frp 管理" subtitle="内网穿透与隧道管理" :loading="loading" :busy="reloading || restarting"
+        @refresh="load">
+        <div class="mgmt-content">
+            <!-- 速览卡：服务状态 + 隧道统计（对齐安卓 FrpScreen） -->
+            <section class="hero-panel">
+                <div class="hero-head">
+                    <i class="fa-solid fa-diagram-project"></i>
+                    <div class="hero-head-text">
+                        <strong>Frp 隧道服务</strong>
+                        <span>{{ known ? (runtime.container || 'frpc') : '连接你的内网服务' }}</span>
+                    </div>
+                    <span class="hero-tag" :class="{ alert: tunnelsError || (known && !runtime.containerRunning) }">
+                        {{ statusText }}
                     </span>
                 </div>
-                <div class="stat-foot mono">{{ runtime.container || 'frpc' }}</div>
-            </div>
-        </div>
-
-        <div v-if="runtime.message" class="glass-card notice">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            <span>{{ runtime.message }}</span>
-        </div>
-
-        <div v-if="runtime.configSharedWithFrpc === false" class="glass-card notice notice-danger">
-            <i class="fa-solid fa-circle-exclamation"></i>
-            <span>
-                管理页读取的 frpc.ini 与 frpc 容器实际加载的不是同一份：
-                保存与热加载都不会影响线上隧道。请让两边的挂载指向同一目录
-                （宿主机 {{ runtime.hostPath }}），并确保该目录归 uid 10001 所有。
-            </span>
-        </div>
-
-        <div class="glass-card table-wrap">
-            <div class="toolbar">
-                <span class="toolbar-title">
-                    隧道列表
-                    <span class="mono path-hint">{{ runtime.hostPath }}</span>
-                </span>
-                <div class="toolbar-actions">
-                    <n-input v-model:value="keyword" size="small" clearable placeholder="搜索名称 / 端口"
-                        style="width: 190px">
-                        <template #prefix><i class="fa-solid fa-magnifying-glass"></i></template>
-                    </n-input>
-                    <n-button size="small" quaternary :loading="loading" @click="load">
-                        <template #icon><i class="fa-solid fa-rotate"></i></template>
-                        刷新
-                    </n-button>
-                    <n-button size="small" quaternary @click="showConfig">
-                        <template #icon><i class="fa-solid fa-file-code"></i></template>
-                        配置原文
-                    </n-button>
-                    <n-button size="small" type="warning" ghost :loading="reloading" @click="reload">
-                        <template #icon><i class="fa-solid fa-bolt"></i></template>
-                        热加载
-                    </n-button>
-                    <n-button size="small" type="error" ghost :loading="restarting" @click="restart">
-                        <template #icon><i class="fa-solid fa-power-off"></i></template>
-                        重启 frpc
-                    </n-button>
-                    <n-button size="small" type="primary" @click="openForm()">
-                        <template #icon><i class="fa-solid fa-plus"></i></template>
-                        新增隧道
-                    </n-button>
+                <div class="hero-metrics">
+                    <div class="hero-metric"><strong>{{ known ? (runtime.total || items.length) : '—' }}</strong><span>全部隧道</span></div>
+                    <div class="hero-metric"><strong>{{ known ? runningCount : '—' }}</strong><span>运行中</span></div>
+                    <div class="hero-metric"><strong>{{ known ? disabledCount : '—' }}</strong><span>已停用</span></div>
                 </div>
+                <div class="hero-divider"></div>
+                <div class="hero-foot">将家里的服务连接到外网</div>
+            </section>
+
+            <div v-if="tunnelsError" class="notice-line"><i class="fa-solid fa-triangle-exclamation"></i>{{ tunnelsError }}</div>
+            <div v-if="runtime.message" class="notice-line"><i class="fa-solid fa-circle-info"></i>{{ runtime.message }}</div>
+            <div v-if="runtime.configSharedWithFrpc === false" class="notice-line danger">
+                <i class="fa-solid fa-circle-exclamation"></i>
+                管理页读取的 frpc.ini 与 frpc 容器实际加载的不是同一份：保存与热加载都不会影响线上隧道。
+                请让两边的挂载指向同一目录（宿主机 {{ runtime.hostPath }}）。
             </div>
-            <n-data-table :columns="columns" :data="filtered" :loading="loading" :bordered="false" size="small"
-                :row-key="(row) => row.name" :scroll-x="1080" />
+
+            <!-- 服务操作 -->
+            <div class="action-row">
+                <n-button secondary :loading="reloading" @click="reload">
+                    <template #icon><i class="fa-solid fa-bolt"></i></template>热加载
+                </n-button>
+                <n-button secondary @click="showConfig">
+                    <template #icon><i class="fa-solid fa-file-code"></i></template>配置
+                </n-button>
+                <n-button secondary :loading="restarting" @click="restart">
+                    <template #icon><i class="fa-solid fa-power-off"></i></template>重启
+                </n-button>
+            </div>
+
+            <div class="section-title">
+                <h2>我的隧道</h2>
+                <button class="link-btn" type="button" @click="openForm()">
+                    <i class="fa-solid fa-plus"></i>新增隧道
+                </button>
+            </div>
+
+            <n-input v-model:value="keyword" clearable placeholder="搜索名称 / 端口" size="large" class="search-box">
+                <template #prefix><i class="fa-solid fa-magnifying-glass"></i></template>
+            </n-input>
+
+            <div v-if="known && !loading && !items.length" class="empty-panel">
+                <span class="empty-icon"><i class="fa-solid fa-diagram-project"></i></span>
+                <strong>还没有隧道</strong>
+                <span>点击「新增隧道」，连接你的第一个内网服务</span>
+            </div>
+
+            <article v-for="row in filtered" :key="row.name" class="panel tunnel-card">
+                <div class="tunnel-head">
+                    <i :class="['fa-solid', row.proxyType === 'http' || row.proxyType === 'https' ? 'fa-globe' : 'fa-diagram-project', 'tunnel-glyph']"></i>
+                    <strong class="tunnel-name">{{ row.name }}</strong>
+                    <span class="chip-tag" :class="statusMeta(row).cls">{{ statusMeta(row).text }}</span>
+                    <n-switch :value="Boolean(row.enabled)" size="small" :loading="toggling === row.name"
+                        @update:value="toggle(row)" />
+                </div>
+
+                <div class="tunnel-route">
+                    <div class="route-side">
+                        <span>本地服务</span>
+                        <strong>{{ row.localAddress || '—' }}</strong>
+                    </div>
+                    <i class="fa-solid fa-arrow-right route-arrow"></i>
+                    <div class="route-side end">
+                        <span>{{ row.proxyType === 'http' || row.proxyType === 'https' ? '远程域名' : '云端端口' }}</span>
+                        <strong>{{ row.remoteAddress || row.remotePort || '—' }}</strong>
+                    </div>
+                </div>
+
+                <div class="tunnel-foot">
+                    <span class="chip-tag outline">{{ String(row.proxyType || '').toUpperCase() }}</span>
+                    <span class="tunnel-remark">{{ row.remark || '' }}</span>
+                    <button class="link-btn" type="button" @click="openForm(row)">编辑</button>
+                    <button class="link-btn danger" type="button" @click="remove(row)">删除</button>
+                </div>
+            </article>
         </div>
 
+        <!-- 编辑 / 新增隧道 -->
         <n-modal v-model:show="form.visible" preset="card" :title="form.editing ? '编辑隧道' : '新增隧道'"
-            style="width: 580px" :mask-closable="false">
-            <n-form ref="formRef" :model="form.data" :rules="rules" label-placement="left" label-width="100">
+            style="width: 560px; max-width: calc(100vw - 24px)" :mask-closable="false">
+            <n-form ref="formRef" :model="form.data" :rules="rules" label-placement="top">
                 <n-form-item label="隧道名称" path="name">
                     <n-input v-model:value="form.data.name" placeholder="如：web-ssh" :disabled="form.editing" />
                 </n-form-item>
                 <n-form-item label="代理类型" path="proxyType">
-                    <n-select v-model:value="form.data.proxyType" :options="typeOptions" />
+                    <div class="chips">
+                        <button v-for="type in typeOptions" :key="type.value" type="button" class="chip"
+                            :class="{ active: form.data.proxyType === type.value }"
+                            @click="form.data.proxyType = type.value">{{ type.label }}</button>
+                    </div>
                 </n-form-item>
-                <n-form-item label="本地地址" path="localIp">
-                    <n-input v-model:value="form.data.localIp" placeholder="127.0.0.1" />
-                </n-form-item>
-                <n-form-item label="本地端口" path="localPort">
-                    <n-input-number v-model:value="form.data.localPort" :min="1" :max="65535" style="width: 100%" />
-                </n-form-item>
+                <div class="pair">
+                    <n-form-item label="本地地址" path="localIp">
+                        <n-input v-model:value="form.data.localIp" placeholder="127.0.0.1" />
+                    </n-form-item>
+                    <n-form-item label="本地端口" path="localPort">
+                        <n-input-number v-model:value="form.data.localPort" :min="1" :max="65535" style="width: 100%" />
+                    </n-form-item>
+                </div>
                 <n-form-item v-if="isPortType" label="远程端口" path="remotePort">
                     <n-input-number v-model:value="form.data.remotePort" :min="1" :max="65535" style="width: 100%"
                         placeholder="服务端暴露端口" />
@@ -111,7 +126,7 @@
                     </n-form-item>
                 </template>
                 <n-form-item label="备注" path="remark">
-                    <n-input v-model:value="form.data.remark" placeholder="可选，写入 remark 字段" />
+                    <n-input v-model:value="form.data.remark" placeholder="可选" />
                 </n-form-item>
                 <n-form-item label="高级选项">
                     <n-space :size="18">
@@ -119,79 +134,57 @@
                         <n-checkbox v-model:checked="form.data.compression">压缩传输</n-checkbox>
                     </n-space>
                 </n-form-item>
-                <n-form-item label="启用" path="enabled">
+                <n-form-item label="启用">
                     <n-switch v-model:value="form.data.enabled" />
                 </n-form-item>
-                <n-alert v-if="!form.editing" type="info" :bordered="false">
-                    保存前会先校验语法，通过后自动热加载 frpc；校验失败不会改动线上配置。
-                </n-alert>
             </n-form>
             <template #footer>
-                <div class="modal-footer">
+                <div class="modal-actions">
                     <n-button @click="form.visible = false">取消</n-button>
-                    <n-button type="primary" :loading="form.loading" @click="submit">保存</n-button>
+                    <n-button type="primary" :loading="form.loading" @click="submit">保存并应用</n-button>
                 </div>
             </template>
         </n-modal>
 
-        <n-modal v-model:show="config.visible" preset="card" title="frpc.ini 配置原文" style="width: 780px">
+        <!-- 配置原文 -->
+        <n-modal v-model:show="config.visible" preset="card" title="frpc.ini 配置原文"
+            style="width: 780px; max-width: calc(100vw - 24px)">
             <div class="config-meta mono">
                 <span>{{ runtime.configPath }}</span>
                 <span>宿主机 {{ runtime.hostPath }}</span>
             </div>
-            <n-input v-model:value="config.content" type="textarea" :rows="22" class="config-editor" />
+            <n-input v-model:value="config.content" type="textarea" :rows="20" class="config-editor" />
             <template #footer>
-                <div class="modal-footer">
-                    <span class="config-hint">保存前自动校验语法，并把上一版备份为 {{ runtime.configPath }}.bak</span>
+                <div class="modal-actions">
                     <n-button @click="config.visible = false">关闭</n-button>
                     <n-button type="primary" :loading="config.loading" @click="saveConfig">保存并热加载</n-button>
                 </div>
             </template>
         </n-modal>
-    </div>
+    </ManagementShell>
 </template>
 
 <script>
-import {
-    NAlert,
-    NButton,
-    NCheckbox,
-    NDataTable,
-    NForm,
-    NFormItem,
-    NInput,
-    NInputNumber,
-    NModal,
-    NSelect,
-    NSpace,
-    NSwitch
-} from 'naive-ui'
-import { h } from 'vue'
+import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NSwitch } from 'naive-ui'
+import ManagementShell from '@/components/main/management-shell.vue'
 import http from '@/libs/http'
 
 export default {
-    components: { NAlert, NButton, NCheckbox, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch },
     name: 'FrpManagement',
+    components: { ManagementShell, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NSwitch },
     data() {
         return {
             loading: false,
             reloading: false,
             restarting: false,
+            toggling: '',
             keyword: '',
+            tunnelsError: '',
             items: [],
             runtime: {
-                total: 0,
-                enabled: 0,
-                disabled: 0,
-                running: 0,
-                error: 0,
-                container: 'frpc',
-                containerRunning: false,
-                containerStatus: '',
-                configPath: '/etc/frp/frpc.ini',
-                hostPath: '',
-                configSharedWithFrpc: null,
-                message: ''
+                total: 0, enabled: 0, disabled: 0, running: 0, error: 0,
+                container: 'frpc', containerRunning: false, containerStatus: '',
+                configPath: '/etc/frp/frpc.ini', hostPath: '', configSharedWithFrpc: null, message: ''
             },
             typeOptions: [
                 { label: 'TCP', value: 'tcp' },
@@ -199,17 +192,8 @@ export default {
                 { label: 'HTTP', value: 'http' },
                 { label: 'HTTPS', value: 'https' }
             ],
-            form: {
-                visible: false,
-                editing: false,
-                loading: false,
-                data: this.emptyForm()
-            },
-            config: {
-                visible: false,
-                loading: false,
-                content: ''
-            },
+            form: { visible: false, editing: false, loading: false, data: this.emptyForm() },
+            config: { visible: false, loading: false, content: '' },
             rules: {
                 name: { required: true, message: '请填写隧道名称', trigger: ['input', 'blur'] },
                 localPort: { type: 'number', required: true, message: '请填写本地端口', trigger: ['blur', 'change'] }
@@ -217,6 +201,21 @@ export default {
         }
     },
     computed: {
+        known() {
+            return !this.tunnelsError && !this.loading
+        },
+        runningCount() {
+            return this.items.filter((row) => row.enabled && row.status === 'running').length
+        },
+        disabledCount() {
+            return this.items.filter((row) => !row.enabled).length
+        },
+        statusText() {
+            if (this.loading) return '正在连接'
+            if (this.tunnelsError) return '连接异常'
+            if (this.runtime.containerRunning) return '运行中'
+            return '未运行'
+        },
         isPortType() {
             return this.form.data.proxyType === 'tcp' || this.form.data.proxyType === 'udp'
         },
@@ -228,81 +227,6 @@ export default {
                     .join(' ').toLowerCase()
                 return text.includes(keyword)
             })
-        },
-        columns() {
-            return [
-                {
-                    title: '状态',
-                    key: 'status',
-                    width: 96,
-                    render: (row) => {
-                        const meta = this.statusMeta(row)
-                        return h('span', { class: ['pill', meta.cls] }, [
-                            h('span', { class: 'dot' }),
-                            meta.text
-                        ])
-                    }
-                },
-                { title: '隧道名称', key: 'name', minWidth: 130 },
-                {
-                    title: '类型',
-                    key: 'proxyType',
-                    width: 76,
-                    render: (row) => h('span', { class: 'mono' }, String(row.proxyType).toUpperCase())
-                },
-                {
-                    title: '本地监听',
-                    key: 'localAddress',
-                    minWidth: 165,
-                    render: (row) => h('div', { class: 'cell-stack' }, [
-                        h('span', { class: 'mono strong' }, row.localAddress || '-'),
-                        row.probe ? h('span', {
-                            class: ['probe', row.probe === 'alive' ? 'ok' : 'bad']
-                        }, row.probeText) : null
-                    ])
-                },
-                {
-                    title: '远程端口',
-                    key: 'remoteAddress',
-                    minWidth: 140,
-                    render: (row) => h('div', { class: 'cell-stack' }, [
-                        h('span', { class: 'mono strong' }, row.remotePort ? String(row.remotePort) : '-'),
-                        row.customDomains ? h('span', { class: 'probe' }, row.customDomains) : null,
-                        row.subdomain ? h('span', { class: 'probe' }, 'subdomain: ' + row.subdomain) : null
-                    ])
-                },
-                {
-                    title: '备注',
-                    key: 'remark',
-                    minWidth: 110,
-                    render: (row) => h('span', { class: 'remark' }, row.remark || '-')
-                },
-                {
-                    title: '操作',
-                    key: 'actions',
-                    width: 150,
-                    render: (row) => h('div', { class: 'op-actions' }, [
-                        h('i', {
-                            class: 'fa-solid fa-pen-to-square op-icon',
-                            style: { color: 'var(--accent-2)' },
-                            title: '编辑',
-                            onClick: () => this.openForm(row)
-                        }),
-                        h('i', {
-                            class: row.enabled ? 'fa-solid fa-toggle-on op-icon' : 'fa-solid fa-toggle-off op-icon',
-                            style: { color: row.enabled ? 'var(--ok)' : 'var(--text-3)', fontSize: '17px' },
-                            title: row.enabled ? '停用' : '启用',
-                            onClick: () => this.toggle(row)
-                        }),
-                        h('i', {
-                            class: 'fa-solid fa-trash op-icon',
-                            style: { color: 'var(--danger)' },
-                            title: '删除',
-                            onClick: () => this.remove(row)
-                        })
-                    ])
-                }
-            ]
         }
     },
     mounted() {
@@ -311,28 +235,20 @@ export default {
     methods: {
         emptyForm() {
             return {
-                name: '',
-                proxyType: 'tcp',
-                localIp: '127.0.0.1',
-                localPort: null,
-                remotePort: null,
-                customDomains: '',
-                subdomain: '',
-                remark: '',
-                encryption: false,
-                compression: false,
-                enabled: true
+                name: '', proxyType: 'tcp', localIp: '127.0.0.1', localPort: null, remotePort: null,
+                customDomains: '', subdomain: '', remark: '', encryption: false, compression: false, enabled: true
             }
         },
         statusMeta(row) {
-            if (!row.enabled) return { text: '已停用', cls: 'off' }
-            if (row.status === 'running') return { text: '运行中', cls: 'ok' }
+            if (!row.enabled) return { text: '已停用', cls: 'muted' }
+            if (row.status === 'running') return { text: '运行中', cls: '' }
             if (row.failed) return { text: '异常', cls: 'danger' }
-            if (!row.status) return { text: '未知', cls: 'warn' }
-            return { text: row.statusText || '未知', cls: 'warn' }
+            if (!row.status) return { text: '未知', cls: 'amber' }
+            return { text: row.statusText || '未知', cls: 'amber' }
         },
         async load() {
             this.loading = true
+            this.tunnelsError = ''
             try {
                 const [items, runtime] = await Promise.all([
                     http.get('/frp/tunnels'),
@@ -341,7 +257,7 @@ export default {
                 this.items = items || []
                 this.runtime = Object.assign(this.runtime, runtime || {})
             } catch (error) {
-                // 拦截器已提示
+                this.tunnelsError = '暂时无法连接 Frp，点击右上角刷新重试。'
             } finally {
                 this.loading = false
             }
@@ -386,12 +302,15 @@ export default {
             })
         },
         async toggle(row) {
+            this.toggling = row.name
             try {
                 await http.post('/frp/tunnels/' + encodeURIComponent(row.name) + '/toggle?enabled=' + !row.enabled)
                 this.$message.success(row.enabled ? '已停用并热加载' : '已启用并热加载')
-                this.load()
+                await this.load()
             } catch (error) {
                 // 拦截器已提示
+            } finally {
+                this.toggling = ''
             }
         },
         remove(row) {
@@ -440,8 +359,8 @@ export default {
                 onPositiveClick: async () => {
                     this.restarting = true
                     try {
-                        const data = await http.post('/frp/restart')
-                        this.$message.success('已重启 ' + ((data && data.container) || 'frpc'))
+                        await http.post('/frp/restart')
+                        this.$message.success('已重启 ' + (this.runtime.container || 'frpc'))
                         setTimeout(() => this.load(), 1200)
                     } catch (error) {
                         // 拦截器已提示
@@ -486,164 +405,148 @@ export default {
 </script>
 
 <style scoped>
-.table-wrap {
-    padding: 12px 14px 14px;
+.action-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
 }
 
-.toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+.action-row .n-button {
+    flex: 1;
+    height: 40px;
+    border-radius: 13px;
+}
+
+.search-box {
     margin-bottom: 12px;
 }
 
-.toolbar-title {
-    font-size: 14px;
+/* 隧道卡（对齐安卓 TunnelCard） */
+.tunnel-card {
+    padding: 14px 16px;
+}
+
+.tunnel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tunnel-glyph {
+    color: var(--pine);
+    font-size: 17px;
+}
+
+.tunnel-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 15px;
     font-weight: 600;
-    display: inline-flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.path-hint {
-    font-weight: 400;
-    font-size: 11.5px;
-}
-
-.toolbar-actions {
+.tunnel-route {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: var(--paper);
 }
 
-.notice {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    margin-bottom: 14px;
-    font-size: 13px;
-    color: var(--warn);
-}
-
-.notice-danger {
-    color: var(--danger);
-    border-color: var(--danger);
-}
-
-.cell-stack {
+.route-side {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
 }
 
-.mono.strong {
-    color: var(--text-1);
+.route-side.end {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.route-side span {
+    font-size: 10px;
+    color: var(--muted);
+}
+
+.route-side strong {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+
+.route-arrow {
+    flex: none;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.tunnel-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.tunnel-remark {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.chip {
+    padding: 7px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.chip.active {
+    border-color: var(--pine);
+    background: var(--soft-green);
+    color: var(--pine);
     font-weight: 600;
 }
 
-.probe {
-    font-size: 11px;
-    color: var(--text-3);
-}
-
-.probe.ok {
-    color: var(--ok);
-}
-
-.probe.bad {
-    color: var(--danger);
-}
-
-.remark {
-    font-size: 12px;
-    color: var(--text-3);
-}
-
-.modal-footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
+.pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
 }
 
 .config-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 14px;
-    margin-bottom: 8px;
+    gap: 8px 16px;
+    margin-bottom: 10px;
+    font-size: 11.5px;
 }
 
-.config-hint {
-    margin-right: auto;
-    font-size: 12px;
-    color: var(--text-3);
-}
-
-.op-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.op-icon {
-    font-size: 14px;
-    cursor: pointer;
-    opacity: .85;
-    transition: opacity .15s ease, transform .15s ease;
-}
-
-.op-icon:hover {
-    opacity: 1;
-    transform: scale(1.15);
-}
-
-.config-editor :deep(textarea) {
-    font-family: Consolas, "Segoe UI", monospace;
-    font-size: 12.5px;
-    line-height: 1.55;
-}
-
-@media (max-width: 900px) {
-    .stat-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
-
-    .stat-card {
-        padding: 14px;
-    }
-
-    .stat-card .stat-value {
-        font-size: 22px;
-    }
-
-    .table-wrap {
-        padding: 12px;
-        border-radius: 10px;
-    }
-
-    .toolbar {
-        flex-wrap: wrap;
-        row-gap: 8px;
-    }
-
-    .toolbar-actions {
-        width: 100%;
-    }
-
-    .toolbar-actions :deep(.n-input) {
-        width: 100% !important;
-    }
-
-    .page-title {
-        font-size: 16px;
-        flex-wrap: wrap;
-        row-gap: 4px;
-        margin-bottom: 12px;
-    }
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
 }
 </style>

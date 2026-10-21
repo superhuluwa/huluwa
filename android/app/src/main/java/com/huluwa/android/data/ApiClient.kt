@@ -35,7 +35,10 @@ class ApiClient(val store: SessionStore) {
         val target = ServerAddress.endpoint(server, segments, query)
         val request = Request.Builder().url(target).header("Accept", "application/json")
         if (token.isNotBlank()) request.header("Authorization", "Bearer $token")
-        val payload = if (method in setOf("POST", "PUT", "PATCH")) (body?.toString() ?: "{}").toRequestBody("application/json; charset=utf-8".toMediaType()) else null
+        // DELETE 也可能带请求体（例如剧集管理的批量删除），所以按「是否传了 body」判断，
+        // 而不是仅凭方法名；其余不带 body 的请求保持无正文。
+        val payload = if (body != null && method in setOf("POST", "PUT", "PATCH", "DELETE"))
+            body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()) else null
         request.method(method, payload)
         val client = if (segments.takeLast(2) == listOf("images", "pull")) http.newBuilder()
             .readTimeout(16, TimeUnit.MINUTES).callTimeout(17, TimeUnit.MINUTES).build() else http

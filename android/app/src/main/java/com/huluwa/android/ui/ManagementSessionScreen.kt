@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.ManagementService
+import com.huluwa.android.data.formatBytes
 
 @Composable fun ManagementSessionScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val session = ui.chat.session ?: return
@@ -22,6 +23,8 @@ import com.huluwa.android.data.ManagementService
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
         ManagementService.AppBuild -> ui.androidBuild.tasks.loading
+        ManagementService.CheckLogs -> ui.checkLogs.loading
+        ManagementService.Library -> ui.library.scan.loading
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
@@ -64,6 +67,15 @@ import com.huluwa.android.data.ManagementService
                             "构建服务：${if (status.enabled) "已启用" else "未启用"}\n构建容器：${if (status.workerOnline) "在线" else "离线"}" +
                                 "\n签名配置：${if (status.signingReady) "已配置" else "未配置"}\n分支：${status.branch}"
                         } }) { Icon(Icons.Outlined.Dns, "构建宿主信息") }
+                        ManagementService.CheckLogs -> IconButton(vm::clearCheckLogs, enabled = ui.checkLogs.data.isNotEmpty() && ui.busy == null) {
+                            Icon(Icons.Outlined.DeleteSweep, "清空巡检记录")
+                        }
+                        ManagementService.Library -> IconButton({ vm.loadText("下载目录") {
+                            val scan = vm.state.value.library.scan.data
+                            "剧集目录：${scan.mediaRoot.ifBlank { "尚未扫描" }}\n可写：${if (scan.writable) "是" else "否"}" +
+                                "\n视频文件：${scan.entries.size} 个\n占用空间：${formatBytes(scan.totalBytes.toDouble())}" +
+                                "\n上次扫描：${scan.scannedAt.ifBlank { "—" }}"
+                        } }) { Icon(Icons.Outlined.Info, "下载目录信息") }
                     }
                 }
             }
@@ -75,6 +87,8 @@ import com.huluwa.android.data.ManagementService
                     ManagementService.Frp -> FrpScreen(ui, vm)
                     ManagementService.Docker -> DockerScreen(ui, vm)
                     ManagementService.AppBuild -> AppBuildScreen(ui, vm, snackbar)
+                    ManagementService.CheckLogs -> CheckLogsScreen(ui, vm)
+                    ManagementService.Library -> LibraryScreen(ui, vm)
                 }
                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }

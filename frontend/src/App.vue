@@ -5,7 +5,7 @@
             <n-dialog-provider>
                 <n-notification-provider>
                     <n-loading-bar-provider>
-                        <div id="app-root" class="grid-bg" :class="{ 'is-fullscreen-page': fullscreen }">
+                        <div id="app-root">
                             <router-view />
                         </div>
                     </n-loading-bar-provider>
@@ -25,11 +25,7 @@ import {
 } from 'naive-ui'
 import { zhCN, dateZhCN } from 'naive-ui'
 import { theme, themeOverrides } from '@/theme/naive'
-import { useFullscreenPage } from '@/composables/useFullscreenPage'
 import './libs/discrete'
-
-// 全屏沉浸页面（手机端会话页）：去掉背景网格与四周内边距，让界面真正铺满整屏
-const fullscreen = useFullscreenPage()
 </script>
 
 <style>
@@ -46,24 +42,14 @@ body,
 html,
 body {
     overflow: hidden;
-    background: var(--bg);
+    background: var(--frame-outside);
     color: var(--text);
-    font-family: "Segoe UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", "Noto Sans SC", sans-serif;
 }
 
 #app-root {
     position: relative;
     overflow: hidden;
-}
-
-#app-root > * {
-    position: relative;
-    z-index: 1;
-}
-
-/* 全屏沉浸页面：背景网格会让聊天列表显得花，整屏页面直接铺纯色背景 */
-#app-root.is-fullscreen-page.grid-bg::before {
-    display: none;
 }
 
 .app-provider,

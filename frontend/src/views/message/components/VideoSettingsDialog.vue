@@ -261,7 +261,7 @@ export default {
     padding: 10px;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: rgba(148, 163, 184, .05);
+    background: rgba(36, 61, 50, .04);
 }
 
 .parsed-cover {
@@ -270,7 +270,7 @@ export default {
     flex: none;
     border-radius: 8px;
     object-fit: cover;
-    background: rgba(148, 163, 184, .1);
+    background: rgba(36, 61, 50, .08);
 }
 
 .parsed-body {

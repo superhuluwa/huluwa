@@ -288,7 +288,7 @@ export default {
     padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: 8px;
-    background: rgba(148, 163, 184, .04);
+    background: rgba(36, 61, 50, .03);
 }
 
 .mm-row-head,
@@ -336,7 +336,7 @@ export default {
 }
 
 .mm-quality.qother {
-    background: rgba(148, 163, 184, .12);
+    background: rgba(36, 61, 50, .09);
     color: var(--text-2);
 }
 

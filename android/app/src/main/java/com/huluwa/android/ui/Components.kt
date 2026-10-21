@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -57,6 +58,8 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "frp" -> Icons.Outlined.AccountTree
     "docker" -> Icons.Outlined.DirectionsBoat
     "android-build" -> Icons.Outlined.Android
+    "check-logs" -> Icons.AutoMirrored.Outlined.ListAlt
+    "library" -> Icons.Outlined.VideoLibrary
     "system" -> Icons.Outlined.NotificationsNone
     else -> Icons.AutoMirrored.Outlined.Chat
 }
@@ -65,6 +68,8 @@ fun sessionColor(kind: String): Color = when (kind) {
     "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber
+    "check-logs" -> Color(0xFF6E8A4E)
+    "library" -> Color(0xFF4E7C6A)
     else -> HuluwaColors.Pine
 }
 

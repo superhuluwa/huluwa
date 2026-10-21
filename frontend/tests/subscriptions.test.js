@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import Subscriptions from '@/views/movie/subscriptions.vue'
+import Subscriptions from '@/views/subscriptions/index.vue'
 import * as chatApi from '@/api/chat'
 import * as hlsApi from '@/api/hls'
 
@@ -10,7 +10,7 @@ vi.stubGlobal('window', { $dialog: null, $message: { success: vi.fn() } })
 
 vi.mock('@/api/chat', () => ({
     GetSubscriptions: vi.fn(), CheckSubscription: vi.fn(), DeleteSubscription: vi.fn(),
-    SubscriptionMagnets: vi.fn(), DownloadMagnet: vi.fn()
+    SubscriptionMagnets: vi.fn(), DownloadMagnet: vi.fn(), SubscribeMovie: vi.fn()
 }))
 
 vi.mock('@/api/hls', () => ({
@@ -20,9 +20,10 @@ vi.mock('@/api/hls', () => ({
 
 /** 只取订阅页需要的方法与数据，不挂载组件：验证「状态徽标即删除入口」的交互契约。 */
 function page(dialog) {
-    const vm = { ...Subscriptions.data(), ...Subscriptions.methods, reload: vi.fn() }
-    vm.isHls = Subscriptions.methods.isHls.bind(vm)
-    window.$dialog = dialog
+    const vm = { ...Subscriptions.data(), $dialog: dialog, $message: { success: vi.fn(), warning: vi.fn() } }
+    for (const [name, method] of Object.entries(Subscriptions.methods)) vm[name] = method.bind(vm)
+    // 刷新走网络接口，这里只验证「删除后确实触发刷新」
+    vm.reload = vi.fn()
     return vm
 }
 
@@ -34,8 +35,8 @@ function dialogStub() {
     }
 }
 
-const movieItem = { id: 7, enabled: true, source: 'dygangs', subscriptionKey: 'dygangs:7', title: '电影港剧集' }
-const hlsItem = { id: 9, enabled: true, source: 'dytt', subscriptionKey: 'dytt:9', title: '电影天堂剧集' }
+const movieItem = { id: 7, enabled: true, source: 'dygangs', sourceType: 'movie', subscriptionKey: 'dygangs:7', title: '电影港剧集', raw: {} }
+const hlsItem = { id: 9, enabled: true, source: 'dytt', sourceType: 'hls', subscriptionKey: 'dytt:9', title: '电影天堂剧集', raw: {} }
 
 beforeEach(() => {
     vi.resetAllMocks()
@@ -59,9 +60,7 @@ describe('我的订阅：状态徽标即删除入口', () => {
         expect(vm.reload).toHaveBeenCalled()
         expect(vm.deleting).toBe('')
 
-        // 取消订阅即删除，不再走「仅停用、保留基线」与「单独删除按钮」的旧路径
-        expect(Subscriptions.methods.unsubscribe).toBeUndefined()
-        expect(Subscriptions.methods.remove).toBeUndefined()
+        // 取消订阅即删除，不再走「仅停用、保留基线」的旧路径
         expect(hlsApi.EnableHlsSubscription).not.toHaveBeenCalled()
     })
 

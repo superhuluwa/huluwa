@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import {
-    GetSessions,
     SessionMessages,
     SendMessage,
     MarkSessionRead,
@@ -10,10 +9,12 @@ import chatSocket from '@/libs/ws'
 import outbox from '@/libs/chatOutbox'
 import { message as toast, notification } from '@/libs/discrete'
 import { useMovieSearchWatchStore } from '@/stores/movieSearchWatch'
+import { loadSessions, isLocalSession } from '@/utils/localSessions'
 
 /**
  * 消息中心会话状态层：
- *  - 会话列表与消息流都由后端持库，本 store 只做「拉取 + 合并 + 乐观追加」；
+ *  - 会话列表 = 服务端聊天会话 + 客户端本地会话（Frp / Docker / App 构建 / 在线升级 / 巡检记录 / 剧集管理，
+ *    由 utils/localSessions 聚合接口摘要，行为对齐安卓 withAppSessions）；消息流仍完全由后端持库；
  *  - 发送走 WebSocket（chat.send，requestId 幂等）：本地立即插入 pending 气泡 →
  *    服务端毫秒级回 chat.ack（落库行收编 pending、转圈消失）→ chat.processing 显示 typing →
  *    后台搜索 / 提交 / 解析完成后 chat.messages 推送机器人回复。WS 断开时 HTTP 兜底发送，
@@ -88,6 +89,8 @@ export const useChatStore = defineStore('chat', {
         currentKey: '',
         messagesBySession: {},
         loadingSessions: false,
+        /** 会话列表加载错误（服务端会话拉取失败时展示，本地会话失败只影响各自摘要） */
+        sessionsError: '',
         loadingMessages: false,
         loadingEarlier: false,
         hasMoreBySession: {},
@@ -126,14 +129,23 @@ export const useChatStore = defineStore('chat', {
         isVideo(state) {
             const session = state.sessions.find((item) => item.id === state.currentKey)
             return !!session && session.kind === 'video'
+        },
+        /** 当前会话是否为客户端本地会话（Frp / Docker / App 构建 / 在线升级 / 巡检记录 / 剧集管理） */
+        currentLocal(state) {
+            return isLocalSession(state.sessions.find((item) => item.id === state.currentKey))
         }
     },
     actions: {
+        /** 会话列表 = 服务端聊天会话 + 本地会话（摘要由 utils/localSessions 聚合，与安卓一致） */
         async refreshSessions() {
             this.loadingSessions = true
             try {
-                const list = await GetSessions()
-                this.sessions = sortSessions(list)
+                this.sessions = sortSessions(await loadSessions())
+                this.sessionsError = ''
+            } catch (error) {
+                // 列表拉取失败：保留上一次的会话，页面给出可重试提示（与安卓 LoadState.error 一致）
+                this.sessionsError = '会话列表加载失败，请点击刷新重试。'
+                throw error
             } finally {
                 this.loadingSessions = false
             }
@@ -144,6 +156,10 @@ export const useChatStore = defineStore('chat', {
             const key = sessionId || this.sessions[0]?.id || ''
             this.currentKey = key
             if (!key) {
+                return
+            }
+            // 本地会话没有消息流，不请求消息接口、也不标记已读
+            if (isLocalSession(this.sessions.find((item) => item.id === key))) {
                 return
             }
             if (key === 'movie') useMovieSearchWatchStore().refresh().catch(() => {})
@@ -428,9 +444,13 @@ export const useChatStore = defineStore('chat', {
         },
 
         handleSessions(frame) {
-            if (Array.isArray(frame.sessions)) {
-                this.sessions = sortSessions(frame.sessions)
+            if (!Array.isArray(frame.sessions)) {
+                return
             }
+            // WS 推送只含服务端聊天会话：保留本地会话行，其余按推送替换，
+            // 避免每次实时帧都把 Frp / Docker / 构建等系统会话冲掉。
+            const locals = this.sessions.filter((item) => isLocalSession(item))
+            this.sessions = sortSessions(frame.sessions.concat(locals))
         },
 
         setTyping(key, requestId) {

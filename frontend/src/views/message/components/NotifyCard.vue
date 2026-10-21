@@ -79,7 +79,7 @@ export default {
     max-width: 86%;
     max-width: min(86%, 720px);
     border-radius: 16px;
-    background: var(--bubble-bot, #1E293B);
+    background: var(--bubble-bot, #FFFFFF);
     border: 1px solid var(--line-2);
     padding: 12px;
     cursor: default;

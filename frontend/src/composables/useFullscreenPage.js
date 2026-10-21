@@ -1,11 +1,10 @@
 import { ref } from 'vue'
 
 /**
- * 会话内容铺满可用空间的全局标记。
+ * 全屏页面标记：进入会话 / 管理会话时整屏展示（隐藏标题栏与底部导航）。
  *
- * 手机端会话页在公共控制台顶栏下铺满剩余空间（默认隐藏侧栏、无外层留白），
- * 该状态由路由守卫在导航前写入，主框架保留公共顶栏，页面本身负责内容区全高布局。
- * 之所以放在模块级 ref 而不是 store：只有守卫与主框架两个使用方，且不参与持久化。
+ * 与旧实现相同，保留模块级 ref：路由守卫在导航落地前写入，主框架据此收起外壳，
+ * 避免先按带标签栏的布局绘制一帧再被覆盖（会看到一次闪动）。
  */
 const fullscreen = ref(false)
 
@@ -21,12 +20,12 @@ export function useFullscreenPage() {
     return fullscreen
 }
 
+/** 旧组件直接调用 `useFullscreenPage()` 当 ref 用；这里仍返回只读 ref，写入统一走 setFullscreenPage */
+export const useFullscreen = useFullscreenPage
+
 /**
- * 全屏沉浸页面打开「控制台菜单」的通道。
- *
- * 手机端会话页铺满整屏、主框架侧栏不渲染，但用户仍需要能切到 Docker / 首页等模块。
- * 主框架挂载时注册回调，页面里的菜单按钮调用 requestShellDrawer() 即可拉出同款抽屉，
- * 不必为全屏页面复制一套导航。
+ * 兼容旧页面（如历史消息中心）的「打开控制台菜单」通道。
+ * 新外壳使用底部标签导航，不再需要抽屉；保留空实现避免旧代码报错。
  */
 let shellDrawerHandler = null
 
