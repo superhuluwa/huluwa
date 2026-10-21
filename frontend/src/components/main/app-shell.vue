@@ -3,8 +3,9 @@
         <!-- 居中手机宽度：桌面浏览器里像原生 App 一样一列居中；手机上铺满 -->
         <div class="app-frame">
             <template v-if="!chatOpen">
-                <!-- 标题栏：与安卓 PageHeader 一致（26sp 加粗标题、左对齐、右侧动作位） -->
-                <header class="page-header" :class="{ 'is-sessions': tab.isSessionTab }">
+                <!-- 标题栏已隐藏：底部标签已经标明当前页面，顶部再显示一行「功能 / 系统 / 下载 / 我的」
+                     会与页面内的列表标题重复。加载中的菊花与「我的」头像浮在内容右上角。 -->
+                <header class="page-header" :class="{ 'is-sessions': tab.isSessionTab, 'is-hidden': hidePageTitle }">
                     <h1 class="page-title">{{ tab.title }}</h1>
                     <div class="header-action">
                         <button v-if="tab.key === 'mine'" class="account-chip" type="button" title="连接配置"
@@ -48,9 +49,12 @@
 
 <script>
 /**
- * 网页端主框架：与安卓 HuluwaRoot 对齐的「标题栏 + 内容 + 底部四标签」结构。
+ * 网页端主框架：与安卓 HuluwaRoot 对齐的「内容 + 底部四标签」结构。
  *
  * - 标签固定为：功能 → 系统 → 下载 → 我的；「订阅」已迁入系统会话「我的订阅」；
+ * - 网页端不显示顶部的「功能 / 系统 / 下载 / 我的」大标题行：底部标签已标明当前页面，
+ *   重复一行标题纯属冗余。标题栏改为不占高度的浮动操作区，只留加载菊花与「我的」头像；
+ *   安卓端 PageHeader 不受影响；
  * - 会话详情（含 Frp / Docker / App 构建 / 我的订阅等管理会话）进入后用自己的返回键回到列表，
  *   路由上仍落在对应标签内（?session= 区分具体会话）；
  * - 桌面浏览器把内容限制在 660px 居中列，观感同手机 App；
@@ -98,6 +102,14 @@ export default {
         /** 是否处于会话详情 / 管理会话（整屏接管，隐藏标题栏与底部导航） */
         chatOpen() {
             return Boolean(this.$route.meta && this.$route.meta.chat)
+        },
+        /**
+         * 网页端隐藏主标签页的标题栏：底部标签已经标明当前页面，
+         * 顶部再显示一行「功能 / 系统 / 下载 / 我的」纯属重复。
+         * 只影响网页端，安卓端 PageHeader 保持不变。
+         */
+        hidePageTitle() {
+            return true
         },
         currentPage() {
             return this.tab.key === 'system' || this.tab.key === 'functions' ? SessionsView
@@ -200,8 +212,34 @@ export default {
     padding-top: max(15px, env(safe-area-inset-top));
 }
 
+/* 网页端隐藏标题栏：不占布局高度，仅把加载菊花 / 账户头像浮到内容右上角 */
+.page-header.is-hidden {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 15;
+    min-height: 0;
+    padding: max(10px, env(safe-area-inset-top)) 18px 0;
+    background: transparent;
+    pointer-events: none;
+}
+
+.page-header.is-hidden .page-title {
+    display: none;
+}
+
+.page-header.is-hidden .header-action {
+    margin-left: auto;
+    pointer-events: auto;
+}
+
 .page-header.is-sessions {
     background: var(--sessions-bg);
+}
+
+.page-header.is-hidden.is-sessions {
+    background: transparent;
 }
 
 .page-title {
@@ -261,6 +299,11 @@ export default {
 
 .page-body.is-sessions {
     background: var(--sessions-bg);
+}
+
+/* 标题栏隐藏后，右上角浮动的加载菊花 / 账户头像会盖住内容首行，给非会话页补一点顶部留白 */
+.page-header.is-hidden~.page-body:not(.is-sessions) {
+    padding-top: 8px;
 }
 
 /* ---------------- 底部标签栏 ---------------- */
