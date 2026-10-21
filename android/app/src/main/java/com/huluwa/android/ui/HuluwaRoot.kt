@@ -43,6 +43,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Functions -> Icons.Outlined.GridView
     MainTab.System -> Icons.Outlined.VerifiedUser
     MainTab.Downloads -> Icons.Outlined.FileDownload
+    MainTab.Ai -> Icons.Outlined.AutoAwesome
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
@@ -83,7 +84,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
                             PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
                                 onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
-                                reconnecting = reconnecting) {
+                                reconnecting = reconnecting && ui.tab != MainTab.Ai) {
                                 // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
                                 if (ui.tab.isSessionTab) TitleLoadingIndicator(!ui.sessions.loaded || ui.sessions.loading)
                             }
@@ -111,6 +112,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                                     MainTab.Functions -> SessionsScreen(ui, vm)
                                     MainTab.System -> SessionsScreen(ui, vm, system = true)
                                     MainTab.Downloads -> DownloadsScreen(ui, vm)
+                                    MainTab.Ai -> AiScreen()
                                     MainTab.Mine -> MineScreen(ui, vm)
                                 } }
                                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))

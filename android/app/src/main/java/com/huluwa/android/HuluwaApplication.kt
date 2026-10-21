@@ -7,6 +7,7 @@ class HuluwaApplication : Application() {
     val session by lazy { SessionStore(this) }
     val chatCache by lazy { ChatCache(this) }
     val repository by lazy { HuluwaRepository(ApiClient(session), chatCache) }
+    val aiRepository by lazy { AiRepository(this) }
     val appUpdates by lazy { AppUpdateManager(this, repository.api) }
     val buildDownloads by lazy { AndroidBuildDownloader(this, repository.api) }
 }
