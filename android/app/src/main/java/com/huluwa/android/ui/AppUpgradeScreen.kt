@@ -29,6 +29,7 @@ import java.time.format.DateTimeFormatter
 @Composable fun AppUpgradeScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val upgrade = ui.upgrade
     val download = upgrade.download
+    val reconnecting = rememberReconnecting(vm)
     val context = LocalContext.current
     var continueInstallation by rememberSaveable { mutableStateOf(false) }
     val installer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -83,7 +84,10 @@ import java.time.format.DateTimeFormatter
                     IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回会话") }
                     RoundIcon(Icons.Outlined.SystemUpdate, modifier = Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                        Text("在线升级", style = MaterialTheme.typography.titleMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("在线升级", style = MaterialTheme.typography.titleMedium)
+                            TitleReconnectBadge(reconnecting)
+                        }
                         Text("从你的服务器获取最新版本", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
                     IconButton(vm::checkAppUpdate, enabled = !upgrade.checking) {
@@ -130,7 +134,7 @@ import java.time.format.DateTimeFormatter
                         "服务器尚未发布安装包" else "等待连接服务器", style = MaterialTheme.typography.bodyMedium, color = HuluwaColors.Muted)
                 }
             }
-            if (upgrade.checkError != null) item {
+            if (upgrade.checkError != null && !upgrade.checkError.isServerUnreachable()) item {
                 Panel(Modifier.fillMaxWidth()) {
                     Text(upgrade.checkError, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodyMedium)
                     TextButton(vm::checkAppUpdate, enabled = !upgrade.checking) { Text("重新检查") }

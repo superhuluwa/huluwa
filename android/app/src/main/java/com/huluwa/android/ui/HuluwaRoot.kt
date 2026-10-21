@@ -47,6 +47,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
 }
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
     val ui by vm.state.collectAsStateWithLifecycle()
+    val reconnecting = rememberReconnecting(vm)
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
@@ -79,8 +80,10 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = {
                             // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
+                            // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
                             PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
-                                onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null) {
+                                onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
+                                reconnecting = reconnecting) {
                                 if (ui.tab.isSessionTab) {
                                     Box(Modifier.size(20.dp)) {
                                         if (!ui.sessions.loaded || ui.sessions.loading) HeaderLoadingIndicator()

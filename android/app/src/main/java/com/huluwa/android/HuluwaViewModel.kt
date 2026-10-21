@@ -118,6 +118,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }.stateIn(viewModelScope, SharingStarted.Eagerly,
         withAppSessions(mutable.value.copy(androidBuild = mutable.value.androidBuild.copy(download = buildDownloads.state.value)), appUpdates.state.value))
 
+    /**
+     * 服务器是否可达：由 ApiClient 在每次请求后更新（成功即在线，连接失败即离线）。
+     * 后台轮询会自动重试，界面层只把它渲染成标题栏的「重连中」徽标，不再弹错误卡片。
+     */
+    val serverReachable: StateFlow<Boolean> = repository.api.reachable
+
     /** 构建会话预览：与网页端概览一致，优先展示进行中的任务。 */
     private fun androidBuildPreview(build: AndroidBuildState): String {
         val status = build.status
@@ -167,6 +173,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 val result = repository.login(address, username.trim(), password, setup = !initialized)
                 withContext(Dispatchers.IO) { session.save(address, result.text("username", fallback = username.trim()), result.text("token")) }
+                repository.api.markReachable()
                 mutable.value = AppState(auth = AuthState(session.server, session.username, true))
                 if (foreground) startForegroundWork()
             } catch (error: CancellationException) { throw error }
@@ -183,6 +190,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (message != null) notify(message)
     }
     private fun handleError(error: Throwable) {
+        // 「连不上服务器」统一改为标题栏的「重连中」徽标提示（微信式），不再用 snackbar 反复弹；
+        // 后台轮询一直在自动重试，连接恢复后徽标会自行消失。
+        if (error.userMessage().isServerUnreachable()) return
         if (error is ApiException && error.code == 401) logout("登录已过期，请重新登录") else notify(error.userMessage())
     }
     fun setForeground(active: Boolean) {

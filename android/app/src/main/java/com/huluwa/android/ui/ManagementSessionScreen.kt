@@ -19,6 +19,7 @@ import com.huluwa.android.data.formatBytes
 @Composable fun ManagementSessionScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val session = ui.chat.session ?: return
     val service = session.managementService ?: return
+    val reconnecting = rememberReconnecting(vm)
     val loading = when (service) {
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
@@ -39,7 +40,10 @@ import com.huluwa.android.data.formatBytes
                     IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回会话") }
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                        Text(service.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(service.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TitleReconnectBadge(reconnecting)
+                        }
                         Text(service.subtitle, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }

@@ -51,7 +51,7 @@ import com.huluwa.android.data.*
             }
         }
         item {
-            Feedback(tunnels.loading, tunnels.error, { vm.refreshFrp() })
+            Feedback(tunnels.loading, tunnels.error.takeUnless { it.isServerUnreachable() }, { vm.refreshFrp() })
             if (known && ui.runtime.message.isNotBlank()) Text(ui.runtime.message, style = MaterialTheme.typography.bodySmall,
                 color = HuluwaColors.Muted, modifier = Modifier.padding(bottom = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

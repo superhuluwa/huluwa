@@ -28,6 +28,7 @@ import com.huluwa.android.data.*
 
 @Composable fun ChatScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val chat = ui.chat; val session = chat.session ?: return
+    val reconnecting = rememberReconnecting(vm)
     val list = rememberLazyListState()
     var content by rememberSaveable(session.id) { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
@@ -46,7 +47,10 @@ import com.huluwa.android.data.*
                     IconButton(vm::closeChat) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回会话") }
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                        Text(session.title, style = MaterialTheme.typography.titleMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            TitleReconnectBadge(reconnecting)
+                        }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
                     IconButton({ vm.refreshChat() }) { Icon(Icons.Outlined.Refresh, "刷新会话") }
@@ -75,7 +79,7 @@ import com.huluwa.android.data.*
         }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), state = list, contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
             item("history") {
-                Feedback(chat.loading, chat.error, { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
+                Feedback(chat.loading, chat.error.takeUnless { it.isServerUnreachable() }, { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
                 if (chat.hasEarlier) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }

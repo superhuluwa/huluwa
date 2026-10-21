@@ -24,6 +24,7 @@ import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.LibraryEntry
 import com.huluwa.android.data.formatBytes
+import com.huluwa.android.data.isServerUnreachable
 
 /**
  * 剧集管理（系统会话，网页端「剧集管理」的原生版本）：
@@ -79,7 +80,7 @@ import com.huluwa.android.data.formatBytes
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Feedback(scanState.loading, scanState.error, { vm.refreshLibrary() })
+            Feedback(scanState.loading, scanState.error.takeUnless { it.isServerUnreachable() }, { vm.refreshLibrary() })
         }
         if (scan.entries.isEmpty() && scanState.loaded) item {
             EmptyContent("下载目录里还没有可管理的剧集", "支持 MP4、MKV、AVI、TS 等常见格式；隐藏目录会被跳过", Icons.Outlined.FolderOpen)

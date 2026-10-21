@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
 
@@ -31,7 +32,7 @@ import com.huluwa.android.*
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(when (sheet) {
+                val title = when (sheet) {
                     AppSheet.Account -> "连接配置"
                     AppSheet.NewDownload -> "新建下载"
                     is AppSheet.TunnelEdit -> if (sheet.tunnel == null) "新增隧道" else "编辑隧道"
@@ -42,11 +43,16 @@ import com.huluwa.android.*
                     is AppSheet.ContainerDetail -> sheet.container.name
                     is AppSheet.CreateResource -> if (sheet.section == com.huluwa.android.data.DockerSection.Images) "拉取镜像" else "新增${sheet.section.title}"
                     else -> "操作"
-                }, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                }
+                // 弹层标题右侧同样显示「重连中」，与各页面标题行保持一致。
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TitleReconnectBadge(rememberReconnecting(vm))
+                }
                 IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭弹层") }
             }
             if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth())
-            ui.actionError?.let { Text(it, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
+            ui.actionError?.takeUnless { it.isServerUnreachable() }?.let { Text(it, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
             when (sheet) {
                 AppSheet.Account -> AccountSheet(ui, vm)
                 AppSheet.NewDownload -> NewDownloadSheet(ui.busy != null, vm)

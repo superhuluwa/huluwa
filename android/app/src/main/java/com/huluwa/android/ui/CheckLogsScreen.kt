@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.CheckLog
+import com.huluwa.android.data.isServerUnreachable
 
 /**
  * 巡检记录（系统会话，网页端「巡检记录」的原生版本）：
@@ -47,7 +48,7 @@ import com.huluwa.android.data.CheckLog
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Feedback(logs.loading, logs.error, { vm.refreshCheckLogs() })
+            Feedback(logs.loading, logs.error.takeUnless { it.isServerUnreachable() }, { vm.refreshCheckLogs() })
         }
         if (rows.isEmpty() && logs.loaded) item {
             EmptyContent("还没有巡检记录", "添加订阅后，每个巡检周期都会在这里留一条结果", Icons.AutoMirrored.Outlined.ListAlt)

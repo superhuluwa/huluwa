@@ -25,7 +25,7 @@ import com.huluwa.android.data.*
     val rows = state.data
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (state.error != null) item {
+        if (state.error != null && !state.error.isServerUnreachable()) item {
             Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
         }
         if (rows.isEmpty()) item {

@@ -71,7 +71,7 @@ import java.util.Locale
                 if (section != DockerSection.Containers) IconButton({ vm.showSheet(AppSheet.CreateResource(section)) }, enabled = enabled) { Icon(Icons.Outlined.Add, if (section == DockerSection.Images) "拉取镜像" else "新增${section.title}") }
             }
             Feedback(if (section == DockerSection.Containers) ui.containers.loading else resourceState.loading,
-                if (section == DockerSection.Containers) ui.containers.error else resourceState.error,
+                (if (section == DockerSection.Containers) ui.containers.error else resourceState.error).takeUnless { it.isServerUnreachable() },
                 { if (section == DockerSection.Containers) vm.refreshDocker() else vm.refreshResources() })
         }
         if (section == DockerSection.Containers) {

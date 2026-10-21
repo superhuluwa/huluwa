@@ -63,7 +63,8 @@ import com.huluwa.android.data.*
                     }
                 }
             }
-            Feedback(ui.downloads.loading, ui.downloads.error, { vm.refreshDownloads() })
+            // 连不上服务器时统一显示标题栏的「重连中」徽标，列表里不再叠一张错误卡片。
+            Feedback(ui.downloads.loading, ui.downloads.error.takeUnless { it.isServerUnreachable() }, { vm.refreshDownloads() })
         }
         if (tasks.isEmpty()) item {
             DownloadEmptyState(if (all.isEmpty()) "这里还没有下载任务" else "当前筛选下暂无任务",

@@ -1,11 +1,16 @@
 package com.huluwa.android.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -41,7 +46,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.R
 import com.huluwa.android.data.*
 import java.time.LocalDate
@@ -111,8 +118,11 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
  * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；标题左对齐。
  *
  * onTap 用于隐藏手势入口：关闭水波纹与焦点反馈，点击后外观和操作都与普通标题无异。
+ * reconnecting 为 true 时在标题文字右侧显示「菊花 + 重连中」，对应后台轮询失败、
+ * 服务器暂时连不上的状态；连接恢复后由调用方置回 false，徽标自动淡出。
  */
-@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onTap: (() -> Unit)? = null, action: @Composable () -> Unit = {}) {
+@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onTap: (() -> Unit)? = null,
+    reconnecting: Boolean = false, action: @Composable () -> Unit = {}) {
     val tapModifier = if (onTap != null) Modifier.clickable(
         interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap,
     ) else Modifier
@@ -122,21 +132,57 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
             .heightIn(min = 63.dp).padding(start = 22.dp, end = 22.dp, top = 15.dp, bottom = 16.dp).then(tapModifier),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
-        Text(title, Modifier.weight(1f), color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
+        // 标题与重连徽标同属左侧一组，徽标紧贴标题文字右侧，不再占据右侧操作区。
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
+            Text(title, color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            TitleReconnectBadge(reconnecting)
+        }
         action()
     }
 }
-/** 标题右侧的小菊花加载图标，逐瓣轮转亮度。 */
-@Composable fun HeaderLoadingIndicator(modifier: Modifier = Modifier) {
+/**
+ * 标题右侧的「重连中」徽标：连不上服务器时淡入并横向展开，连接恢复后淡出收起。
+ * 所有页面（主标签、二级页、底部弹层）的标题行都调用它，保证同一套提示逻辑。
+ */
+@Composable fun TitleReconnectBadge(reconnecting: Boolean) {
+    AnimatedVisibility(reconnecting, enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
+        exit = fadeOut(tween(260)) + shrinkHorizontally(tween(260)), label = "重连提示") {
+        ReconnectingBadge()
+    }
+}
+/** 订阅服务器可达性，返回「是否正在重连」，供各页面标题行直接使用。 */
+@Composable fun rememberReconnecting(vm: HuluwaViewModel): Boolean {
+    val reachable by vm.serverReachable.collectAsStateWithLifecycle()
+    return !reachable
+}
+/** 微信式的「重连中」提示：红色小菊花持续转动 + 红色文字，服务器恢复后随父级淡出。 */
+@Composable fun ReconnectingBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier.semantics { contentDescription = "正在重新连接服务器" },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        ReconnectSpinner(HuluwaColors.Danger, Modifier.size(15.dp))
+        Text("重连中", color = HuluwaColors.Danger, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+/**
+ * 标题右侧的小菊花加载图标，逐瓣轮转亮度。
+ *
+ * 默认用次要文字色；重连徽标传入危险色，让「连不上」的提示更醒目。
+ */
+@Composable fun HeaderLoadingIndicator(modifier: Modifier = Modifier, color: Color = HuluwaColors.Muted) {
+    ReconnectSpinner(color, modifier.size(20.dp).progressSemantics().semantics { contentDescription = "正在加载" })
+}
+/** 自绘 12 瓣菊花：按相位递减亮度并整体保持静止角度，形成旋转观感。 */
+@Composable private fun ReconnectSpinner(color: Color, modifier: Modifier) {
     val transition = rememberInfiniteTransition(label = "标题加载")
     val phase by transition.animateFloat(
         initialValue = 0f, targetValue = 12f,
         animationSpec = infiniteRepeatable(tween(durationMillis = 960, easing = LinearEasing)),
         label = "加载轮转",
     )
-    val color = HuluwaColors.Muted
-    Canvas(modifier.size(20.dp).progressSemantics().semantics { contentDescription = "正在加载" }) {
+    Canvas(modifier) {
         val radius = size.minDimension * .42f
         repeat(12) { index ->
             val age = (phase.toInt() - index + 12) % 12

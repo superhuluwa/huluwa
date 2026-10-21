@@ -1,6 +1,9 @@
 package com.huluwa.android.data
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.*
 import okhttp3.*
@@ -13,13 +16,18 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class ApiException(val code: Int, override val message: String) : IOException(message)
+
+/** 服务器不可达时的统一文案；界面层据此把提示收敛到标题栏的「重连中」徽标。 */
+const val ServerUnreachableMessage = "无法连接服务器，请检查服务器地址和网络"
 fun Throwable.userMessage(): String = when (this) {
     is ApiException -> message
     is SocketTimeoutException -> "请求超时，请稍后重试"
-    is IOException -> "无法连接服务器，请检查服务器地址和网络"
+    is IOException -> ServerUnreachableMessage
     is IllegalArgumentException -> message ?: "输入内容不正确"
     else -> message?.take(240) ?: "操作失败，请重试"
 }
+/** 是否属于「服务器连不上」：与 [userMessage] 中网络层的分支保持一致（超时单独提示，不算断线）。 */
+fun String?.isServerUnreachable(): Boolean = this == ServerUnreachableMessage
 suspend fun <T> sourceResult(block: suspend () -> T): Result<T> = try { Result.success(block()) }
 catch (error: CancellationException) { throw error }
 catch (error: Throwable) { Result.failure(error) }
@@ -27,6 +35,13 @@ catch (error: Throwable) { Result.failure(error) }
 class ApiClient(val store: SessionStore) {
     val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(100, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
+
+    // 服务器可达性：任一请求成功即视为在线，连接失败即可达为 false。
+    // 后台轮询本身就在不断重试，界面层只观察这个状态，不再要求用户手动点「重试」。
+    private val mutableReachable = MutableStateFlow(true)
+    val reachable: StateFlow<Boolean> = mutableReachable.asStateFlow()
+    /** 登录成功、重新配置服务器时重置，避免上一台服务器的离线状态带到新会话。 */
+    fun markReachable() { mutableReachable.value = true }
 
     suspend fun request(
         method: String, segments: List<String>, body: JsonElement? = null, query: Map<String, String> = emptyMap(),
@@ -38,7 +53,14 @@ class ApiClient(val store: SessionStore) {
         request.method(method, payloadFor(method, body))
         val client = if (segments.takeLast(2) == listOf("images", "pull")) http.newBuilder()
             .readTimeout(16, TimeUnit.MINUTES).callTimeout(17, TimeUnit.MINUTES).build() else http
-        return execute(request.build(), client)
+        return try {
+            execute(request.build(), client).also { mutableReachable.value = true }
+        } catch (error: IOException) {
+            // HTTP 层有响应（含 4xx / 5xx）说明服务器在线，只有连接失败才算不可达；
+            // 超时单独提示，不作为断线，与 userMessage() 的分支保持一致。
+            if (error !is ApiException && error !is SocketTimeoutException) mutableReachable.value = false
+            throw error
+        }
     }
     suspend fun get(vararg path: String, query: Map<String, String> = emptyMap()) = request("GET", path.toList(), query = query)
     suspend fun post(vararg path: String, body: JsonElement? = null, query: Map<String, String> = emptyMap()) = request("POST", path.toList(), body, query)

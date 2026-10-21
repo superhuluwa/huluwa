@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.Session
+import com.huluwa.android.data.isServerUnreachable
 
 internal val SessionsBackground = Color(0xFFF9FBF8)
 
@@ -44,7 +45,8 @@ private object SessionsColors {
     LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState,
         overscrollEffect = rememberBounceOverscroll()) {
         // 加载状态显示在标题右侧，列表只保留错误反馈，避免切换标签时挤动内容。
-        if (ui.sessions.error != null) item {
+        // 「无法连接服务器」由标题栏的「重连中」徽标统一承载，这里不再重复渲染成错误卡片。
+        if (ui.sessions.error != null && !ui.sessions.error.isServerUnreachable()) item {
             Feedback(loading = false, error = ui.sessions.error, onRetry = { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
