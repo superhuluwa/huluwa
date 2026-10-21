@@ -92,10 +92,11 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     else -> null
 }
 /**
- * 白底面板（对应网页端 .panel）：默认 16dp 内边距；紧凑列表可传更小的 [contentPadding]，
- * 放在最后避免打乱已有的 `Panel(modifier, color) { }` 位置参数调用。
+ * 白底面板（对应网页端 .panel）：默认 16dp 内边距，紧凑列表可传更小的 [contentPadding]。
+ * content 必须排在最后：Kotlin 的尾随 lambda 绑定的是最后一个参数，
+ * 若把 contentPadding 放最后，`Panel(modifier, color) { }` 里的 lambda 会被当成 contentPadding。
  */
-@Composable fun Panel(modifier: Modifier = Modifier, color: Color = Color.White, content: @Composable ColumnScope.() -> Unit, contentPadding: Dp = 16.dp) {
+@Composable fun Panel(modifier: Modifier = Modifier, color: Color = Color.White, contentPadding: Dp = 16.dp, content: @Composable ColumnScope.() -> Unit) {
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = color,
         border = if (color == Color.White) BorderStroke(1.dp, HuluwaColors.Line) else null) {
         Column(Modifier.padding(contentPadding), content = content)
