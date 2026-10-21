@@ -14,10 +14,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Magnet
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
@@ -59,14 +59,14 @@ import kotlinx.serialization.json.*
     fun copy(text: String, label: String) {
         if (text.isBlank()) return
         context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-        vm.notify("$label已复制")
+        vm.notify("${label}已复制")
     }
     // 与网页端 n-modal preset="card" 对齐：居中卡片、20dp 圆角、雾绿描边
     Dialog(onDismissRequest = vm::dismissSheet, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp).heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .88f),
             shape = RoundedCornerShape(20.dp), color = HuluwaColors.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
             Column(Modifier.fillMaxWidth()) {
-                FilmDialogHeader(card, sheet.data.data, vm)
+                FilmDialogHeader(card, sheet.data.data, sheet.data.loading, vm)
                 HorizontalDivider(color = HuluwaColors.Line)
                 Box(Modifier.weight(1f, fill = false)) {
                     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -88,16 +88,16 @@ import kotlinx.serialization.json.*
 }
 
 /** 弹框标题：图标 + 剧名 + 条数，右侧「重新抓取」与关闭 */
-@Composable private fun FilmDialogHeader(card: FilmCard, data: JsonObject, vm: HuluwaViewModel) {
+@Composable private fun FilmDialogHeader(card: FilmCard, data: JsonObject, loading: Boolean, vm: HuluwaViewModel) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(if (card.isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.Magnet, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
+        Icon(if (card.isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.CloudDownload, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
         Text(data.text("title", fallback = card.title), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // 电影港按磁力条数、电影天堂按各线路可复制条目合计（与网页端「可复制 N 条」一致）
         val count = if (card.isHls) data.rows("playSources").sumOf { source -> source.asObject().rows("items").size }
         else data.rows("magnets").size
         if (count > 0) Text(if (card.isHls) "可复制 $count 条" else "$count 条", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-        IconButton({ vm.reloadFilmResources(card) }, enabled = !data.loading) { Icon(Icons.Outlined.Refresh, "重新抓取", Modifier.size(19.dp), tint = HuluwaColors.Pine) }
+        IconButton(onClick = { vm.reloadFilmResources(card) }, enabled = !loading) { Icon(Icons.Outlined.Refresh, "重新抓取", Modifier.size(19.dp), tint = HuluwaColors.Pine) }
         IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
     }
 }
@@ -164,8 +164,12 @@ import kotlinx.serialization.json.*
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sources.forEachIndexed { index, source ->
             val active = index == selected.coerceIn(sources.indices)
-            Surface(if (active) HuluwaColors.SoftGreen else HuluwaColors.White, shape = RoundedCornerShape(999.dp),
-                border = BorderStroke(1.dp, if (active) HuluwaColors.Pine else HuluwaColors.Line), modifier = Modifier.clickable { selected = index }) {
+            Surface(
+                onClick = { selected = index },
+                shape = RoundedCornerShape(999.dp),
+                color = if (active) HuluwaColors.SoftGreen else HuluwaColors.White,
+                border = BorderStroke(1.dp, if (active) HuluwaColors.Pine else HuluwaColors.Line),
+            ) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(source.name, style = MaterialTheme.typography.labelLarge, color = if (active) HuluwaColors.Pine else HuluwaColors.Muted, maxLines = 1)
                     Text("${source.items.size}", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
@@ -207,7 +211,7 @@ import kotlinx.serialization.json.*
         "720P", "480P", "360P" -> HuluwaColors.Amber to Color(0x24FBBF24)
         else -> HuluwaColors.Muted to Color(0x17243D32)
     }
-    Surface(background, shape = RoundedCornerShape(999.dp)) {
+    Surface(shape = RoundedCornerShape(999.dp), color = background) {
         Text(value.ifBlank { "OTHER" }, Modifier.widthIn(min = 58.dp).padding(vertical = 2.dp), textAlign = TextAlign.Center,
             color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
