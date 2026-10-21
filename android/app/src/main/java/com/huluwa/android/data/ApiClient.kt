@@ -35,10 +35,15 @@ class ApiClient(val store: SessionStore) {
         val target = ServerAddress.endpoint(server, segments, query)
         val request = Request.Builder().url(target).header("Accept", "application/json")
         if (token.isNotBlank()) request.header("Authorization", "Bearer $token")
-        // DELETE 也可能带请求体（例如剧集管理的批量删除），所以按「是否传了 body」判断，
-        // 而不是仅凭方法名；其余不带 body 的请求保持无正文。
-        val payload = if (body != null && method in setOf("POST", "PUT", "PATCH", "DELETE"))
-            body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()) else null
+        // OkHttp 要求 POST / PUT / PATCH 必须带请求体，没传 body 时补一个空 JSON（如 frp 热加载、容器重启）；
+        // DELETE 可以没有正文，只有批量删除这类场景才按 body 判断是否携带。
+        val payload = when {
+            method in setOf("POST", "PUT", "PATCH") ->
+                (body?.toString() ?: "{}").toRequestBody("application/json; charset=utf-8".toMediaType())
+            method == "DELETE" && body != null ->
+                body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            else -> null
+        }
         request.method(method, payload)
         val client = if (segments.takeLast(2) == listOf("images", "pull")) http.newBuilder()
             .readTimeout(16, TimeUnit.MINUTES).callTimeout(17, TimeUnit.MINUTES).build() else http
