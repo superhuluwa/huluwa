@@ -6,9 +6,9 @@ import { setFullscreenPage } from '@/composables/useFullscreenPage'
 
 /**
  * 路由结构对齐安卓端 HuluwaRoot：
- *   底部五标签 = 功能 / 系统 / 下载 / 订阅 / 我的
+ *   底部四标签 = 功能 / 系统 / 下载 / 我的（「订阅」已迁入系统会话「我的订阅」）
  *   「功能」「系统」的标签页就是会话列表；点进会话后使用 meta.chat 接管整屏（隐藏标题栏与底部导航），
- *   由会话页自带的返回键回到列表。管理类会话（Frp / Docker / App 构建 / 巡检记录 / 剧集管理 / 在线升级）
+ *   由会话页自带的返回键回到列表。管理类会话（Frp / Docker / App 构建 / 巡检记录 / 剧集管理 / 我的订阅）
  *   同样以 meta.chat 的全屏页面呈现，视觉与安卓的管理会话一致。
  *
  * meta.tab   当前页面归属的底部标签（决定底部导航高亮）
@@ -55,9 +55,8 @@ const routes = [
             },
             {
                 path: 'subscriptions',
-                name: 'subscriptions',
-                meta: { title: '订阅', tab: 'subscriptions' },
-                component: createRouteLoader(() => import('@/views/subscriptions/index.vue'))
+                // 旧地址兼容：订阅已从底部标签迁入系统会话「我的订阅」
+                redirect: '/my-subscriptions'
             },
             {
                 path: 'mine',
@@ -97,10 +96,10 @@ const routes = [
                 component: createRouteLoader(() => import('@/views/movie/library.vue'))
             },
             {
-                path: 'upgrade',
-                name: 'upgrade',
-                meta: { title: '在线升级', tab: 'system', chat: true },
-                component: createRouteLoader(() => import('@/views/upgrade/index.vue'))
+                path: 'my-subscriptions',
+                name: 'my-subscriptions',
+                meta: { title: '我的订阅', tab: 'system', chat: true },
+                component: createRouteLoader(() => import('@/views/subscriptions/index.vue'))
             },
             // ---- 我的 → 附加工具（安卓端没有对应页面，保留在网页端） ----
             {

@@ -13,7 +13,7 @@ import { loadSessions, isLocalSession } from '@/utils/localSessions'
 
 /**
  * 消息中心会话状态层：
- *  - 会话列表 = 服务端聊天会话 + 客户端本地会话（Frp / Docker / App 构建 / 在线升级 / 巡检记录 / 剧集管理，
+ *  - 会话列表 = 服务端聊天会话 + 客户端本地会话（Frp / Docker / App 构建 / 巡检记录 / 剧集管理 / 我的订阅，
  *    由 utils/localSessions 聚合接口摘要，行为对齐安卓 withAppSessions）；消息流仍完全由后端持库；
  *  - 发送走 WebSocket（chat.send，requestId 幂等）：本地立即插入 pending 气泡 →
  *    服务端毫秒级回 chat.ack（落库行收编 pending、转圈消失）→ chat.processing 显示 typing →
@@ -130,7 +130,7 @@ export const useChatStore = defineStore('chat', {
             const session = state.sessions.find((item) => item.id === state.currentKey)
             return !!session && session.kind === 'video'
         },
-        /** 当前会话是否为客户端本地会话（Frp / Docker / App 构建 / 在线升级 / 巡检记录 / 剧集管理） */
+        /** 当前会话是否为客户端本地会话（Frp / Docker / App 构建 / 巡检记录 / 剧集管理 / 我的订阅） */
         currentLocal(state) {
             return isLocalSession(state.sessions.find((item) => item.id === state.currentKey))
         }

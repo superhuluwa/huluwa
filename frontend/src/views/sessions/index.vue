@@ -36,7 +36,8 @@
  * 会话列表（功能 / 系统两个标签共用，与安卓 SessionsScreen 一一对应）：
  *  - 44px 图标、标题 15px 半粗、预览 12px 单行截断、右侧时间与未读角标；
  *  - 整行平铺 + 左侧缩进的分隔线，不用圆角卡片；
- *  - 系统标签只展示本地服务会话（在线升级 / Frp / Docker / App 构建 / 巡检记录 / 剧集管理）。
+ *  - 系统标签只展示本地服务会话（Frp / Docker / App 构建 / 巡检记录 / 剧集管理 / 我的订阅）；
+ *    「在线升级」只在安卓 App 内出现，网页端不提供。
  */
 import SessionIcon from '@/views/message/components/SessionIcon.vue'
 import { useChatStore } from '@/stores/chat'
@@ -44,12 +45,12 @@ import { formatTimeLabel, stripMarkup } from '@/utils/chatFormat'
 import { isLocalSession, LOCAL_KINDS, routeOfSession } from '@/utils/localSessions'
 
 const LOCAL_ICONS = {
-    upgrade: 'fa-solid fa-arrow-up-right-dots',
     frp: 'fa-solid fa-diagram-project',
     docker: 'fa-brands fa-docker',
     'android-build': 'fa-brands fa-android',
     'check-logs': 'fa-solid fa-list-check',
-    library: 'fa-solid fa-hard-drive'
+    library: 'fa-solid fa-hard-drive',
+    subscriptions: 'fa-regular fa-bookmark'
 }
 
 export default {

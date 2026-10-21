@@ -60,6 +60,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "android-build" -> Icons.Outlined.Android
     "check-logs" -> Icons.AutoMirrored.Outlined.ListAlt
     "library" -> Icons.Outlined.VideoLibrary
+    "subscriptions" -> Icons.Outlined.BookmarkBorder
     "system" -> Icons.Outlined.NotificationsNone
     else -> Icons.AutoMirrored.Outlined.Chat
 }

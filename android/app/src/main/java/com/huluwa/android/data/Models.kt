@@ -34,7 +34,7 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
-    Functions("功能", true), System("系统", true), Downloads("下载"), Subscriptions("订阅"), Mine("我的")
+    Functions("功能", true), System("系统", true), Downloads("下载"), Mine("我的")
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
@@ -42,6 +42,7 @@ enum class ManagementService(val sessionId: String, val kind: String, val title:
     AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
     CheckLogs("local-check-logs", "check-logs", "巡检记录", "订阅巡检结果与新增明细"),
     Library("local-library", "library", "剧集管理", "扫描下载目录 · 管理磁盘空间"),
+    Subscriptions("local-subscriptions", "subscriptions", "我的订阅", "电影港与电影天堂订阅 · 追更状态与资源列表"),
 }
 enum class DownloadSource(val title: String) { Hls("离线剧集"), Magnet("磁力下载"), XunleiWin("迅雷【Win】") }
 enum class SubscriptionSource(val title: String) { Hls("电影天堂"), Movie("电影港") }

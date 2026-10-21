@@ -29,7 +29,7 @@
                 <component :is="Component" :key="$route.fullPath" />
             </router-view>
 
-            <!-- 底部五标签：安卓进入会话后收起导航，这里保持一致（全屏会话只保留页面内返回键） -->
+            <!-- 底部四标签：安卓进入会话后收起导航，这里保持一致（全屏会话只保留页面内返回键） -->
             <nav v-if="!chatOpen" class="tab-bar" aria-label="主导航">
                 <button v-for="item in tabs" :key="item.key" class="tab-item" :class="{ active: item.key === activeTab }"
                     type="button" :aria-current="item.key === activeTab ? 'page' : undefined" @click="selectTab(item)">
@@ -48,10 +48,10 @@
 
 <script>
 /**
- * 网页端主框架：与安卓 HuluwaRoot 对齐的「标题栏 + 内容 + 底部五标签」结构。
+ * 网页端主框架：与安卓 HuluwaRoot 对齐的「标题栏 + 内容 + 底部四标签」结构。
  *
- * - 标签固定为：功能 → 系统 → 下载 → 订阅 → 我的（与安卓 MainTab 一致）；
- * - 会话详情（含 Frp / Docker / App 构建管理会话）进入后用自己的返回键回到列表，
+ * - 标签固定为：功能 → 系统 → 下载 → 我的；「订阅」已迁入系统会话「我的订阅」；
+ * - 会话详情（含 Frp / Docker / App 构建 / 我的订阅等管理会话）进入后用自己的返回键回到列表，
  *   路由上仍落在对应标签内（?session= 区分具体会话）；
  * - 桌面浏览器把内容限制在 660px 居中列，观感同手机 App；
  * - 会话未读角标与安卓一致：功能 / 系统两个标签分别汇总各自分类的未读数。
@@ -62,7 +62,6 @@ import { setFullscreenPage } from '@/composables/useFullscreenPage'
 import { isSystemSession } from '@/utils/localSessions'
 import SessionsView from '@/views/sessions/index.vue'
 import DownloadsView from '@/views/downloads/index.vue'
-import SubscriptionsView from '@/views/subscriptions/index.vue'
 import MineView from '@/views/mine/index.vue'
 import AccountSheet from '@/components/main/components/account-sheet.vue'
 
@@ -71,13 +70,12 @@ export const TABS = [
     { key: 'functions', title: '功能', icon: 'fa-solid fa-table-cells-large', isSessionTab: true, system: false },
     { key: 'system', title: '系统', icon: 'fa-solid fa-shield-halved', isSessionTab: true, system: true },
     { key: 'downloads', title: '下载', icon: 'fa-solid fa-circle-down' },
-    { key: 'subscriptions', title: '订阅', icon: 'fa-regular fa-bookmark' },
     { key: 'mine', title: '我的', icon: 'fa-regular fa-user' }
 ]
 
 export default {
     name: 'AppShell',
-    components: { SessionsView, DownloadsView, SubscriptionsView, MineView, AccountSheet },
+    components: { SessionsView, DownloadsView, MineView, AccountSheet },
     setup() {
         return { chatStore: useChatStore(), auth: useAuthStore() }
     },
@@ -103,8 +101,7 @@ export default {
         },
         currentPage() {
             return this.tab.key === 'system' || this.tab.key === 'functions' ? SessionsView
-                : this.tab.key === 'downloads' ? DownloadsView
-                    : this.tab.key === 'subscriptions' ? SubscriptionsView : MineView
+                : this.tab.key === 'downloads' ? DownloadsView : MineView
         },
         /** 功能 / 系统两个标签分别汇总各自分类的未读（对齐安卓 HuluwaRoot 的角标逻辑） */
         unreadByTab() {
@@ -151,7 +148,7 @@ export default {
             if (item.key === this.activeTab && !this.chatOpen) {
                 return
             }
-            // 标签 key 与路由名一致（functions / system / downloads / subscriptions / mine），
+            // 标签 key 与路由名一致（functions / system / downloads / mine），
             // 会话 / 管理会话页里点标签也会回到该标签的列表页。
             this.$router.push({ name: item.key, query: {} })
         },

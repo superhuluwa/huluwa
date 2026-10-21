@@ -25,6 +25,7 @@ import com.huluwa.android.data.formatBytes
         ManagementService.AppBuild -> ui.androidBuild.tasks.loading
         ManagementService.CheckLogs -> ui.checkLogs.loading
         ManagementService.Library -> ui.library.scan.loading
+        ManagementService.Subscriptions -> ui.subscriptions.loading
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
@@ -76,6 +77,8 @@ import com.huluwa.android.data.formatBytes
                                 "\n视频文件：${scan.entries.size} 个\n占用空间：${formatBytes(scan.totalBytes.toDouble())}" +
                                 "\n上次扫描：${scan.scannedAt.ifBlank { "—" }}"
                         } }) { Icon(Icons.Outlined.Info, "下载目录信息") }
+                        // 订阅管理没有额外工具入口，刷新按钮已足够
+                        ManagementService.Subscriptions -> Unit
                     }
                 }
             }
@@ -89,6 +92,7 @@ import com.huluwa.android.data.formatBytes
                     ManagementService.AppBuild -> AppBuildScreen(ui, vm, snackbar)
                     ManagementService.CheckLogs -> CheckLogsScreen(ui, vm)
                     ManagementService.Library -> LibraryScreen(ui, vm)
+                    ManagementService.Subscriptions -> SubscriptionsScreen(ui, vm)
                 }
                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }

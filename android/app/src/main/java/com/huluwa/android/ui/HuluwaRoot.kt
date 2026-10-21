@@ -33,7 +33,6 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Functions -> Icons.Outlined.GridView
     MainTab.System -> Icons.Outlined.VerifiedUser
     MainTab.Downloads -> Icons.Outlined.FileDownload
-    MainTab.Subscriptions -> Icons.Outlined.BookmarkBorder
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
@@ -93,7 +92,6 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                         MainTab.Functions -> SessionsScreen(ui, vm)
                         MainTab.System -> SessionsScreen(ui, vm, system = true)
                         MainTab.Downloads -> DownloadsScreen(ui, vm)
-                        MainTab.Subscriptions -> SubscriptionsScreen(ui, vm)
                         MainTab.Mine -> MineScreen(ui, vm)
                     } }
                     if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))

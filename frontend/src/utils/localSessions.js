@@ -2,38 +2,42 @@ import http from '@/libs/http'
 import { getSummary, getEnvironment, listContainers } from '@/api/docker'
 import { getAndroidStatus } from '@/api/android'
 import { ScanEpisodeLibrary } from '@/api/library'
-import { GetSubscriptionCheckLogs } from '@/api/chat'
+import { GetSubscriptionCheckLogs, GetSubscriptions } from '@/api/chat'
+import { GetHlsSubscriptions } from '@/api/hls'
 
 /**
  * 本地会话（对齐安卓 HuluwaViewModel.withAppSessions）：
  * 服务端只下发聊天会话（电影港 / 电影天堂 / 磁力 / 视频解析 / 迅雷 / 系统通知），
- * Frp、Docker、App 构建、在线升级是客户端本地会话，摘要由各接口聚合后实时计算；
- * 网页端另外把安卓没有的「巡检记录」「剧集管理」也作为系统会话补进来。
+ * Frp、Docker、App 构建是客户端本地会话，摘要由各接口聚合后实时计算；
+ * 「在线升级」只在安卓 App 内提供（网页端不显示安装自己），
+ * 而安卓没有的「巡检记录」「剧集管理」在网页端作为系统会话补进来；
+ * 「我的订阅」由原底部订阅标签迁入系统会话，与其它系统会话一样整屏打开。
  *
  * 会话行格式与 /chat/sessions 一致：{ id, title, kind, unread, last, updatedAt }。
  */
 
 /** 本地会话 ID：与安卓保持一致，避免同一用户两端看到的名字 / 顺序不同 */
 export const LOCAL_SESSIONS = {
-    upgrade: { id: 'local-app-upgrade', kind: 'upgrade', title: '在线升级', route: 'upgrade' },
     frp: { id: 'local-frp-management', kind: 'frp', title: 'Frp 管理', route: 'frp' },
     docker: { id: 'local-docker-management', kind: 'docker', title: 'Docker 管理', route: 'docker' },
     build: { id: 'local-android-build', kind: 'android-build', title: 'App 构建管理', route: 'android-build' },
     checkLogs: { id: 'local-check-logs', kind: 'check-logs', title: '巡检记录', route: 'check-logs' },
-    library: { id: 'local-library', kind: 'library', title: '剧集管理', route: 'library' }
+    library: { id: 'local-library', kind: 'library', title: '剧集管理', route: 'library' },
+    subscriptions: { id: 'local-subscriptions', kind: 'subscriptions', title: '我的订阅', route: 'my-subscriptions' }
 }
 
-/** 系统标签下的本地会话顺序（与安卓 ManagementService.entries 顺序一致，另加巡检 / 剧集） */
+/** 系统标签下的本地会话顺序（与安卓 ManagementService.entries 顺序一致；不含在线升级） */
 export const MANAGEMENT_SESSIONS = [
     LOCAL_SESSIONS.frp,
     LOCAL_SESSIONS.docker,
     LOCAL_SESSIONS.build,
     LOCAL_SESSIONS.checkLogs,
-    LOCAL_SESSIONS.library
+    LOCAL_SESSIONS.library,
+    LOCAL_SESSIONS.subscriptions
 ]
 
 export const LOCAL_KINDS = new Set([
-    'upgrade', 'frp', 'docker', 'android-build', 'check-logs', 'library'
+    'frp', 'docker', 'android-build', 'check-logs', 'library', 'subscriptions'
 ])
 
 export function isLocalSession(session) {
@@ -75,18 +79,18 @@ function localSession(meta, preview, updatedAt = '') {
  *  3. 排序与安卓一致：按更新时间倒序，空时间按最旧处理，同时间按 id 排序。
  */
 export async function loadSessions() {
-    const [chatSessions, upgrade, frp, docker, build, checkLogs, library] = await Promise.allSettled([
+    const [chatSessions, frp, docker, build, checkLogs, library, subscriptions] = await Promise.allSettled([
         http.get('/chat/sessions'),
-        loadUpgrade(),
         loadFrp(),
         loadDocker(),
         loadBuild(),
         loadCheckLogs(),
-        loadLibrary()
+        loadLibrary(),
+        loadSubscriptions()
     ])
 
     const pick = (result) => (result.status === 'fulfilled' ? result.value : null)
-    const locals = [pick(upgrade), pick(frp), pick(docker), pick(build), pick(checkLogs), pick(library)]
+    const locals = [pick(frp), pick(docker), pick(build), pick(checkLogs), pick(library), pick(subscriptions)]
         .filter(Boolean)
     // 聊天会话是列表的主体：拉不到时向上抛错，由 store 保留旧列表并给出重试提示；
     // 本地会话则各自降级为一行说明，不影响其它会话。
@@ -106,26 +110,6 @@ export async function loadSessions() {
         }
         return String(left.id).localeCompare(String(right.id))
     })
-}
-
-/** 在线升级：有可用版本时摘要与未读角标与安卓一致 */
-async function loadUpgrade() {
-    try {
-        const data = await http.get('/android/releases/latest', null, { silent: true })
-        const release = data && data.release
-        const available = Boolean(data && data.available && release)
-        const row = localSession(
-            LOCAL_SESSIONS.upgrade,
-            available
-                ? `发现新版本 v${release.versionName}（${release.versionCode}），点击查看`
-                : '内置浏览器下载并安装最新安卓安装包',
-            available ? String(release.publishedAt || '') : ''
-        )
-        row.unread = available ? 1 : 0
-        return row
-    } catch (error) {
-        return localSession(LOCAL_SESSIONS.upgrade, '暂时无法检查更新，点击查看详情')
-    }
 }
 
 /** Frp 管理摘要：与安卓一致，优先反映连接异常与运行状态 */
@@ -224,6 +208,44 @@ async function loadLibrary() {
         return localSession(LOCAL_SESSIONS.library, `${series} 部作品 · ${entries.length} 个视频 · ${formatBytes(scan.totalBytes)}`)
     } catch (error) {
         return localSession(LOCAL_SESSIONS.library, '下载目录扫描失败，点击重试')
+    }
+}
+
+/**
+ * 我的订阅摘要：电影港与电影天堂两个来源合并统计。
+ * 单个来源失败只标注该来源，避免整行退化成「加载失败」。
+ */
+async function loadSubscriptions() {
+    try {
+        const [movie, hls] = await Promise.allSettled([GetSubscriptions(true), GetHlsSubscriptions()])
+        const failed = []
+        let enabled = 0
+        let total = 0
+        if (movie.status === 'fulfilled') {
+            for (const item of Array.isArray(movie.value) ? movie.value : []) {
+                total += 1
+                if (item.enabled !== false) enabled += 1
+            }
+        } else {
+            failed.push('电影港')
+        }
+        if (hls.status === 'fulfilled') {
+            for (const item of Array.isArray(hls.value) ? hls.value : []) {
+                total += 1
+                if (item.enabled !== false) enabled += 1
+            }
+        } else {
+            failed.push('电影天堂')
+        }
+        if (failed.length === 2) {
+            return localSession(LOCAL_SESSIONS.subscriptions, '订阅加载失败，点击重试')
+        }
+        const preview = total
+            ? `${total} 个订阅 · ${enabled} 个追更中${failed.length ? ` · ${failed.join('、')}加载失败` : ''}`
+            : '电影港与电影天堂的订阅，追更状态与资源列表'
+        return localSession(LOCAL_SESSIONS.subscriptions, preview)
+    } catch (error) {
+        return localSession(LOCAL_SESSIONS.subscriptions, '订阅加载失败，点击重试')
     }
 }
 

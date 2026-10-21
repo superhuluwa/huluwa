@@ -80,9 +80,9 @@ describe('路由代码预加载', () => {
     })
 })
 
-describe('底部五标签外壳', () => {
-    it('标签固定为 功能 / 系统 / 下载 / 订阅 / 我的，与安卓 MainTab 一致', () => {
-        expect(TABS.map((item) => item.title)).toEqual(['功能', '系统', '下载', '订阅', '我的'])
+describe('底部四标签外壳', () => {
+    it('标签固定为 功能 / 系统 / 下载 / 我的，与安卓 MainTab 一致（订阅已迁入系统会话）', () => {
+        expect(TABS.map((item) => item.title)).toEqual(['功能', '系统', '下载', '我的'])
         // 只有「功能」「系统」是会话标签页，其余为独立页面
         expect(TABS.filter((item) => item.isSessionTab).map((item) => item.key)).toEqual(['functions', 'system'])
     })

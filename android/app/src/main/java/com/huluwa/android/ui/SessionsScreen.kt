@@ -111,6 +111,7 @@ private object SessionsColors {
             "android-build" -> Color(0xFFE4F0E7)
             "check-logs" -> Color(0xFFEDF1E5)
             "library" -> Color(0xFFE8EFE9)
+            "subscriptions" -> Color(0xFFF0EBF6)
             else -> Color(0xFFE9E5F1)
         }
         val tone = when (session.kind) {
@@ -119,6 +120,7 @@ private object SessionsColors {
             "android-build" -> Color(0xFF4E8C68)
             "check-logs" -> Color(0xFF6E8A4E)
             "library" -> Color(0xFF4E7C6A)
+            "subscriptions" -> Color(0xFF7E6AA0)
             else -> Color(0xFF8E7BAC)
         }
         Box(

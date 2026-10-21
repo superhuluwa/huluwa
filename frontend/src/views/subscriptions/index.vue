@@ -1,79 +1,84 @@
 <template>
-    <div class="subscriptions-page">
-        <p v-if="loadError" class="subs-error">{{ loadError }}</p>
+    <ManagementShell kind="subscriptions" title="我的订阅" subtitle="电影港与电影天堂订阅 · 追更状态与资源列表"
+        :loading="loading" :busy="busy" @refresh="reload">
+        <div class="mgmt-content">
+            <p v-if="loadError" class="subs-error">{{ loadError }}</p>
 
-        <div v-if="!rows.length" class="subs-empty">
-            <span class="empty-icon"><i class="fa-regular fa-bookmark"></i></span>
-            <strong>{{ loading ? '正在同步订阅…' : '还没有订阅' }}</strong>
-            <span v-if="!loading">在「功能 → 电影港 / 电影天堂」搜索片名，在结果卡片上订阅即可追更</span>
-        </div>
+            <div v-if="!rows.length" class="subs-empty">
+                <span class="empty-icon"><i class="fa-regular fa-bookmark"></i></span>
+                <strong>{{ loading ? '正在同步订阅…' : '还没有订阅' }}</strong>
+                <span v-if="!loading">在「功能 → 电影港 / 电影天堂」搜索片名，在结果卡片上订阅即可追更</span>
+            </div>
 
-        <article v-for="item in rows" :key="item.subscriptionKey" class="sub-card" :class="{ off: !item.enabled }">
-            <div class="sub-main">
-                <img v-if="item.cover" class="poster" :src="item.cover" :alt="item.title" loading="lazy" />
-                <div v-else class="poster fallback">
-                    <i :class="isHls(item) ? 'fa-solid fa-circle-play' : 'fa-solid fa-film'"></i>
-                </div>
-                <div class="sub-info">
-                    <div class="sub-title-row">
-                        <strong>{{ item.title }}</strong>
-                        <div class="more-wrap">
-                            <button class="icon-btn" type="button" title="管理订阅" @click="toggleMenu(item.subscriptionKey)">
-                                <i class="fa-solid fa-ellipsis"></i>
-                            </button>
-                            <div v-if="menuKey === item.subscriptionKey" class="more-menu">
-                                <button type="button" :disabled="busy || !item.enabled" @click="check(item)">立即检查</button>
-                                <button type="button" :disabled="busy" @click="cancel(item)">
-                                    {{ item.enabled ? '取消订阅' : '删除订阅' }}
+            <article v-for="item in rows" :key="item.subscriptionKey" class="sub-card" :class="{ off: !item.enabled }">
+                <div class="sub-main">
+                    <img v-if="item.cover" class="poster" :src="item.cover" :alt="item.title" loading="lazy" />
+                    <div v-else class="poster fallback">
+                        <i :class="isHls(item) ? 'fa-solid fa-circle-play' : 'fa-solid fa-film'"></i>
+                    </div>
+                    <div class="sub-info">
+                        <div class="sub-title-row">
+                            <strong>{{ item.title }}</strong>
+                            <div class="more-wrap">
+                                <button class="icon-btn" type="button" title="管理订阅" @click="toggleMenu(item.subscriptionKey)">
+                                    <i class="fa-solid fa-ellipsis"></i>
                                 </button>
-                                <button type="button" @click="openResources(item)">资源列表</button>
-                                <button v-if="!item.enabled" type="button" :disabled="busy" @click="resubscribe(item)">
-                                    {{ isHls(item) ? '恢复追更' : '重新订阅' }}
-                                </button>
+                                <div v-if="menuKey === item.subscriptionKey" class="more-menu">
+                                    <button type="button" :disabled="busy || !item.enabled" @click="check(item)">立即检查</button>
+                                    <button type="button" :disabled="busy" @click="cancel(item)">
+                                        {{ item.enabled ? '取消订阅' : '删除订阅' }}
+                                    </button>
+                                    <button type="button" @click="openResources(item)">资源列表</button>
+                                    <button v-if="!item.enabled" type="button" :disabled="busy" @click="resubscribe(item)">
+                                        {{ isHls(item) ? '恢复追更' : '重新订阅' }}
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <p class="sub-meta">{{ [item.year, item.genre, sourceLabel(item)].filter(Boolean).join(' · ') }}</p>
-                    <div class="sub-tags">
-                        <span class="tag">{{ isHls(item) ? `已收录 ${item.count || 0} 集` : `${item.count || 0} 条磁力` }}</span>
-                        <span class="tag outline" :class="{ paused: !item.enabled }">
-                            {{ item.enabled ? '追更中' : (isHls(item) ? '已暂停' : '已取消') }}
-                        </span>
+                        <p class="sub-meta">{{ [item.year, item.genre, sourceLabel(item)].filter(Boolean).join(' · ') }}</p>
+                        <div class="sub-tags">
+                            <span class="tag">{{ isHls(item) ? `已收录 ${item.count || 0} 集` : `${item.count || 0} 条磁力` }}</span>
+                            <span class="tag outline" :class="{ paused: !item.enabled }">
+                                {{ item.enabled ? '追更中' : (isHls(item) ? '已暂停' : '已取消') }}
+                            </span>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <p v-if="item.lastCheckAt" class="sub-line">上次检查：{{ item.lastCheckAt }}</p>
-            <p v-if="item.enabled && item.nextCheckAt" class="sub-line">下次检查：{{ item.nextCheckAt }}</p>
-            <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
-            <div v-if="magnetsOpen === item.subscriptionKey" class="magnet-panel">
-                <p v-if="!magnets.length" class="sub-line">暂无磁力记录</p>
-                <div v-for="magnet in magnets" :key="magnet.id" class="magnet-row">
-                    <span class="magnet-quality">{{ magnet.quality }}</span>
-                    <span class="magnet-title">{{ magnet.title || `第 ${magnet.episode} 集` }}</span>
-                    <button v-if="!magnet.downloaded" type="button" class="mini-btn" :disabled="downloading === magnet.id"
-                        @click="downloadMagnet(magnet)">
-                        {{ downloading === magnet.id ? '提交中…' : '下载' }}
-                    </button>
-                    <span v-else class="magnet-done">已下载</span>
+                <p v-if="item.lastCheckAt" class="sub-line">上次检查：{{ item.lastCheckAt }}</p>
+                <p v-if="item.enabled && item.nextCheckAt" class="sub-line">下次检查：{{ item.nextCheckAt }}</p>
+                <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
+                <div v-if="magnetsOpen === item.subscriptionKey" class="magnet-panel">
+                    <p v-if="!magnets.length" class="sub-line">暂无磁力记录</p>
+                    <div v-for="magnet in magnets" :key="magnet.id" class="magnet-row">
+                        <span class="magnet-quality">{{ magnet.quality }}</span>
+                        <span class="magnet-title">{{ magnet.title || `第 ${magnet.episode} 集` }}</span>
+                        <button v-if="!magnet.downloaded" type="button" class="mini-btn" :disabled="downloading === magnet.id"
+                            @click="downloadMagnet(magnet)">
+                            {{ downloading === magnet.id ? '提交中…' : '下载' }}
+                        </button>
+                        <span v-else class="magnet-done">已下载</span>
+                    </div>
                 </div>
-            </div>
-        </article>
+            </article>
+        </div>
 
         <HlsResourceDialog v-model:show="hlsDialog" :movie="hlsMovie" @saved="reload" />
         <PlaySourceDialog v-model:show="playDialog" :movie="playMovie" :title="playMovie ? playMovie.title : ''" />
         <MagnetListDialog v-model:show="magnetDialog.show" :url="magnetDialog.url" :title="magnetDialog.title"
             @downloaded="reload" />
-    </div>
+    </ManagementShell>
 </template>
 
 <script>
 /**
- * 订阅标签页（对齐安卓 SubscriptionsScreen）：
+ * 我的订阅（系统会话，对齐安卓 ManagementSessionScreen + SubscriptionsScreen）：
  *  - 电影港（磁力订阅）与电影天堂（离线剧集订阅）合并为一个列表，按加入时间排列；
  *  - 卡片展示封面、来源、追更状态、已收录数量与巡检时间；
  *  - 「…」菜单提供立即检查、取消 / 删除、资源列表、恢复追更；
  *  - 取消订阅即删除（与网页版既有约定一致，测试也覆盖了这一契约）。
+ *  - 原底部「订阅」标签已移除，本页作为系统会话整屏打开，返回键回到系统会话列表。
  */
+import ManagementShell from '@/components/main/management-shell.vue'
 import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
 import {
     GetSubscriptions, CheckSubscription, DeleteSubscription, SubscriptionMagnets,
@@ -88,7 +93,7 @@ import MagnetListDialog from '@/views/message/components/MagnetListDialog.vue'
 
 export default {
     name: 'SubscriptionsPage',
-    components: { HlsResourceDialog, PlaySourceDialog, MagnetListDialog },
+    components: { ManagementShell, HlsResourceDialog, PlaySourceDialog, MagnetListDialog },
     setup() {
         return { hlsStore: useHlsSubscriptionsStore() }
     },
@@ -319,12 +324,7 @@ export default {
 </script>
 
 <style scoped>
-.subscriptions-page {
-    min-height: 100%;
-    padding: 4px 22px 28px;
-    background: var(--paper);
-}
-
+/* 内容留白与卡片样式交给全局 .mgmt-content / .panel 体系，这里只保留订阅卡自身 */
 .subs-error {
     margin: 0 0 12px;
     padding: 9px 12px;

@@ -92,6 +92,17 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     value.library.scan.data.entries.isEmpty() -> "下载目录里还没有可管理的剧集"
                     else -> "${value.library.scan.data.seriesCount} 部作品 · ${value.library.scan.data.entries.size} 个视频 · ${formatBytes(value.library.scan.data.totalBytes.toDouble())}"
                 }
+                // 我的订阅：电影港与电影天堂两个来源合并统计，失败只标注单个来源
+                ManagementService.Subscriptions -> when {
+                    value.subscriptions.loading -> "正在同步订阅…"
+                    value.subscriptions.error != null && value.subscriptions.data.isEmpty() -> "订阅加载失败，点击重试"
+                    value.subscriptions.data.isEmpty() -> "电影港与电影天堂的订阅，追更状态与资源列表"
+                    else -> {
+                        val enabled = value.subscriptions.data.count { it.enabled }
+                        val suffix = if (value.subscriptions.error != null) " · 部分来源加载失败" else ""
+                        "${value.subscriptions.data.size} 个订阅 · $enabled 个追更中$suffix"
+                    }
+                }
             }
             Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
@@ -233,10 +244,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     // 巡检与剧集摘要同样在会话列表常驻刷新（安卓新增的两条系统会话）。
                     refreshCheckLogs(silent)
                     refreshLibrary(silent)
+                    // 「我的订阅」摘要：订阅列表随系统会话行一起更新。
+                    refreshSubscriptions(silent)
                 }
             }
             MainTab.Downloads -> refreshDownloads(silent)
-            MainTab.Subscriptions -> refreshSubscriptions(silent)
             // 「我的」页只读取已登录信息，按会话未读数刷新即可。
             MainTab.Mine -> refreshSessions(silent)
         }
@@ -251,6 +263,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             ManagementService.AppBuild -> refreshAndroidBuild(silent)
             ManagementService.CheckLogs -> refreshCheckLogs(silent)
             ManagementService.Library -> refreshLibrary(silent)
+            ManagementService.Subscriptions -> refreshSubscriptions(silent)
         }
     }
     private fun refresh(key: String, block: suspend () -> Unit) {

@@ -1,16 +1,12 @@
 <template>
     <div class="management-page">
+        <!-- 标题文字已隐藏：浏览器标签已显示页面名，页面内重复一条标题栏观感冗余。
+             这里只保留返回与操作按钮，做成一条无边框的轻量工具栏。 -->
         <header class="mgmt-header">
-            <button class="icon-btn" type="button" :title="'返回' + backTitle" @click="back">
+            <button class="icon-btn" type="button" :title="'返回' + title" @click="back">
                 <i class="fa-solid fa-chevron-left"></i>
             </button>
-            <span class="mgmt-icon" :class="kind">
-                <i :class="icon"></i>
-            </span>
-            <div class="mgmt-title">
-                <strong>{{ title }}</strong>
-                <span>{{ subtitle }}</span>
-            </div>
+            <span class="mgmt-spacer"></span>
             <slot name="actions"></slot>
             <button v-if="refreshable" class="icon-btn" type="button" :title="'刷新' + title" :disabled="loading"
                 @click="$emit('refresh')">
@@ -29,21 +25,10 @@
 <script>
 /**
  * 管理会话整屏壳（对齐安卓 ManagementSessionScreen）：
- *  - 顶部：返回、38px 服务图标、标题 + 副标题、页面自定义动作、刷新；
+ *  - 顶部：返回、页面自定义动作、刷新；标题文字不在页面内重复（浏览器标签已显示页面名）；
  *  - 返回键回到「系统」标签的会话列表；
  *  - 底部导航在进入管理会话时收起（路由 meta.chat），与安卓一致。
  */
-import { LOCAL_SESSIONS } from '@/utils/localSessions'
-
-const KINDS = {
-    frp: { icon: 'fa-solid fa-diagram-project' },
-    docker: { icon: 'fa-brands fa-docker' },
-    'android-build': { icon: 'fa-brands fa-android' },
-    'check-logs': { icon: 'fa-solid fa-list-check' },
-    library: { icon: 'fa-solid fa-hard-drive' },
-    upgrade: { icon: 'fa-solid fa-arrow-up-right-dots' }
-}
-
 export default {
     name: 'ManagementShell',
     props: {
@@ -51,6 +36,7 @@ export default {
             type: String,
             required: true
         },
+        /** 会话标题：仅用于返回键 / 刷新按钮的无障碍提示，页面内不再重复显示 */
         title: {
             type: String,
             required: true
@@ -74,15 +60,6 @@ export default {
         }
     },
     emits: ['refresh'],
-    computed: {
-        icon() {
-            return (KINDS[this.kind] || KINDS.frp).icon
-        },
-        backTitle() {
-            const matched = Object.values(LOCAL_SESSIONS).find((item) => item.kind === this.kind)
-            return matched ? matched.title : '会话'
-        }
-    },
     methods: {
         back() {
             this.$router.push({ name: 'system' })
@@ -100,14 +77,19 @@ export default {
     background: var(--paper);
 }
 
+/* 轻量工具栏：只有返回 / 操作 / 刷新，无标题文字，去掉分割线避免看起来像第二层标题栏 */
 .mgmt-header {
     flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
-    background: #fff;
-    border-bottom: 1px solid var(--line);
+    padding: max(6px, env(safe-area-inset-top)) 12px 4px;
+    background: var(--paper);
+}
+
+.mgmt-spacer {
+    flex: 1;
+    min-width: 0;
 }
 
 .icon-btn {
@@ -133,44 +115,6 @@ export default {
 .icon-btn:disabled {
     opacity: .55;
     cursor: default;
-}
-
-.mgmt-icon {
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 12px;
-    background: var(--soft-green);
-    color: var(--pine);
-    font-size: 17px;
-}
-
-.mgmt-title {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-.mgmt-title strong {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--ink);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.mgmt-title span {
-    font-size: 11px;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .mgmt-body {

@@ -14,10 +14,27 @@ import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
 import com.huluwa.android.data.*
 
+/**
+ * 我的订阅（系统会话，对齐安卓 ManagementSessionScreen + 网页端「我的订阅」）：
+ * 由原底部「订阅」标签迁入系统会话，卡片展示封面、来源、追更状态与巡检信息，
+ * 「…」菜单提供立即检查、暂停 / 恢复、资源列表与删除。
+ * 空状态与加载 / 错误反馈沿用系统会话列表的同一套组件。
+ */
 @Composable fun SubscriptionsScreen(ui: AppState, vm: HuluwaViewModel) {
-    val rows = ui.subscriptions.data
-    LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(rows, key = { it.key }) { sub -> SubscriptionCard(sub, ui.busy == null && !ui.subscriptions.loading, vm) }
+    val state = ui.subscriptions
+    val rows = state.data
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (state.error != null) item {
+            Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
+        }
+        if (rows.isEmpty()) item {
+            EmptyContent(
+                "还没有订阅", "在「功能 → 电影港 / 电影天堂」搜索片名，在结果卡片上订阅即可追更",
+                Icons.Outlined.BookmarkBorder, loading = !state.loaded,
+            )
+        }
+        items(rows, key = { it.key }) { sub -> SubscriptionCard(sub, ui.busy == null && !state.loading, vm) }
     }
 }
 
