@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,10 +91,14 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     "xunlei", "xunlei-win" -> R.drawable.session_icon_xunlei
     else -> null
 }
-@Composable fun Panel(modifier: Modifier = Modifier, color: Color = Color.White, content: @Composable ColumnScope.() -> Unit) {
+/**
+ * 白底面板（对应网页端 .panel）：默认 16dp 内边距；紧凑列表可传更小的 [contentPadding]，
+ * 放在最后避免打乱已有的 `Panel(modifier, color) { }` 位置参数调用。
+ */
+@Composable fun Panel(modifier: Modifier = Modifier, color: Color = Color.White, content: @Composable ColumnScope.() -> Unit, contentPadding: Dp = 16.dp) {
     Surface(modifier, shape = RoundedCornerShape(20.dp), color = color,
         border = if (color == Color.White) BorderStroke(1.dp, HuluwaColors.Line) else null) {
-        Column(Modifier.padding(16.dp), content = content)
+        Column(Modifier.padding(contentPadding), content = content)
     }
 }
 @Composable fun RoundIcon(icon: ImageVector, color: Color = HuluwaColors.Pine, modifier: Modifier = Modifier) {
@@ -307,10 +312,13 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         Text(detail, color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
-@Composable fun Poster(title: String, cover: String, modifier: Modifier = Modifier) {
-    Box(modifier.width(70.dp).height(100.dp).clip(RoundedCornerShape(11.dp))
+/**
+ * 海报缩略图：默认 70×100，可用 [size] 整体缩放（订阅卡等紧凑卡片传更小的尺寸）。
+ */
+@Composable fun Poster(title: String, cover: String, modifier: Modifier = Modifier, size: DpSize = DpSize(70.dp, 100.dp)) {
+    Box(modifier.size(size).clip(RoundedCornerShape(11.dp))
         .background(Brush.linearGradient(listOf(Color(0xFFC7D6B7), Color(0xFF577A62)))), contentAlignment = Alignment.Center) {
-        Text(title.take(8), Modifier.padding(10.dp), color = Color.White, style = MaterialTheme.typography.titleMedium)
+        Text(title.take(8), Modifier.padding(8.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
         if (cover.isNotBlank()) AsyncImage(cover, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }

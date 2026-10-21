@@ -27,19 +27,19 @@
                         </div>
                         <!-- 来源 + 收录条数合并成一行（原年份 / 类型与下方标签行一并移除），与安卓卡片保持一致 -->
                         <p class="sub-meta">{{ metaLine(item) }}</p>
+                        <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
+                        <!-- 立即检查与资源列表紧跟在「电影港 · 已收录 N 条」下方，不再横跨卡片底部 -->
+                        <div class="sub-actions">
+                            <button class="sub-action" type="button" :disabled="busy || !item.enabled"
+                                @click="check(item)">
+                                <i class="fa-solid fa-rotate"></i>
+                                {{ checking === item.subscriptionKey ? '检查中…' : '立即检查' }}
+                            </button>
+                            <button class="sub-action" type="button" @click="openResources(item)">
+                                <i class="fa-solid fa-list"></i>资源列表
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
-                <!-- 原「…」菜单里的操作迁到卡片底部：立即检查与资源列表各占一半宽度 -->
-                <div class="sub-actions">
-                    <button class="sub-action" type="button" :disabled="busy || !item.enabled"
-                        @click="check(item)">
-                        <i class="fa-solid fa-rotate"></i>
-                        {{ checking === item.subscriptionKey ? '检查中…' : '立即检查' }}
-                    </button>
-                    <button class="sub-action" type="button" @click="openResources(item)">
-                        <i class="fa-solid fa-list"></i>资源列表
-                    </button>
                 </div>
             </article>
         </div>
@@ -296,11 +296,11 @@ export default {
     line-height: 1.6;
 }
 
-/* 订阅卡：白卡 + 海报 + 信息（对齐安卓 SubscriptionCard） */
+/* 订阅卡：白卡 + 海报 + 信息（对齐安卓 SubscriptionCard，紧凑布局） */
 .sub-card {
-    margin-bottom: 12px;
-    padding: 16px;
-    border-radius: 20px;
+    margin-bottom: 10px;
+    padding: 12px;
+    border-radius: 18px;
     border: 1px solid var(--line);
     background: #fff;
 }
@@ -311,14 +311,14 @@ export default {
 
 .sub-main {
     display: flex;
-    gap: 13px;
+    gap: 11px;
 }
 
 .poster {
     flex: none;
-    width: 70px;
-    height: 100px;
-    border-radius: 11px;
+    width: 56px;
+    height: 80px;
+    border-radius: 9px;
     object-fit: cover;
     background: linear-gradient(160deg, #C7D6B7, #577A62);
 }
@@ -328,7 +328,7 @@ export default {
     align-items: center;
     justify-content: center;
     color: #fff;
-    font-size: 24px;
+    font-size: 20px;
 }
 
 .sub-info {
@@ -336,7 +336,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
 }
 
 .sub-title-row {
@@ -348,27 +348,26 @@ export default {
 .sub-title-row strong {
     flex: 1;
     min-width: 0;
-    font-size: 15px;
+    font-size: 14.5px;
     font-weight: 600;
     color: var(--ink);
-    line-height: 1.45;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    line-height: 1.35;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* 右上角「取消订阅」：次要文字按钮，删除类操作用警示色区分 */
 .unsub-btn {
     flex: none;
     margin: -2px -4px 0 0;
-    padding: 4px 8px;
+    padding: 3px 7px;
     border: 0;
     border-radius: 9px;
     background: none;
     color: var(--danger);
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
@@ -389,25 +388,28 @@ export default {
     margin: 0;
     font-size: 12px;
     color: var(--muted);
-    line-height: 1.5;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sub-error {
+    margin: 5px 0 0;
+    font-size: 11.5px;
+    color: var(--danger);
+    line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
-.sub-error {
-    margin: 8px 0 0;
-    font-size: 12px;
-    color: var(--danger);
-    line-height: 1.55;
-}
-
-/* 卡片底部操作条：原「…」菜单里的立即检查与资源列表，等宽两个按钮 */
+/* 卡片内操作条：紧跟在「电影港 · 已收录 N 条」下方，等宽两个按钮 */
 .sub-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 12px;
+    gap: 7px;
+    margin-top: 8px;
 }
 
 .sub-action {
@@ -416,15 +418,15 @@ export default {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    height: 36px;
-    padding: 0 10px;
+    gap: 5px;
+    height: 32px;
+    padding: 0 8px;
     border: 1px solid var(--line);
-    border-radius: 11px;
+    border-radius: 9px;
     background: #fff;
     color: var(--pine);
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;

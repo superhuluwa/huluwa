@@ -28,8 +28,8 @@ import com.huluwa.android.data.*
 @Composable fun SubscriptionsScreen(ui: AppState, vm: HuluwaViewModel) {
     val state = ui.subscriptions
     val rows = state.data
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
         if (state.error != null && !state.error.isServerUnreachable()) item {
             Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
@@ -45,45 +45,46 @@ import com.huluwa.android.data.*
 }
 
 @Composable private fun SubscriptionCard(sub: Subscription, enabled: Boolean, vm: HuluwaViewModel) {
-    Panel(Modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(13.dp), verticalAlignment = Alignment.Top) {
-            Poster(sub.title, sub.cover)
+    // 紧凑卡片：内边距 12、海报 56×80、按钮 32 高，一屏能多放一张
+    Panel(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
+        Row(horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.Top) {
+            Poster(sub.title, sub.cover, size = DpSize(56.dp, 80.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(sub.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(sub.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // 右上角「取消订阅」：取消即删除订阅记录，已下载文件保留；已暂停的残留项显示「删除订阅」
                     TextButton(
                         onClick = { vm.deleteSubscription(sub) }, enabled = enabled,
-                        modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp),
+                        modifier = Modifier.height(28.dp), contentPadding = PaddingValues(horizontal = 6.dp),
                     ) {
                         Text(if (sub.enabled) "取消订阅" else "删除订阅", color = HuluwaColors.Danger,
-                            style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                            style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
                 }
                 // 来源 + 收录条数合并成一行（原年份 / 类型与下方标签行一并移除），追更中的状态不再标注
                 Text(listOf(sub.source.title, "已收录 ${sub.count} 条", if (sub.enabled) "" else "已暂停").filter(String::isNotBlank).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // 失败原因与两个操作按钮都跟在信息列里，不再横跨整张卡片底部
+                if (sub.lastError.isNotBlank()) Text(sub.lastError, Modifier.padding(top = 5.dp), color = HuluwaColors.Danger,
+                    style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    SubscriptionAction("立即检查", Icons.Outlined.Refresh, enabled && sub.enabled, Modifier.weight(1f)) { vm.checkSubscription(sub) }
+                    SubscriptionAction("资源列表", Icons.Outlined.List, true, Modifier.weight(1f)) { vm.filmResources(sub.asFilmCard()) }
+                }
             }
-        }
-        // 巡检时间不再展示，只保留上次失败的原文提示
-        if (sub.lastError.isNotBlank()) Text(sub.lastError, Modifier.padding(top = 7.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
-        // 原「…」菜单里的操作迁到卡片底部：资源列表以按钮形式提供，立即检查只在追更中可用
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SubscriptionAction("立即检查", Icons.Outlined.Refresh, enabled && sub.enabled, Modifier.weight(1f)) { vm.checkSubscription(sub) }
-            SubscriptionAction("资源列表", Icons.Outlined.List, true, Modifier.weight(1f)) { vm.filmResources(sub.asFilmCard()) }
         }
     }
 }
 
-/** 订阅卡片底部的次要操作按钮：白底细边框，文字与图标统一用松柏绿。 */
+/** 订阅卡片信息列里的次要操作按钮：白底细边框，文字与图标统一用松柏绿。 */
 @Composable private fun SubscriptionAction(label: String, icon: ImageVector, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     OutlinedButton(
-        onClick, modifier.height(38.dp), enabled = enabled, shape = RoundedCornerShape(11.dp),
+        onClick, modifier.height(32.dp), enabled = enabled, shape = RoundedCornerShape(9.dp),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = HuluwaColors.Pine),
-        border = BorderStroke(1.dp, HuluwaColors.Line), contentPadding = PaddingValues(horizontal = 10.dp),
+        border = BorderStroke(1.dp, HuluwaColors.Line), contentPadding = PaddingValues(horizontal = 8.dp),
     ) {
-        Icon(icon, null, Modifier.size(16.dp))
-        Spacer(Modifier.width(5.dp))
+        Icon(icon, null, Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
