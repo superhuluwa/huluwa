@@ -3,7 +3,6 @@ package com.huluwa.android.data
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -74,14 +73,6 @@ class HuluwaRepository(val api: ApiClient) {
         val response = if (sub.source == SubscriptionSource.Hls) api.post("hls", "subscriptions", sub.id, "check")
             else api.post("chat", "subscriptions", sub.id, "check")
         return response.requireSuccess().asObject().text("message", fallback = "订阅检查完成")
-    }
-    suspend fun toggle(sub: Subscription) {
-        if (sub.source == SubscriptionSource.Hls) api.post("hls", "subscriptions", sub.id, "enabled", body = ApiJson.encodeToJsonElement(EnabledRequest(!sub.enabled))).requireSuccess()
-        else if (sub.enabled) api.post("chat", "subscriptions", sub.id, "unsubscribe").requireSuccess()
-        else api.post("chat", "subscriptions", body = jsonBody {
-            put("id", sub.raw.text("resId")); put("title", sub.title); put("year", sub.year); put("origin", sub.raw.text("origin"))
-            put("genre", sub.genre); put("cover", sub.cover); put("url", sub.raw.text("detailUrl")); put("downloader", sub.raw.text("downloader"))
-        }).requireSuccess()
     }
     suspend fun deleteSubscription(sub: Subscription) {
         if (sub.source == SubscriptionSource.Hls) api.delete("hls", "subscriptions", sub.id).requireSuccess()

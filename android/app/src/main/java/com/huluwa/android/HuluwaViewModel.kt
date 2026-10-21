@@ -631,7 +631,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun downloadLog(task: DownloadTask) = loadText("下载日志") { repository.downloadLog(task.id) }
     fun checkSubscription(sub: Subscription) = perform("check:${sub.key}", "", close = false, after = { refreshSubscriptions(); refreshDownloads(true) }) { notify(repository.check(sub)) }
-    fun toggleSubscription(sub: Subscription) = perform("toggle:${sub.key}", if (sub.enabled) "已暂停追更" else "已恢复追更", after = { refreshSubscriptions(); refreshDownloads(true) }) { repository.toggle(sub) }
     fun deleteSubscription(sub: Subscription) = confirm("删除订阅", if (sub.source == SubscriptionSource.Hls) "删除「${sub.title}」及其追更任务记录，已归档文件保留。" else "删除「${sub.title}」及其磁力基线、下载记录，已下载文件保留。", "删除订阅") {
         perform("delete:${sub.key}", "订阅已删除", after = { refreshSubscriptions(); refreshDownloads(true) }) { repository.deleteSubscription(sub) }
     }

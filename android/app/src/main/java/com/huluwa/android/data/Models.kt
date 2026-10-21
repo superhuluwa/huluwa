@@ -25,7 +25,6 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 
 @Serializable data class Credentials(val username: String, val password: String)
 @Serializable data class SendMessageRequest(val content: String, val requestId: String)
-@Serializable data class EnabledRequest(val enabled: Boolean)
 @Serializable data class TunnelDraft(
     val name: String = "", val proxyType: String = "tcp", val localIp: String = "127.0.0.1",
     val localPort: Int? = null, val remotePort: Int? = null, val customDomains: String = "",

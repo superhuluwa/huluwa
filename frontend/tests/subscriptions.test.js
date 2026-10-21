@@ -9,16 +9,14 @@ vi.mock('@/libs/http', () => ({ default: { get: vi.fn(), post: vi.fn(), delete: 
 vi.stubGlobal('window', { $dialog: null, $message: { success: vi.fn() } })
 
 vi.mock('@/api/chat', () => ({
-    GetSubscriptions: vi.fn(), CheckSubscription: vi.fn(), DeleteSubscription: vi.fn(),
-    SubscriptionMagnets: vi.fn(), DownloadMagnet: vi.fn(), SubscribeMovie: vi.fn()
+    GetSubscriptions: vi.fn(), CheckSubscription: vi.fn(), DeleteSubscription: vi.fn()
 }))
 
 vi.mock('@/api/hls', () => ({
-    GetHlsSubscriptions: vi.fn(), CheckHlsSubscription: vi.fn(),
-    EnableHlsSubscription: vi.fn(), DeleteHlsSubscription: vi.fn()
+    GetHlsSubscriptions: vi.fn(), CheckHlsSubscription: vi.fn(), DeleteHlsSubscription: vi.fn()
 }))
 
-/** 只取订阅页需要的方法与数据，不挂载组件：验证「状态徽标即删除入口」的交互契约。 */
+/** 只取订阅页需要的方法与数据，不挂载组件：验证「取消订阅即删除」的交互契约。 */
 function page(dialog) {
     const vm = { ...Subscriptions.data(), $dialog: dialog, $message: { success: vi.fn(), warning: vi.fn() } }
     for (const [name, method] of Object.entries(Subscriptions.methods)) vm[name] = method.bind(vm)
@@ -44,7 +42,7 @@ beforeEach(() => {
     hlsApi.DeleteHlsSubscription.mockResolvedValue({ ok: true })
 })
 
-describe('我的订阅：状态徽标即删除入口', () => {
+describe('我的订阅：取消订阅即删除', () => {
     it('点击「已订阅」先确认「是否取消订阅」，确认后删除该订阅', async () => {
         const dialog = dialogStub()
         const vm = page(dialog)
@@ -59,12 +57,9 @@ describe('我的订阅：状态徽标即删除入口', () => {
         expect(chatApi.DeleteSubscription).toHaveBeenCalledWith(7)
         expect(vm.reload).toHaveBeenCalled()
         expect(vm.deleting).toBe('')
-
-        // 取消订阅即删除，不再走「仅停用、保留基线」的旧路径
-        expect(hlsApi.EnableHlsSubscription).not.toHaveBeenCalled()
     })
 
-    it('电影天堂的暂停追更同样按删除处理，删除后不再保留订阅行', async () => {
+    it('电影天堂的「取消订阅」同样按删除处理，删除后不再保留订阅行', async () => {
         const dialog = dialogStub()
         const vm = page(dialog)
         vm.cancel(hlsItem)
@@ -76,7 +71,7 @@ describe('我的订阅：状态徽标即删除入口', () => {
         expect(vm.reload).toHaveBeenCalled()
     })
 
-    it('已取消 / 已暂停的残留项点徽标可直接删除，不提供恢复入口以外的操作', async () => {
+    it('已取消 / 已暂停的残留项显示「删除订阅」，确认后直接删除', async () => {
         const dialog = dialogStub()
         const vm = page(dialog)
         vm.cancel({ ...movieItem, enabled: false })
@@ -95,12 +90,11 @@ describe('我的订阅：状态徽标即删除入口', () => {
         expect(hlsApi.DeleteHlsSubscription).not.toHaveBeenCalled()
     })
 
-    it('恢复入口只在非订阅状态出现：恢复追更走启用接口，不删除订阅', async () => {
-        hlsApi.EnableHlsSubscription.mockResolvedValue({})
-        const vm = page(dialogStub())
-        await vm.resubscribe({ ...hlsItem, enabled: false })
-
-        expect(hlsApi.EnableHlsSubscription).toHaveBeenCalledWith(9, true)
-        expect(hlsApi.DeleteHlsSubscription).not.toHaveBeenCalled()
+    it('不再提供恢复追更入口：页面只有检查、资源列表与删除', () => {
+        expect(Subscriptions.methods.resubscribe).toBeUndefined()
+        expect(Subscriptions.methods.toggleMenu).toBeUndefined()
+        expect(typeof Subscriptions.methods.check).toBe('function')
+        expect(typeof Subscriptions.methods.openResources).toBe('function')
+        expect(typeof Subscriptions.methods.cancel).toBe('function')
     })
 })

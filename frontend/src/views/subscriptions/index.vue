@@ -19,21 +19,11 @@
                     <div class="sub-info">
                         <div class="sub-title-row">
                             <strong>{{ item.title }}</strong>
-                            <div class="more-wrap">
-                                <button class="icon-btn" type="button" title="管理订阅" @click="toggleMenu(item.subscriptionKey)">
-                                    <i class="fa-solid fa-ellipsis"></i>
-                                </button>
-                                <div v-if="menuKey === item.subscriptionKey" class="more-menu">
-                                    <button type="button" :disabled="busy || !item.enabled" @click="check(item)">立即检查</button>
-                                    <button type="button" :disabled="busy" @click="cancel(item)">
-                                        {{ item.enabled ? '取消订阅' : '删除订阅' }}
-                                    </button>
-                                    <button type="button" @click="openResources(item)">资源列表</button>
-                                    <button v-if="!item.enabled" type="button" :disabled="busy" @click="resubscribe(item)">
-                                        {{ isHls(item) ? '恢复追更' : '重新订阅' }}
-                                    </button>
-                                </div>
-                            </div>
+                            <!-- 取消订阅即删除订阅记录（已下载文件保留）；历史遗留的已暂停项显示「删除订阅」 -->
+                            <button class="unsub-btn" type="button" :disabled="busy || deleting === item.subscriptionKey"
+                                @click="cancel(item)">
+                                {{ item.enabled ? '取消订阅' : '删除订阅' }}
+                            </button>
                         </div>
                         <p class="sub-meta">{{ [item.year, item.genre, sourceLabel(item)].filter(Boolean).join(' · ') }}</p>
                         <div class="sub-tags">
@@ -47,17 +37,16 @@
                 <p v-if="item.lastCheckAt" class="sub-line">上次检查：{{ item.lastCheckAt }}</p>
                 <p v-if="item.enabled && item.nextCheckAt" class="sub-line">下次检查：{{ item.nextCheckAt }}</p>
                 <p v-if="item.lastError" class="sub-error">{{ item.lastError }}</p>
-                <div v-if="magnetsOpen === item.subscriptionKey" class="magnet-panel">
-                    <p v-if="!magnets.length" class="sub-line">暂无磁力记录</p>
-                    <div v-for="magnet in magnets" :key="magnet.id" class="magnet-row">
-                        <span class="magnet-quality">{{ magnet.quality }}</span>
-                        <span class="magnet-title">{{ magnet.title || `第 ${magnet.episode} 集` }}</span>
-                        <button v-if="!magnet.downloaded" type="button" class="mini-btn" :disabled="downloading === magnet.id"
-                            @click="downloadMagnet(magnet)">
-                            {{ downloading === magnet.id ? '提交中…' : '下载' }}
-                        </button>
-                        <span v-else class="magnet-done">已下载</span>
-                    </div>
+                <!-- 原「…」菜单里的操作迁到卡片底部：立即检查与资源列表各占一半宽度 -->
+                <div class="sub-actions">
+                    <button class="sub-action" type="button" :disabled="busy || !item.enabled"
+                        @click="check(item)">
+                        <i class="fa-solid fa-rotate"></i>
+                        {{ checking === item.subscriptionKey ? '检查中…' : '立即检查' }}
+                    </button>
+                    <button class="sub-action" type="button" @click="openResources(item)">
+                        <i class="fa-solid fa-list"></i>资源列表
+                    </button>
                 </div>
             </article>
         </div>
@@ -74,19 +63,15 @@
  * 我的订阅（系统会话，对齐安卓 ManagementSessionScreen + SubscriptionsScreen）：
  *  - 电影港（磁力订阅）与电影天堂（离线剧集订阅）合并为一个列表，按加入时间排列；
  *  - 卡片展示封面、来源、追更状态、已收录数量与巡检时间；
- *  - 「…」菜单提供立即检查、取消 / 删除、资源列表、恢复追更；
- *  - 取消订阅即删除（与网页版既有约定一致，测试也覆盖了这一契约）。
+ *  - 卡片右上角为「取消订阅」（取消即删除记录，已下载文件保留），
+ *    原「…」菜单里的立即检查与资源列表改为卡片底部按钮；
+ *  - 不再提供暂停 / 恢复追更：历史遗留的已暂停项只保留「删除订阅」。
  *  - 原底部「订阅」标签已移除，本页作为系统会话整屏打开，返回键回到系统会话列表。
  */
 import ManagementShell from '@/components/main/management-shell.vue'
 import { useHlsSubscriptionsStore } from '@/stores/hlsSubscriptions'
-import {
-    GetSubscriptions, CheckSubscription, DeleteSubscription, SubscriptionMagnets,
-    DownloadMagnet, SubscribeMovie
-} from '@/api/chat'
-import {
-    GetHlsSubscriptions, CheckHlsSubscription, DeleteHlsSubscription, EnableHlsSubscription
-} from '@/api/hls'
+import { GetSubscriptions, CheckSubscription, DeleteSubscription } from '@/api/chat'
+import { GetHlsSubscriptions, CheckHlsSubscription, DeleteHlsSubscription } from '@/api/hls'
 import HlsResourceDialog from '@/views/message/components/HlsResourceDialog.vue'
 import PlaySourceDialog from '@/views/message/components/PlaySourceDialog.vue'
 import MagnetListDialog from '@/views/message/components/MagnetListDialog.vue'
@@ -103,12 +88,8 @@ export default {
             busy: false,
             deleting: '',
             checking: '',
-            downloading: 0,
             loadError: '',
             rows: [],
-            menuKey: '',
-            magnetsOpen: '',
-            magnets: [],
             hlsDialog: false,
             playDialog: false,
             hlsMovie: null,
@@ -117,7 +98,6 @@ export default {
         }
     },
     mounted() {
-        document.addEventListener('click', this.onDocumentClick)
         this.reload()
     },
     activated() {
@@ -204,16 +184,7 @@ export default {
                 raw: item
             }
         },
-        toggleMenu(key) {
-            this.menuKey = this.menuKey === key ? '' : key
-        },
-        onDocumentClick(event) {
-            if (!event.target.closest?.('.more-wrap')) {
-                this.menuKey = ''
-            }
-        },
         async check(item) {
-            this.menuKey = ''
             this.checking = item.subscriptionKey
             this.busy = true
             try {
@@ -232,9 +203,8 @@ export default {
                 this.busy = false
             }
         },
-        /** 状态徽标即删除入口（与既有交互契约一致）：取消订阅 = 删除订阅 */
+        /** 右上角「取消订阅」即删除入口：取消订阅 = 删除订阅记录 */
         cancel(item) {
-            this.menuKey = ''
             const enabled = item.enabled
             this.$dialog.warning({
                 title: enabled ? '是否取消订阅' : '是否删除订阅',
@@ -261,35 +231,7 @@ export default {
                 }
             })
         },
-        async resubscribe(item) {
-            this.menuKey = ''
-            this.busy = true
-            try {
-                if (item.sourceType === 'hls') {
-                    await EnableHlsSubscription(item.id, true)
-                } else {
-                    const raw = item.raw || {}
-                    await SubscribeMovie({
-                        id: raw.resId || item.id,
-                        title: item.title,
-                        year: item.year,
-                        origin: raw.origin || '',
-                        genre: item.genre,
-                        cover: item.cover,
-                        url: raw.detailUrl || item.detailUrl,
-                        downloader: item.downloader
-                    })
-                }
-                this.$message.success('已恢复追更')
-                await this.reload()
-            } catch (error) {
-                // 拦截器已提示
-            } finally {
-                this.busy = false
-            }
-        },
         openResources(item) {
-            this.menuKey = ''
             if (item.sourceType === 'hls') {
                 this.hlsMovie = { id: item.resId || item.id, title: item.title, apiUrl: item.apiUrl, detailUrl: item.detailUrl }
                 this.hlsDialog = true
@@ -305,18 +247,6 @@ export default {
                 show: true,
                 url: raw.detailUrl || item.detailUrl,
                 title: item.title
-            }
-        },
-        async downloadMagnet(magnet) {
-            this.downloading = magnet.id
-            try {
-                await DownloadMagnet({ magnetId: magnet.id })
-                this.$message.success('已提交下载')
-                magnet.downloaded = true
-            } catch (error) {
-                // 拦截器已提示
-            } finally {
-                this.downloading = 0
             }
         }
     }
@@ -430,62 +360,28 @@ export default {
     overflow: hidden;
 }
 
-.icon-btn {
+/* 右上角「取消订阅」：次要文字按钮，删除类操作用警示色区分 */
+.unsub-btn {
     flex: none;
-    width: 34px;
-    height: 34px;
-    margin: -6px -6px 0 0;
+    margin: -2px -4px 0 0;
+    padding: 4px 8px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 9px;
     background: none;
-    color: var(--muted);
-    font-size: 14px;
-    cursor: pointer;
-}
-
-.icon-btn:hover {
-    background: var(--soft-green);
-    color: var(--pine);
-}
-
-.more-wrap {
-    position: relative;
-    flex: none;
-}
-
-.more-menu {
-    position: absolute;
-    top: 34px;
-    right: 0;
-    z-index: 30;
-    min-width: 150px;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    border-radius: 14px;
-    background: #fff;
-    border: 1px solid var(--line);
-    box-shadow: 0 12px 32px rgba(36, 61, 50, .16);
-}
-
-.more-menu button {
-    padding: 10px 12px;
-    border: 0;
-    border-radius: 10px;
-    background: none;
-    color: var(--ink);
+    color: var(--danger);
     font-family: inherit;
-    font-size: 13px;
-    text-align: left;
-    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 500;
     white-space: nowrap;
+    cursor: pointer;
+    transition: background .15s;
 }
 
-.more-menu button:hover:not(:disabled) {
-    background: var(--soft-green);
+.unsub-btn:hover:not(:disabled) {
+    background: rgba(180, 68, 82, .08);
 }
 
-.more-menu button:disabled {
+.unsub-btn:disabled {
     opacity: .45;
     cursor: default;
 }
@@ -541,56 +437,41 @@ export default {
     line-height: 1.55;
 }
 
-.magnet-panel {
+/* 卡片底部操作条：原「…」菜单里的立即检查与资源列表，等宽两个按钮 */
+.sub-actions {
+    display: flex;
+    gap: 8px;
     margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid var(--line);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
 }
 
-.magnet-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-}
-
-.magnet-quality {
-    flex: none;
-    color: var(--pine);
-    font-weight: 600;
-}
-
-.magnet-title {
+.sub-action {
     flex: 1;
     min-width: 0;
-    color: var(--muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.mini-btn {
-    flex: none;
-    padding: 6px 12px;
-    border: 0;
-    border-radius: 10px;
-    background: var(--pine);
-    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    background: #fff;
+    color: var(--pine);
     font-family: inherit;
-    font-size: 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+    white-space: nowrap;
     cursor: pointer;
+    transition: background .15s, border-color .15s;
 }
 
-.mini-btn:disabled {
-    opacity: .6;
+.sub-action:hover:not(:disabled) {
+    background: var(--soft-green);
+    border-color: rgba(32, 108, 84, .35);
 }
 
-.magnet-done {
-    flex: none;
-    color: var(--muted);
-    font-size: 11px;
+.sub-action:disabled {
+    opacity: .45;
+    cursor: default;
 }
 </style>
