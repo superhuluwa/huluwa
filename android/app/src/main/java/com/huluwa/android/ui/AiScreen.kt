@@ -233,7 +233,7 @@ import kotlinx.serialization.json.*
             Row(Modifier.align(Alignment.End)) {
                 TextButton({ answer(approval, "decline", JsonObject(emptyMap())) }, enabled = !working) { Text("拒绝") }
                 TextButton({
-                    val values = buildJsonObject { responses.forEach { (id, value) -> put(id, buildJsonObject { put("answers", buildJsonArray { add(value) }) }) }
+                    val values = buildJsonObject { responses.forEach { (id, value) -> put(id, buildJsonObject { put("answers", buildJsonArray { add(value) }) }) } }
                     answer(approval, "accept", values)
                 }, enabled = !working && questions.all { responses[it.text("id")]?.isNotBlank() == true }) { Text(if (questions.isEmpty()) "允许本次" else "发送回复") }
             }
