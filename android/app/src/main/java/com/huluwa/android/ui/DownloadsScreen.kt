@@ -1,7 +1,6 @@
 package com.huluwa.android.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,43 +16,39 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 @Composable fun DownloadsScreen(ui: AppState, vm: HuluwaViewModel) {
-    var filter by rememberSaveable { mutableIntStateOf(0) }
+    // 默认展示全部任务：去掉顶部汇总卡片和多余标题，列表直接从筛选条下方开始
+    var filter by rememberSaveable { mutableIntStateOf(2) }
     var menu by remember { mutableStateOf(false) }
     val all = ui.downloads.data
-    // 三个来源合并成一个列表：不再按来源分区或筛选，来源改由卡片上的标签区分
+    // 三个来源合并成一个列表：不再按来源分区，来源改由卡片上的标签区分
     val tasks = all.filter { when (filter) { 0 -> it.active; 1 -> it.completed; else -> true } }
     val busy = ui.busy == null && !ui.downloads.loading
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Spacer(Modifier.height(10.dp))
-            DownloadHero(all)
-            Spacer(Modifier.height(14.dp))
-            FilterRow(listOf("进行中 ${all.count { it.active }}", "已完成 ${all.count { it.completed }}", "全部任务 ${all.size}"), filter, { filter = it })
-            SectionTitle("下载任务", Modifier.padding(top = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
-                    Box {
-                        DownloadToolButton(Icons.Outlined.MoreHoriz, "下载操作") { menu = true }
-                        DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
-                            DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
-                            DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
-                            DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
-                                onClick = { menu = false; vm.clearDownloads(type) }) }
-                        }
+            // 筛选与刷新、更多操作收在同一行，节省列表上方空间
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterRow(listOf("进行中 ${all.count { it.active }}", "已完成 ${all.count { it.completed }}", "全部 ${all.size}"),
+                    filter, { filter = it }, Modifier.weight(1f))
+                DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
+                Box {
+                    DownloadToolButton(Icons.Outlined.MoreHoriz, "下载操作") { menu = true }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
+                        DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
+                        DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
+                        DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
+                            onClick = { menu = false; vm.clearDownloads(type) }) }
                     }
                 }
             }
@@ -66,45 +61,6 @@ import com.huluwa.android.data.*
                 !ui.downloads.loaded)
         }
         items(tasks, key = { it.key }) { task -> DownloadCard(task, busy, vm) }
-    }
-}
-
-@Composable private fun DownloadHero(tasks: List<DownloadTask>) {
-    val active = tasks.count { it.active }
-    val waiting = tasks.count { it.active && (it.progress == null || it.progress <= 0f) }
-    val completed = tasks.count { it.completed }
-    val totalSpeed = tasks.filter { it.active }.sumOf { speedBytes(it.speed) }
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = HuluwaColors.Pine,
-        contentColor = Color.White, shadowElevation = 2.dp) {
-        Box(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(Color(0xFF174E3D), HuluwaColors.Pine, Color(0xFF2A785F))))) {
-            Box(Modifier.size(170.dp).align(Alignment.TopEnd).offset(x = 52.dp, y = (-82).dp)
-                .clip(RoundedCornerShape(100.dp)).background(Color.White.copy(alpha = .07f)))
-            Column(Modifier.padding(horizontal = 18.dp, vertical = 17.dp)) {
-                Text("当前下载速度", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Lime)
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(if (totalSpeed > 0) formatBytes(totalSpeed) else "待同步", fontSize = 31.sp, lineHeight = 34.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
-                    if (totalSpeed > 0) Text("/s", Modifier.padding(start = 5.dp, bottom = 4.dp),
-                        color = Color.White.copy(alpha = .68f), style = MaterialTheme.typography.labelSmall)
-                }
-                Spacer(Modifier.height(15.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = .14f))
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    HeroMetric("$active", "个任务正在下载")
-                    HeroMetric("$waiting", "个等待中")
-                    HeroMetric("$completed", "个已完成")
-                }
-            }
-        }
-    }
-}
-
-@Composable private fun HeroMetric(value: String, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(value, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(label, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -124,19 +80,6 @@ import com.huluwa.android.data.*
         Text(if (loading) "请稍候，正在获取服务器下载任务" else detail, color = HuluwaColors.Muted,
             style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
     }
-}
-
-private fun speedBytes(raw: String): Double {
-    val match = Regex("([0-9]+(?:\\.[0-9]+)?)\\s*([kmgt]?b)(?:/s)?").find(raw.trim().lowercase()) ?: return 0.0
-    val amount = match.groupValues[1].toDoubleOrNull() ?: return 0.0
-    val multiplier = when (match.groupValues[2]) {
-        "kb" -> 1024.0
-        "mb" -> 1024.0 * 1024
-        "gb" -> 1024.0 * 1024 * 1024
-        "tb" -> 1024.0 * 1024 * 1024 * 1024
-        else -> 1.0
-    }
-    return amount * multiplier
 }
 
 @Composable private fun DownloadCard(task: DownloadTask, enabled: Boolean, vm: HuluwaViewModel) {
