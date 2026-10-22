@@ -1,0 +1,895 @@
+{
+  "date": "2026-10-22",
+  "interactionChecks": [
+    {
+      "style": "pine",
+      "test": "执行日志展开",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "切换项目",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "切换供应商",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "切换模型",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "发送并显示中断按钮",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "中断回复",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "模拟回复",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "执行日志展开",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "切换项目",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "切换供应商",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "切换模型",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "发送并显示中断按钮",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "中断回复",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "模拟回复",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "执行日志展开",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "切换项目",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "切换供应商",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "切换模型",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "发送并显示中断按钮",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "中断回复",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "模拟回复",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "密码可见切换",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "本地连接流程",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "新建对话空状态",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "对话详情",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "操作允许",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "操作拒绝",
+      "pass": true
+    },
+    {
+      "style": "pine",
+      "test": "删除演示对话",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "密码可见切换",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "本地连接流程",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "新建对话空状态",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "对话详情",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "操作允许",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "操作拒绝",
+      "pass": true
+    },
+    {
+      "style": "editorial",
+      "test": "删除演示对话",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "密码可见切换",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "本地连接流程",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "新建对话空状态",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "对话详情",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "操作允许",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "操作拒绝",
+      "pass": true
+    },
+    {
+      "style": "terminal",
+      "test": "删除演示对话",
+      "pass": true
+    },
+    {
+      "test": "方案视图切换：pine",
+      "pass": true
+    },
+    {
+      "test": "方案视图切换：editorial",
+      "pass": true
+    },
+    {
+      "test": "方案视图切换：terminal",
+      "pass": true
+    },
+    {
+      "test": "方案视图切换：all",
+      "pass": true
+    }
+  ],
+  "responsiveChecks": [
+    {
+      "width": 320,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 375,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 375,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 375,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 375,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 375,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 768,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "view": "home",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "view": "chat",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "view": "picker",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "view": "connection",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "view": "approval",
+      "documentOverflow": false,
+      "phones": [
+        {
+          "style": "pine",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "editorial",
+          "overflow": false,
+          "broken": 0
+        },
+        {
+          "style": "terminal",
+          "overflow": false,
+          "broken": 0
+        }
+      ]
+    }
+  ],
+  "javascriptErrors": [],
+  "androidBuildRun": false
+}

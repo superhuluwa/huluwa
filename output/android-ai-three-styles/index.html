@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>葫芦娃 · AI 页面三种设计</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23206c54'/%3E%3Cpath d='M16 8c-7-5-12 5-6 8-9 5-5 12 6 12s15-7 6-12c6-3 1-13-6-8z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main class="board">
+    <header class="board-header">
+        <a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 6C7 2 3 8 7 11c-7 4-5 11 5 11s12-7 5-11c4-3 0-9-5-5Zm0 0c0-3 2-5 5-5"/></svg></span><strong>葫芦娃</strong><span class="brand-separator"></span><span>安卓 AI · 设计提案</span></a>
+        <span class="prototype-note"><i></i>交互原型 · 本地示例数据</span>
+    </header>
+    <section class="intro">
+        <div><p class="eyebrow">三个方向，一样紧凑。</p><h1>把空间，留给对话。</h1><p class="description">重新整理首页、二级页面和消息排版。更少的界面占用，更多的对话内容。</p></div>
+        <div class="view-switch" role="group" aria-label="选择设计风格">
+            <button type="button" data-view="all" aria-pressed="true">三版对比</button>
+            <button type="button" data-view="pine" aria-pressed="false"><i class="color-dot pine-dot"></i>松柏极简</button>
+            <button type="button" data-view="editorial" aria-pressed="false"><i class="color-dot editorial-dot"></i>黑白编辑</button>
+            <button type="button" data-view="terminal" aria-pressed="false"><i class="color-dot terminal-dot"></i>深色终端</button>
+        </div>
+    </section>
+    <nav class="toolbar" aria-label="同步切换预览页面">
+        <div class="page-switch" role="group" aria-label="预览页面">
+            <button type="button" data-page="home" aria-pressed="false">AI 首页</button>
+            <button type="button" data-page="chat" aria-pressed="true">AI 对话</button>
+            <button type="button" data-page="picker" aria-pressed="false">项目与模型</button>
+            <button type="button" data-page="connection" aria-pressed="false">服务连接</button>
+            <button type="button" data-page="approval" aria-pressed="false">操作确认</button>
+        </div>
+        <button type="button" class="reset-button" id="reset-demo" aria-label="重置三套方案的演示">↻<span>重置演示</span></button>
+    </nav>
+    <section id="gallery" class="gallery" data-view="all" aria-label="三套安卓 AI 页面设计"></section>
+    <footer class="board-footer"><span>每套均可独立体验首页、对话与二级选择页。</span><span>设计原型，非安卓运行截图。</span></footer>
+</main>
+</body>
+</html>

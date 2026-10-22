@@ -91,14 +91,19 @@ private enum class RootPage { Home, Chat, AiConversation }
             if (destination == RootPage.Home) {
                 // 列表层始终在二级页下方：返回时二级页从列表上方滑出，与微信一致
                 Box(Modifier.fillMaxSize().zIndex(0f)) {
+                    val homeBackground = when {
+                        ui.tab.isSessionTab -> SessionsBackground
+                        ui.tab == MainTab.Ai -> AiColors.Background
+                        else -> HuluwaColors.Paper
+                    }
                     Scaffold(
                         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-                        containerColor = if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
+                        containerColor = homeBackground,
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = {
                             // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
-                            PageHeader(ui.tab.title, if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper,
+                            PageHeader(if (ui.tab == MainTab.Ai) "AI 工作台" else ui.tab.title, homeBackground,
                                 onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
                                 reconnecting = reconnecting && ui.tab != MainTab.Ai) {
                                 // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
@@ -116,7 +121,7 @@ private enum class RootPage { Home, Chat, AiConversation }
                                         }
                                         if (unread > 0) Badge(containerColor = HuluwaColors.Pine, contentColor = Color.White) { Text(if (unread > 99) "99+" else unread.toString()) }
                                     }) { Icon(tabIcon(tab), null) } },
-                                    label = { Text(tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    label = { Text(if (tab == MainTab.Ai) "AI" else tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     colors = NavigationBarItemDefaults.colors(selectedIconColor = HuluwaColors.Pine, selectedTextColor = HuluwaColors.Pine,
                                         indicatorColor = HuluwaColors.SoftGreen, unselectedIconColor = HuluwaColors.Muted, unselectedTextColor = HuluwaColors.Muted)) }
                             }
