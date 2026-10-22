@@ -33,6 +33,28 @@ Ai 登录与葫芦娃登录独立；用户名、地址与登录令牌单独保�
 
 这里创建的是 Ai 管理的独立会话；服务器恢复同一 Claude session / Codex thread 以保持上下文。现有桌面 PTY 会话不自动接管进 Ai 消息列表。
 
+## 上下文与 Token 用量
+
+输入框圆角容器内的底部状态栏常驻显示当前上下文占用和会话累计输入、输出 token。点击整行或“对话操作 → 上下文与 Token”打开详情；详情包括本轮输入 / 输出、缓存读取 / 写入、推理输出和统计状态，未提供的明细不显示。占用达到 70% 和 90% 时分别使用提醒色与危险色，这些界面提醒不等同于模型的自动压缩阈值。
+
+直接消费 TerminalBuddy 在会话 JSON 中新增的可选 `usage` 字段，无需通过葫芦娃后端转发，也不新增用量轮询：
+
+| 字段 | 含义 |
+| --- | --- |
+| `usage.context.usedTokens` / `windowTokens` | 最近一次模型调用的上下文占用与容量，均有效时计算百分比 |
+| `usage.context.basis` | Claude 为 `input`，Codex 估算为 `inputAndOutput`；当前上下文不使用整段会话累计消耗计算 |
+| `usage.context.usedSource` / `windowSource` | 用量来源及容量来源；`calculated` 或 `configuration` 对应 `≈` 标注 |
+| `usage.context.updating` | 压缩后等待下一次调用更新，期间不显示旧占用率 |
+| `usage.lastTurn` | 最近一次用户发送触发的整轮用量；`state` 为 `provisional`、`final` 或 `partial` |
+| `usage.sessionTotal` | 会话累计用量；`coverage` 为 `complete`、`sinceUpgrade` 或 `partial` |
+| `inputTokens` / `outputTokens` | 输入（已含缓存）与输出总量，使用可空 `Long`，未知为 `null` |
+| `cacheReadInputTokens` / `cacheCreationInputTokens` | 总输入中对应的缓存明细，不重复叠加 |
+| `reasoningOutputTokens` | 总输出中的推理部分，不重复叠加 |
+
+WebSocket 更新仍以新会话元数据为准，仅按消息 ID 合并历史正文，因此 `usage` 可随元数据保留；REST 补偿及 `revision` 防倒退机制继续适用。新会话首次发送前使用本地会话壳时，显示“用量待返回”，创建与发送成功后跟随服务端快照更新。
+
+旧服务端 / 旧会话没有 `usage` 时，客户端仍可解码和聊天。未知数字显示 `—`，窗口未知时不捏造百分比；旧会话从升级后统计、停止或异常导致的部分用量均在详情中说明。
+
 ## 接口
 
 以下均为 TerminalBuddy 接口，返回直接 JSON，不是葫芦娃的 `code/data` 响应包装。REST 使用 `Authorization: Bearer <token>`，WebSocket 使用现有服务的 token 查询参数机制。
@@ -51,4 +73,4 @@ Ai 登录与葫芦娃登录独立；用户名、地址与登录令牌单独保�
 | `DELETE /api/ai/sessions/{id}` | 删除空闲会话 |
 | `/ws/ai/{id}?token=...` | 首帧完整会话，后续推送元数据与变化的消息 |
 
-核心代码：`ui/AiScreen.kt`（首页与二级会话页）、`ui/HuluwaRoot.kt`（根导航与转场）、`AiViewModel.kt`、`data/AiRepository.kt`、`data/AiModels.kt`。所有新 UI、连接状态和消息生命周期均独立于原有家庭服务聊天功能。
+核心代码：`ui/AiScreen.kt`（首页）、`ui/AiConversationScreen.kt`（二级会话页）、`ui/AiUsageBar.kt`（上下文与用量状态栏 / 详情）、`ui/HuluwaRoot.kt`（根导航与转场）、`AiViewModel.kt`、`data/AiRepository.kt`、`data/AiModels.kt`。所有新 UI、连接状态和消息生命周期均独立于原有家庭服务聊天功能。
