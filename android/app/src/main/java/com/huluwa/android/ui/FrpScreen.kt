@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,95 +18,138 @@ import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 @Composable fun FrpScreen(ui: AppState, vm: HuluwaViewModel) {
+    var filter by rememberSaveable { mutableIntStateOf(0) }
     val tunnels = ui.tunnels
-    val known = tunnels.loaded && tunnels.error == null
+    val reconnecting = rememberReconnecting(vm)
+    val snapshot = tunnels.hasSnapshot()
+    val known = snapshot && tunnels.error == null && ui.runtime.configAvailable && !reconnecting
     val enabled = ui.busy == null && !tunnels.loading && known
+    val running = if (ui.runtime.running) tunnels.data.count { it.running } else 0
+    val failed = tunnels.data.count { it.enabled && it.failed }
+    val disabled = tunnels.data.count { !it.enabled }
+    val filtered = tunnels.data.filter { when (filter) {
+        1 -> ui.runtime.running && it.running
+        2 -> it.enabled && it.failed
+        3 -> !it.enabled
+        else -> true
+    } }
     val status = when {
-        tunnels.loading && !tunnels.loaded -> "连接中"
-        tunnels.error != null -> "连接异常"
-        !tunnels.loaded -> "等待连接"
-        ui.runtime.running -> "运行中"
-        else -> "未运行"
+        reconnecting -> "连接中断"
+        tunnels.error != null -> "无法获取"
+        !snapshot -> if (tunnels.loading) "获取中" else "等待连接"
+        !ui.runtime.running -> "frpc 未运行"
+        else -> "frpc 运行中"
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (reconnecting || tunnels.error != null) item {
+            StatusNotice(if (reconnecting) "暂时连不上服务器" else "无法获取 FRP 状态",
+                if (snapshot) "保留上次数据 · ${statusTime(tunnels.updatedAt)}" else tunnels.error,
+                if (reconnecting) HuluwaColors.Danger else HuluwaColors.Amber) { vm.refreshFrp() }
+        }
         item {
-            Panel(Modifier.fillMaxWidth(), HuluwaColors.Pine) {
+            Panel(Modifier.fillMaxWidth(), HuluwaColors.PineDark) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.AccountTree, null, Modifier.size(32.dp), tint = HuluwaColors.Lime)
-                    Column(Modifier.weight(1f)) {
-                        Text("Frp 隧道服务", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                        Text(if (known) ui.runtime.container else "连接你的内网服务", style = MaterialTheme.typography.labelMedium,
-                            color = Color.White.copy(alpha = .8f))
-                    }
-                    Tag(status, tone = if (tunnels.error != null || known && !ui.runtime.running) Color(0xFFFFD7BD) else HuluwaColors.Lime)
+                    Icon(Icons.Outlined.AccountTree, null, Modifier.size(28.dp), tint = HuluwaColors.Lime)
+                    Text("FRP 隧道服务", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Tag(status, tone = if (!known || !ui.runtime.running) Color(0xFFFFD7BD) else HuluwaColors.Lime)
                 }
-                Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 16.dp)) {
-                    Metric(if (known) tunnels.data.size.toString() else "—", "全部隧道", Modifier.weight(1f), Color.White)
-                    Metric(if (known) tunnels.data.count { it.running }.toString() else "—", "运行中", Modifier.weight(1f), Color.White)
-                    Metric(if (known) tunnels.data.count { !it.enabled }.toString() else "—", "已停用", Modifier.weight(1f), Color.White)
+                Text("容器 ${ui.runtime.container} · ${statusUpdatedAt(tunnels.updatedAt, !known)}", Modifier.padding(top = 9.dp),
+                    color = Color.White.copy(alpha = .75f), style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 18.dp)) {
+                    Metric(if (snapshot) tunnels.data.size.toString() else "—", "全部隧道", Modifier.weight(1f), Color.White)
+                    Metric(if (snapshot) running.toString() else "—", "运行中", Modifier.weight(1f), Color.White)
+                    Metric(if (snapshot) failed.toString() else "—", "异常", Modifier.weight(1f), Color.White)
                 }
-                HorizontalDivider(color = Color.White.copy(alpha = .2f))
-                Text("将家里的服务连接到外网", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = .8f))
+                HorizontalDivider(color = Color.White.copy(alpha = .18f))
+                Text(if (snapshot) "$disabled 条已停用 · 不参与运行告警" else "连接后获取隧道状态",
+                    Modifier.padding(top = 12.dp), style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .8f))
             }
         }
+        if (known && ui.runtime.message.isNotBlank()) item { StatusNotice("FRP 服务提示", ui.runtime.message) }
         item {
-            // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
-            Feedback(loading = false, error = tunnels.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshFrp() })
-            if (known && ui.runtime.message.isNotBlank()) Text(ui.runtime.message, style = MaterialTheme.typography.bodySmall,
-                color = HuluwaColors.Muted, modifier = Modifier.padding(bottom = 8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(vm::reloadFrp, Modifier.weight(1f), enabled = enabled) { Text("热加载") }
-                OutlinedButton(vm::frpLogs, Modifier.weight(1f)) { Text("日志") }
-                OutlinedButton(vm::restartFrp, Modifier.weight(1f), enabled = enabled) { Text("重启") }
-            }
-            SectionTitle("我的隧道", Modifier.padding(top = 8.dp)) {
-                TextButton({ vm.showSheet(AppSheet.TunnelEdit()) }, enabled = enabled) {
-                    Icon(Icons.Outlined.Add, null, Modifier.size(17.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("新增隧道")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(vm::frpLogs, Modifier.weight(1f), enabled = !reconnecting && ui.busy == null) {
+                    Icon(Icons.Outlined.Subject, null, Modifier.size(16.dp)); Spacer(Modifier.width(5.dp)); Text("运行日志")
+                }
+                Button({ vm.showSheet(AppSheet.TunnelEdit()) }, Modifier.weight(1f), enabled = enabled) {
+                    Icon(Icons.Outlined.Add, null, Modifier.size(16.dp)); Spacer(Modifier.width(5.dp)); Text("新增隧道")
                 }
             }
+            SectionTitle("我的隧道") {
+                Text(if (snapshot) "${tunnels.data.size} 条" else "—", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+            }
+            FilterRow(listOf("全部", "运行中", "异常", "已停用"), filter, { filter = it })
         }
-        if (known && !tunnels.loading && tunnels.data.isEmpty()) item {
-            EmptyContent("还没有隧道", "点击“新增隧道”，连接你的第一个内网服务", Icons.Outlined.AccountTree)
+        if (!tunnels.loaded && !snapshot) item { StatusSkeleton() }
+        else if (known && filtered.isEmpty()) item {
+            EmptyContent(if (tunnels.data.isEmpty()) "还没有隧道" else "该筛选下没有隧道",
+                if (tunnels.data.isEmpty()) "点击“新增隧道”，连接你的第一个内网服务" else "试试查看其他状态", Icons.Outlined.AccountTree)
         }
-        items(tunnels.data, key = { it.name }) { tunnel -> TunnelCard(tunnel, enabled, vm) }
-        item { Spacer(Modifier.height(8.dp)) }
+        items(filtered, key = { it.name }) { tunnel -> TunnelCard(tunnel, enabled, known && ui.runtime.running, vm) }
+        item { Text("隧道运行与本地端口可达分别展示，公网访问仍取决于实际连接。",
+            color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium) }
     }
 }
-@Composable private fun TunnelCard(tunnel: Tunnel, enabled: Boolean, vm: HuluwaViewModel) {
+
+@Composable private fun TunnelCard(tunnel: Tunnel, enabled: Boolean, current: Boolean, vm: HuluwaViewModel) {
     var menu by remember { mutableStateOf(false) }
-    val status = if (!tunnel.enabled) "已停用" else if (tunnel.failed) "异常" else if (tunnel.running) "运行中" else tunnel.statusText.ifBlank { "状态待查询" }
-    Panel(Modifier.fillMaxWidth()) {
+    val status = when {
+        !tunnel.enabled -> "已停用"
+        !current -> "状态待查询"
+        tunnel.failed -> "启动异常"
+        tunnel.running -> "运行中"
+        else -> tunnel.statusText.ifBlank { "状态待查询" }
+    }
+    Panel(Modifier.fillMaxWidth(), contentPadding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(if (tunnel.draft.proxyType in setOf("http", "https")) Icons.Outlined.Language else Icons.Outlined.AccountTree, null, Modifier.size(21.dp), tint = HuluwaColors.Pine)
-            Text(tunnel.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            StatusTag(status, healthy = tunnel.running, alert = tunnel.failed)
-            Switch(tunnel.enabled, { vm.toggleTunnel(tunnel) }, enabled = enabled)
+            Icon(if (tunnel.draft.proxyType in setOf("http", "https")) Icons.Outlined.Language else Icons.Outlined.AccountTree,
+                null, Modifier.size(21.dp), tint = if (tunnel.enabled) HuluwaColors.Pine else HuluwaColors.Muted)
+            Column(Modifier.weight(1f)) {
+                Text(tunnel.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("${tunnel.draft.proxyType.uppercase()} · ${if (tunnel.enabled) "已启用" else "已停用"}",
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+            }
+            StatusTag(status, current && tunnel.running, current && tunnel.failed)
+            Box {
+                IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "隧道操作") }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("查看详情") }, onClick = { menu = false; vm.tunnelDetail(tunnel) })
+                    DropdownMenuItem(text = { Text("编辑隧道") }, enabled = enabled,
+                        onClick = { menu = false; vm.showSheet(AppSheet.TunnelEdit(tunnel)) })
+                    DropdownMenuItem(text = { Text(if (tunnel.enabled) "停用隧道" else "启用隧道") }, enabled = enabled,
+                        onClick = { menu = false; vm.toggleTunnel(tunnel) })
+                    DropdownMenuItem(text = { Text("删除隧道", color = HuluwaColors.Danger) }, enabled = enabled,
+                        onClick = { menu = false; vm.deleteTunnel(tunnel) })
+                }
+            }
         }
-        Panel(Modifier.fillMaxWidth().padding(top = 9.dp), HuluwaColors.Paper) {
+        Panel(Modifier.fillMaxWidth().padding(top = 10.dp), HuluwaColors.Paper, contentPadding = 10.dp) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("本地服务", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                     Text(tunnel.localAddress.ifBlank { "—" }, style = MaterialTheme.typography.bodySmall)
                 }
-                Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(17.dp), tint = HuluwaColors.Muted)
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp), tint = HuluwaColors.Muted)
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                    Text(if (tunnel.draft.proxyType in setOf("http", "https")) "远程域名" else "云端端口", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    Text(if (tunnel.draft.proxyType in setOf("http", "https")) "远程域名" else "云端端口",
+                        style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                     Text(tunnel.remoteAddress.ifBlank { "—" }, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Tag(tunnel.draft.proxyType.uppercase(), outlined = true)
-            Text(tunnel.draft.remark, Modifier.weight(1f).padding(start = 7.dp), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            TextButton({ vm.showSheet(AppSheet.TunnelEdit(tunnel)) }, enabled = enabled) { Text("编辑") }
-            Box {
-                IconButton({ menu = true }, enabled = enabled) { Icon(Icons.Outlined.MoreHoriz, "隧道操作") }
-                DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text("删除隧道") }, onClick = { menu = false; vm.deleteTunnel(tunnel) }) }
+            val probe = when {
+                !tunnel.enabled -> "已停用 · 不参与运行告警"
+                !current -> "上次探测 · ${tunnel.probeText.ifBlank { "未探测" }}"
+                tunnel.draft.proxyType in setOf("udp", "sudp") -> "${tunnel.probeText.ifBlank { "未探测" }} · TCP 探测"
+                else -> tunnel.probeText.ifBlank { "未探测" }
             }
+            Text(probe, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+                color = if (current && tunnel.enabled && tunnel.probe == "closed") HuluwaColors.Amber else HuluwaColors.Muted)
+            TextButton({ vm.tunnelDetail(tunnel) }) { Text("查看详情") }
         }
+        if (tunnel.enabled && tunnel.error.isNotBlank()) Text(tunnel.error, color = if (current) HuluwaColors.Danger else HuluwaColors.Muted,
+            style = MaterialTheme.typography.bodySmall)
     }
 }

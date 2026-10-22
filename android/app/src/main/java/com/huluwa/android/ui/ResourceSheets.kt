@@ -286,11 +286,19 @@ private fun episodeNumber(title: String): Int? {
     LabelValue("容器名称", sheet.container.name)
     LabelValue("容器编号", sheet.container.id)
     LabelValue("使用镜像", sheet.container.image)
-    LabelValue("状态", sheet.container.status)
+    LabelValue("状态", raw.child("State").text("Status").ifBlank { sheet.container.status })
+    raw.child("State").child("Health").text("Status").takeIf { it.isNotBlank() }?.let { health ->
+        LabelValue("健康检查", when (health) { "healthy" -> "健康"; "unhealthy" -> "不健康"; "starting" -> "启动中"; else -> health })
+    }
     LabelValue("创建时间", raw.text("Created", "created"))
     LabelValue("重启策略", raw.child("HostConfig").child("RestartPolicy").text("Name", "name"))
     raw.rows("Mounts", "mounts").forEach { mount -> mount.asObject().let { LabelValue("存储挂载", "${it.text("Source", "source")}\n→ ${it.text("Destination", "destination")}") } }
     Button({ vm.containerLogs(sheet.container) }, Modifier.fillMaxWidth(), enabled = !busy) { Text("查看运行日志") }
-    OutlinedButton({ vm.containerAction(sheet.container, if (sheet.container.running) "stop" else "start") }, Modifier.fillMaxWidth(), enabled = !busy) { Text(if (sheet.container.running) "停止容器" else "启动容器") }
-    TextButton({ vm.deleteContainer(sheet.container) }, Modifier.fillMaxWidth(), enabled = !busy && !sheet.container.running) { Text("删除容器", color = HuluwaColors.Danger) }
+    val containerState = raw.child("State").text("Status").ifBlank { sheet.container.state }.lowercase()
+    val canStop = containerState in setOf("running", "paused", "restarting")
+    val canStart = containerState in setOf("created", "exited")
+    OutlinedButton({ vm.containerAction(sheet.container, "restart") }, Modifier.fillMaxWidth(), enabled = !busy && containerState != "removing") { Text("重启容器") }
+    OutlinedButton({ vm.containerAction(sheet.container, if (canStop) "stop" else "start") }, Modifier.fillMaxWidth(),
+        enabled = !busy && (canStop || canStart)) { Text(if (canStop) "停止容器" else "启动容器") }
+    TextButton({ vm.deleteContainer(sheet.container) }, Modifier.fillMaxWidth(), enabled = !busy && containerState in setOf("created", "exited", "dead")) { Text("删除容器", color = HuluwaColors.Danger) }
 }

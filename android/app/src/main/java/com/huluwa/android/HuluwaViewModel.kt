@@ -44,6 +44,7 @@ data class AppState(
     val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
     val library: LibraryState = LibraryState(),
     val browserVisible: Boolean = false,
+    val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
 )
 
 /** 剧集管理：扫描结果 + 当前展开的剧集分组（UI 层可自行维护更细的状态） */
@@ -141,6 +142,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val notices = Channel<String>(Channel.BUFFERED)
     val messages = notices.receiveAsFlow()
     private var foreground = false
+    private val foregroundState = MutableStateFlow(false)
     private var socketJob: Job? = null
     private var pollingJob: Job? = null
     private var upgradeDownloadJob: Job? = null
@@ -152,6 +154,41 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var generation = 0
     private var sheetGeneration = 0
     private var processingStarted = 0L
+
+    init {
+        // 资源轮询只跟随可见的「我的」或服务器详情；FRP / Docker 摘要采用较慢的周期。
+        viewModelScope.launch {
+            combine(mutable, foregroundState) { ui, active ->
+                when {
+                    !active || !ui.auth.loggedIn || ui.browserVisible || ui.chat.session != null -> 0
+                    ui.serverStatusVisible -> 2
+                    ui.tab == MainTab.Mine -> 1
+                    else -> 0
+                }
+            }.distinctUntilChanged().collectLatest { mode ->
+                if (mode == 0) return@collectLatest
+                try {
+                    var nextServicesAt = 0L
+                    while (currentCoroutineContext().isActive) {
+                        refreshServer(true)
+                        val now = System.currentTimeMillis()
+                        if (mode == 1 && now >= nextServicesAt) {
+                            refreshFrpSummary()
+                            refreshDockerSummary()
+                            nextServicesAt = now + 30_000L
+                        }
+                        delay(if (mode == 2) 2_000L else 5_000L)
+                    }
+                } finally {
+                    listOf("mine-server", "mine-frp", "mine-docker").forEach { refreshJobs.remove(it)?.cancel() }
+                    mutable.update { it.copy(mine = it.mine.copy(
+                        server = it.mine.server.copy(loading = false), frp = it.mine.frp.copy(loading = false),
+                        docker = it.mine.docker.copy(loading = false),
+                    )) }
+                }
+            }
+        }
+    }
 
     fun notify(text: String) { viewModelScope.launch { notices.send(text) } }
     fun authenticate(server: String, username: String, password: String, confirmation: String) {
@@ -198,6 +235,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun setForeground(active: Boolean) {
         foreground = active
+        foregroundState.value = active
         if (active && session.loggedIn) startForegroundWork() else stopForegroundWork()
     }
     private fun startForegroundWork() {
@@ -232,13 +270,14 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         upgradeDownloadJob?.cancel(); upgradeDownloadJob = null
         mutable.update { it.copy(realtime = false) }
     }
-    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab) }; refreshCurrent(false) }
+    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false) }; refreshCurrent(false) }
 
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true) } }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, serverStatusVisible = false) } }
     fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
+        if (current.serverStatusVisible) { refreshServer(silent); return }
         val service = current.chat.session?.managementService
         if (service != null) {
             refreshManagement(service, silent)
@@ -261,8 +300,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
             MainTab.Ai -> Unit // AI 使用独立服务连接与生命周期。
             MainTab.Downloads -> refreshDownloads(silent)
-            // 「我的」页只读取已登录信息，按会话未读数刷新即可。
-            MainTab.Mine -> refreshSessions(silent)
+            // 自动刷新由可见性轮询负责；手动刷新独立重取三个模块。
+            MainTab.Mine -> if (!silent) refreshMine()
         }
     }
     private fun refreshManagement(service: ManagementService, silent: Boolean = false) {
@@ -282,6 +321,72 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (!session.loggedIn || refreshJobs[key]?.isActive == true) return
         refreshJobs[key] = viewModelScope.launch { block() }
     }
+    fun openServerStatus() {
+        closeChat(); dismissSheet()
+        mutable.update { it.copy(serverStatusVisible = true) }
+        refreshServer()
+    }
+    fun closeServerStatus() { mutable.update { it.copy(serverStatusVisible = false) } }
+    fun openManagement(service: ManagementService) {
+        val target = state.value.sessions.data.firstOrNull { it.managementService == service }
+            ?: Session(service.sessionId, service.title, service.kind, 0, null)
+        openSession(target)
+    }
+    fun refreshMine() {
+        refreshServer()
+        refreshFrpSummary()
+        refreshDockerSummary()
+    }
+    fun refreshServer(silent: Boolean = false) = refresh("mine-server") {
+        val epoch = generation
+        mutable.update { it.copy(mine = it.mine.copy(server = it.mine.server.copy(loading = !silent || !it.mine.server.loaded))) }
+        try {
+            val data = repository.serverMetrics()
+            if (!data.available) throw ApiException(503, data.message.ifBlank { "资源指标暂不可用" })
+            if (epoch == generation) mutable.update { it.copy(mine = it.mine.copy(server = LoadState(
+                data, loaded = true, updatedAt = System.currentTimeMillis(),
+            ))) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(mine = it.mine.copy(server = it.mine.server.copy(loading = false, loaded = true, error = error.userMessage()))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+    fun refreshFrpSummary() = refresh("mine-frp") {
+        val epoch = generation
+        mutable.update { it.copy(mine = it.mine.copy(frp = it.mine.frp.copy(loading = true))) }
+        try {
+            val data = repository.frpSummary()
+            if (epoch == generation) mutable.update { it.copy(mine = it.mine.copy(frp = LoadState(
+                data, loaded = true, updatedAt = System.currentTimeMillis(),
+                error = if (data.configAvailable) null else data.message.ifBlank { "无法读取隧道配置" },
+            ))) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(mine = it.mine.copy(frp = it.mine.frp.copy(loading = false, loaded = true, error = error.userMessage()))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+    fun refreshDockerSummary() = refresh("mine-docker") {
+        val epoch = generation
+        mutable.update { it.copy(mine = it.mine.copy(docker = it.mine.docker.copy(loading = true))) }
+        try {
+            val data = repository.dockerSummary()
+            if (!data.available) throw ApiException(503, data.message.ifBlank { "Docker 无法连接" })
+            if (epoch == generation) mutable.update { it.copy(mine = it.mine.copy(docker = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis()))) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(mine = it.mine.copy(docker = it.mine.docker.copy(loading = false, loaded = true, error = error.userMessage()))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
     fun refreshSessions(silent: Boolean = false) = refresh("sessions") {
         val epoch = generation
         if (!silent) mutable.update { it.copy(sessions = it.sessions.copy(loading = true, error = null)) }
@@ -364,17 +469,43 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshFrp(silent: Boolean = false) = refresh("frp") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(tunnels = it.tunnels.copy(loading = true, error = null)) }
-        try { val (tunnels, runtime) = repository.frp(); if (epoch == generation) mutable.update { it.copy(tunnels = LoadState(tunnels, loaded = true), runtime = runtime) } }
-        catch (error: CancellationException) { throw error }
-        catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(tunnels = it.tunnels.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
+        if (!silent) mutable.update { it.copy(tunnels = it.tunnels.copy(loading = true)) }
+        try {
+            val (tunnels, runtime) = repository.frp()
+            val now = System.currentTimeMillis()
+            if (epoch == generation) mutable.update { it.copy(
+                tunnels = LoadState(tunnels, loaded = true, updatedAt = now), runtime = runtime,
+                mine = it.mine.copy(frp = LoadState(runtime, loaded = true, updatedAt = now,
+                    error = if (runtime.configAvailable) null else runtime.message.ifBlank { "无法读取隧道配置" })),
+            ) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(tunnels = it.tunnels.copy(loading = false, error = error.userMessage(), loaded = true),
+                    mine = it.mine.copy(frp = it.mine.frp.copy(loading = false, loaded = true, error = error.userMessage()))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
     }
     fun refreshDocker(silent: Boolean = false) = refresh("docker") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(containers = it.containers.copy(loading = true, error = null)) }
-        try { val (containers, overview) = repository.docker(); if (epoch == generation) mutable.update { it.copy(containers = LoadState(containers, loaded = true), overview = overview) } }
-        catch (error: CancellationException) { throw error }
-        catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(containers = it.containers.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
+        if (!silent) mutable.update { it.copy(containers = it.containers.copy(loading = true)) }
+        try {
+            val (containers, overview) = repository.docker()
+            if (!overview.online) throw ApiException(503, overview.message.ifBlank { "Docker 无法连接" })
+            val now = System.currentTimeMillis()
+            if (epoch == generation) mutable.update { it.copy(
+                containers = LoadState(containers, loaded = true, updatedAt = now), overview = overview,
+                mine = it.mine.copy(docker = LoadState(DockerSummary(true, overview.total, overview.running), loaded = true, updatedAt = now)),
+            ) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation) {
+                mutable.update { it.copy(containers = it.containers.copy(loading = false, error = error.userMessage(), loaded = true),
+                    mine = it.mine.copy(docker = it.mine.docker.copy(loading = false, loaded = true, error = error.userMessage()))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
     }
     fun selectDockerSection(section: DockerSection) { mutable.update { it.copy(dockerSection = section) }; if (section != DockerSection.Containers) refreshResources() }
     fun refreshResources(silent: Boolean = false) {
@@ -480,7 +611,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (session.isLocal) {
             closeChat()
             dismissSheet()
-            mutable.update { it.copy(chat = ChatState(session = session)) }
+            mutable.update { it.copy(chat = ChatState(session = session), serverStatusVisible = false) }
             val service = session.managementService
             if (service != null) refreshManagement(service) else checkAppUpdate()
             return
@@ -489,7 +620,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val current = chatGeneration
         // 先同步切到会话页（保证转场立即开始）；进程内已有这一页时直接同步渲染，第一帧就是完整内容。
         val warm = repository.warmMessages(session.id)
-        mutable.update { it.copy(chat = ChatState(session = session, messages = warm.orEmpty(), loading = warm == null,
+        mutable.update { it.copy(serverStatusVisible = false, chat = ChatState(session = session, messages = warm.orEmpty(), loading = warm == null,
             hasEarlier = warm != null && warm.size >= CHAT_PAGE_SIZE)) }
         chatJob = viewModelScope.launch {
             // 没有进程内缓存时再读磁盘，命中即关闭加载态；随后请求服务器在后台无感刷新。
@@ -729,6 +860,17 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         perform("container-delete", "容器已删除", after = { refreshDocker() }) { repository.deleteContainer(container.id) }
     }
     fun containerLogs(container: DockerContainer) = loadText("${container.name} · 运行日志") { repository.containerLogs(container.id) }
+    fun tunnelDetail(tunnel: Tunnel) = loadText(tunnel.name) {
+        buildString {
+            appendLine("代理类型：${tunnel.draft.proxyType.uppercase()}")
+            appendLine("隧道状态：${if (!tunnel.enabled) "已停用" else tunnel.statusText.ifBlank { "状态待查询" }}")
+            appendLine("本地服务：${tunnel.localAddress.ifBlank { "—" }}")
+            appendLine("远程地址 / 端口：${tunnel.remoteAddress.ifBlank { "—" }}")
+            appendLine("本地探测：${tunnel.probeText.ifBlank { "未探测" }}")
+            if (tunnel.error.isNotBlank()) appendLine("错误信息：${tunnel.error}")
+            if (tunnel.draft.remark.isNotBlank()) appendLine("备注：${tunnel.draft.remark}")
+        }
+    }
     fun frpLogs() = loadText("frpc · 运行日志") {
         val container = repository.api.get("docker", "containers", query = mapOf("all" to "true")).asArray().map { DockerContainer.from(it.asObject()) }
             .firstOrNull { it.name == mutable.value.runtime.container } ?: throw IllegalArgumentException("没有找到 frpc 容器")
