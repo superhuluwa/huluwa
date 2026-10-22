@@ -48,7 +48,7 @@ internal object AiColors {
 
 /** 首页交给根布局标题栏使用的操作；visible=false 时标题栏不显示任何 AI 操作。 */
 data class AiHeaderActionsState(
-    val visible: Boolean, val loading: Boolean, val enabled: Boolean,
+    val visible: Boolean, val loading: Boolean, val enabled: Boolean, val reconnecting: Boolean,
     val onRefresh: () -> Unit, val onConnection: () -> Unit, val onLogout: () -> Unit,
 )
 
@@ -62,6 +62,7 @@ data class AiHeaderActionsState(
     LaunchedEffect(ui.authenticated, ui.connectionRevision) { if (ui.authenticated) connection = false }
     val header = AiHeaderActionsState(
         visible = ui.authenticated && !connection, loading = ui.loading, enabled = !ui.deletingAll,
+        reconnecting = ui.reconnecting,
         onRefresh = vm::refresh, onConnection = { connection = true; vm.clearError() }, onLogout = vm::logout,
     )
     SideEffect { onHeaderActions(header) }
@@ -202,6 +203,7 @@ data class AiHeaderActionsState(
 /** AI 首页标题栏右侧的刷新与更多菜单。 */
 @Composable internal fun AiHeaderActions(actions: AiHeaderActionsState) {
     if (!actions.visible) return
+    AiReconnectingIndicator(actions.reconnecting, Modifier.padding(end = 2.dp))
     IconButton(actions.onRefresh, enabled = actions.enabled) {
         if (actions.loading) AiSpinner(HuluwaColors.Muted, Modifier.size(20.dp))
         else Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)

@@ -142,13 +142,6 @@ private enum class RootPage { Home, Chat, AiConversation }
                                 } }
                                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))
                             }
-                            // AI 服务连接与家庭服务器无关，断线时单独在标题下方悬浮提示，不挤动页面。
-                            androidx.compose.animation.AnimatedVisibility(aiActive && aiUi.authenticated && aiUi.reconnecting,
-                                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).padding(top = 8.dp),
-                                enter = androidx.compose.animation.fadeIn(),
-                                exit = androidx.compose.animation.fadeOut()) {
-                                AiConnectingOverlay()
-                            }
                         }
                     }
                 }

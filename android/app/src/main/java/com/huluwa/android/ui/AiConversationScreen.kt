@@ -73,7 +73,11 @@ import kotlinx.serialization.json.*
                         verticalAlignment = Alignment.CenterVertically) {
                         IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
                         Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                AiReconnectingIndicator(ui.reconnecting, Modifier.padding(start = 8.dp))
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                 AiStatusDot(
                                     when {
@@ -86,7 +90,6 @@ import kotlinx.serialization.json.*
                                     color = AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        if (ui.loadingSession) CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(18.dp), strokeWidth = 2.dp)
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作", Modifier.size(20.dp), tint = AiColors.Muted) }
                     }
                     AiDivider()
