@@ -1,12 +1,19 @@
 package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -21,6 +28,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -207,22 +216,36 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
 
 @Composable private fun AiConversation(ui: AiUiState, vm: AiViewModel, modifier: Modifier) {
     val session = ui.selected ?: return
-    val list = rememberLazyListState()
-    var initialized by remember(session.id) { mutableStateOf(false) }
-    val nearBottom by remember { derivedStateOf { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= list.layoutInfo.totalItemsCount - 3 } ?: true } }
-    LaunchedEffect(session.id, session.messages.size, session.messages.lastOrNull()?.text?.length) {
-        if (session.messages.isNotEmpty() && (!initialized || nearBottom || session.messages.last().role == "user")) {
-            list.scrollToItem(session.messages.lastIndex); initialized = true
-        }
-    }
+    val motion = rememberAiConversationMotion(session, ui.loadingSession)
+    val scroll = rememberAiConversationScroll(session.id, motion.initialized, motion.messages.size)
+    val revealing by remember(motion) { derivedStateOf { motion.messages.any { it.isRevealing } } }
     Column(modifier.fillMaxWidth().imePadding()) {
-        if (session.messages.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(if (ui.loadingSession) "正在加载消息…" else "发送第一条消息，开始对话。", color = HuluwaColors.Muted)
-        } else LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(session.messages, key = { it.id }) { AiMessageBubble(it, session.providerLabel) }
-            if (session.running) item(key = "ai-status") {
-                Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp); Text(session.statusLabel, color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.gestures), state = scroll.list,
+                contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(motion.messages, key = { it.id }) { message ->
+                    AiMessageBubble(message, session.providerLabel, Modifier.animateItem(
+                        fadeInSpec = null, placementSpec = spring(stiffness = Spring.StiffnessMediumLow), fadeOutSpec = tween(140)))
+                }
+                if (session.running || revealing) item(key = "ai-status") {
+                    AiReplyIndicator(if (session.running) session.statusLabel else "正在回复",
+                        Modifier.animateItem(placementSpec = spring(stiffness = Spring.StiffnessMediumLow)))
+                }
+                // A real bottom anchor also follows replies taller than the viewport.
+                item(key = "ai-bottom") { Spacer(Modifier.height(1.dp)) }
+            }
+            if (motion.messages.isEmpty() && (!session.running || ui.loadingSession)) {
+                Text(if (ui.loadingSession || !motion.initialized) "正在加载消息…" else "发送第一条消息，开始对话。",
+                    Modifier.align(Alignment.Center).padding(24.dp), color = HuluwaColors.Muted)
+            }
+            AnimatedVisibility(visible = !scroll.following && motion.messages.isNotEmpty(),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
+                enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
+                exit = fadeOut(tween(120)) + slideOutVertically(tween(160)) { it / 2 }) {
+                FilledTonalButton({ scroll.following = true }, elevation = ButtonDefaults.filledTonalButtonElevation(defaultElevation = 3.dp)) {
+                    Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("回到最新")
                 }
             }
         }
@@ -233,7 +256,7 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                 OutlinedTextField(ui.draft, vm::draft, Modifier.weight(1f), placeholder = { Text("给 ${session.providerLabel} 发消息…") }, maxLines = 5,
                     enabled = !ui.loadingSession, shape = RoundedCornerShape(16.dp), textStyle = MaterialTheme.typography.bodyMedium)
                 if (session.running) FilledIconButton(vm::stop, enabled = !ui.working, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.Stop, "中断回复") }
-                else FilledIconButton(vm::send, enabled = ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession, modifier = Modifier.size(48.dp)) {
+                else FilledIconButton({ scroll.following = true; vm.send() }, enabled = ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession, modifier = Modifier.size(48.dp)) {
                     if (ui.sending) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Outlined.Send, "发送消息")
                 }
             }
@@ -241,13 +264,20 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
     }
 }
 
-@Composable private fun AiMessageBubble(message: AiMessage, provider: String) {
+@Composable private fun AiMessageBubble(message: AiAnimatedMessage, provider: String, modifier: Modifier = Modifier) {
     val mine = message.role == "user"
     val tool = message.role == "tool"
     var expanded by remember(message.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+    val entrance by animateFloatAsState(if (message.entered) 1f else 0f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing), label = "ai-message-entrance")
+    LaunchedEffect(message) { message.entered = true }
+    Column(modifier.fillMaxWidth().graphicsLayer {
+        alpha = entrance
+        translationY = (1f - entrance) * 12.dp.toPx()
+    }, horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
         Text(if (mine) "我" else if (tool) "执行过程" else provider, Modifier.padding(horizontal = 4.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-        Surface(Modifier.widthIn(max = 600.dp), color = if (mine) HuluwaColors.SoftGreen else if (tool) Color(0xFFF0F2F1) else Color.White, shape = RoundedCornerShape(16.dp)) {
+        Surface(Modifier.widthIn(max = 600.dp).animateContentSize(tween(160, easing = LinearOutSlowInEasing)),
+            color = if (mine) HuluwaColors.SoftGreen else if (tool) Color(0xFFF0F2F1) else Color.White, shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(14.dp)) {
                 SelectionContainer {
                     Text(message.text, style = if (tool) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
@@ -257,6 +287,24 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                 if (tool && (message.text.length > 180 || message.text.count { it == '\n' } >= 4)) TextButton({ expanded = !expanded }) { Text(if (expanded) "收起" else "展开执行日志") }
             }
         }
+    }
+}
+
+@Composable private fun AiReplyIndicator(label: String, modifier: Modifier = Modifier) {
+    val pulse = rememberInfiniteTransition(label = "ai-typing")
+    Row(modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.height(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            repeat(3) { index ->
+                val opacity by pulse.animateFloat(initialValue = .3f, targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(450, easing = FastOutSlowInEasing), RepeatMode.Reverse,
+                        initialStartOffset = StartOffset(index * 150)), label = "ai-typing-dot-$index")
+                Box(Modifier.size(4.dp).graphicsLayer {
+                    alpha = opacity
+                    translationY = -2.dp.toPx() * opacity
+                }.background(HuluwaColors.Pine, CircleShape))
+            }
+        }
+        Text(label, color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
