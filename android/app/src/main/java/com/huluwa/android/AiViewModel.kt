@@ -13,14 +13,24 @@ data class AiUiState(
     val server: String = "", val username: String = "admin", val authenticated: Boolean = false,
     val authenticating: Boolean = false, val loading: Boolean = false, val loadingSession: Boolean = false,
     val sessions: List<AiSession> = emptyList(), val projects: List<AiProject> = emptyList(),
+    val providers: List<AiProvider> = emptyList(), val projectPath: String = "", val providerId: String = "", val modelId: String = "",
     val selected: AiSession? = null, val draft: String = "", val sending: Boolean = false,
     val connected: Boolean = false, val working: Boolean = false, val error: String? = null, val connectionRevision: Long = 0,
-)
+) {
+    val launchProject get() = projects.find { it.path == projectPath }
+    val availableProviders get() = providers.filter { provider ->
+        launchProject?.let { if (provider.agent == "codex") it.enabledAgents.codex else it.enabledAgents.claude } == true
+    }
+    val launchProvider get() = availableProviders.find { it.id == providerId }
+    val launchModel get() = launchProvider?.models?.find { it.id == modelId }
+    val canCreate get() = launchProject != null && launchProvider != null && launchModel != null && !loading && !working
+}
 
 class AiViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as HuluwaApplication).aiRepository
     private val store = repository.store
-    private val mutable = MutableStateFlow(AiUiState(store.server, store.username, store.loggedIn))
+    private val mutable = MutableStateFlow(AiUiState(store.server, store.username, store.loggedIn,
+        projectPath = repository.selectedProject, providerId = repository.selectedProvider, modelId = repository.selectedModel))
     val state = mutable.asStateFlow()
     private var visible = false
     private var generation = 0
@@ -47,7 +57,8 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 require(password.isNotEmpty()) { "请输入 AI 服务密码" }
                 withContext(Dispatchers.IO) { repository.login(server, username.trim(), password) }
                 generation++; stopRealtime(); refreshJob?.cancel(); refreshJob = null; selectJob?.cancel(); sendJob?.cancel(); actionJob?.cancel(); drafts.clear(); requests.clear()
-                mutable.value = AiUiState(store.server, store.username, true, connectionRevision = System.currentTimeMillis())
+                mutable.value = AiUiState(store.server, store.username, true, projectPath = repository.selectedProject,
+                    providerId = repository.selectedProvider, modelId = repository.selectedModel, connectionRevision = System.currentTimeMillis())
                 refresh()
             } catch (e: CancellationException) { throw e }
             catch (e: Throwable) { mutable.update { it.copy(authenticating = false, error = e.userMessage()) } }
@@ -70,24 +81,41 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         refreshJob = viewModelScope.launch {
             mutable.update { it.copy(loading = true) }
             try {
-                val (sessions, projects) = coroutineScope {
+                val (sessions, projects, catalog) = coroutineScope {
                     val sessions = async { repository.sessions() }; val projects = async { repository.projects() }
-                    sessions.await() to projects.await()
+                    val catalog = async { repository.catalog() }
+                    Triple(sessions.await(), projects.await(), catalog.await())
                 }
                 if (epoch != generation) return@launch
-                mutable.update { it.copy(sessions = sessions, projects = projects, loading = false, error = null) }
-                val restore = repository.lastSession
-                if (mutable.value.selected == null && restore.isNotBlank() && sessions.any { it.id == restore }) open(restore)
+                mutable.update { reconcile(it.copy(sessions = sessions, projects = projects, providers = catalog.providers, loading = false, error = null)) }
+                saveSelection()
             } catch (e: CancellationException) { throw e }
             catch (e: Throwable) { if (epoch == generation) { mutable.update { it.copy(loading = false) }; failure(e) } }
         }
     }
+    private fun reconcile(ui: AiUiState): AiUiState {
+        val project = ui.launchProject ?: ui.projects.firstOrNull()
+        val projectUi = ui.copy(projectPath = project?.path.orEmpty())
+        val choices = projectUi.availableProviders
+        val provider = choices.find { it.id == ui.providerId }
+            ?: choices.firstOrNull { it.isDefault && it.models.isNotEmpty() }
+            ?: choices.firstOrNull { it.models.isNotEmpty() } ?: choices.firstOrNull()
+        val model = provider?.models?.find { it.id == ui.modelId } ?: provider?.models?.firstOrNull()
+        return projectUi.copy(providerId = provider?.id.orEmpty(), modelId = model?.id.orEmpty())
+    }
+    private fun saveSelection() {
+        val ui = mutable.value
+        repository.saveSelection(ui.projectPath, ui.providerId, ui.modelId)
+    }
+    fun selectProject(path: String) { mutable.update { reconcile(it.copy(projectPath = path)) }; saveSelection() }
+    fun selectProvider(id: String) { mutable.update { reconcile(it.copy(providerId = id, modelId = "")) }; saveSelection() }
+    fun selectModel(id: String) { mutable.update { reconcile(it.copy(modelId = id)) }; saveSelection() }
     fun open(id: String) {
-        selectJob?.cancel(); sendJob?.cancel(); sendJob = null; stopRealtime()
+        refreshJob?.cancel(); selectJob?.cancel(); sendJob?.cancel(); sendJob = null; stopRealtime()
         val epoch = ++generation
         val summary = mutable.value.sessions.find { it.id == id }
         repository.lastSession = id
-        mutable.update { it.copy(selected = summary, loadingSession = true, draft = drafts[id].orEmpty(), sending = false, working = false, error = null) }
+        mutable.update { it.copy(selected = summary, loading = false, loadingSession = true, draft = drafts[id].orEmpty(), sending = false, working = false, error = null) }
         selectJob = viewModelScope.launch {
             try {
                 val session = repository.session(id)
@@ -103,13 +131,17 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         mutable.update { it.copy(selected = null, draft = "", loadingSession = false, sending = false, working = false, error = null) }
         refresh()
     }
-    fun create(project: AiProject, provider: String, model: String) {
-        if (actionJob?.isActive == true) return
+    fun create() {
+        val ui = mutable.value
+        val project = ui.launchProject ?: return
+        val provider = ui.launchProvider ?: return
+        val model = ui.launchModel ?: return
+        if (!ui.canCreate || actionJob?.isActive == true) return
         val epoch = generation
         actionJob = viewModelScope.launch {
             mutable.update { it.copy(working = true, error = null) }
             try {
-                val session = repository.create(project, provider, model)
+                val session = repository.create(project, provider, model.id)
                 if (epoch != generation) return@launch
                 mutable.update { it.copy(sessions = listOf(session) + it.sessions, working = false) }
                 open(session.id)

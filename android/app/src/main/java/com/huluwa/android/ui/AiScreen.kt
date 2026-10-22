@@ -27,82 +27,157 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LifecycleStartEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.huluwa.android.AiUiState
 import com.huluwa.android.AiViewModel
 import com.huluwa.android.data.*
 import kotlinx.serialization.json.*
 
-/** 原生 AI 消息页面：服务连接、会话、工具日志和输入均由 Compose 渲染。 */
-@Composable fun AiScreen(vm: AiViewModel = viewModel()) {
-    val ui by vm.state.collectAsStateWithLifecycle()
+/** Ai 首页：服务端项目、供应商与模型选择，以及最近的对话。 */
+@Composable fun AiScreen(ui: AiUiState, vm: AiViewModel) {
     var connection by rememberSaveable { mutableStateOf(false) }
-    var creating by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<AiSession?>(null) }
-    LifecycleStartEffect(Unit) { vm.setVisible(true); onStopOrDispose { vm.setVisible(false) } }
-    BackHandler(ui.selected != null || connection) { if (connection) connection = false else vm.closeSession() }
+    BackHandler(connection) { connection = false }
     LaunchedEffect(ui.authenticated, ui.connectionRevision) { if (ui.authenticated) connection = false }
     if (!ui.authenticated || connection) {
         AiConnection(ui, { server, username, password -> vm.login(server, username, password) }, if (ui.authenticated) ({ connection = false }) else null)
         return
     }
     Column(Modifier.fillMaxSize()) {
-        Surface(color = Color.White) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (ui.selected != null) IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 会话") }
-                Column(Modifier.weight(1f)) {
-                    Text(ui.selected?.title ?: "AI 会话", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(ui.selected?.let { "${it.providerLabel} · ${it.statusLabel} · ${if (ui.connected) "实时连接" else "自动同步"}" }
-                        ?: ui.server, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (ui.loading || ui.loadingSession) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                if (ui.selected == null) IconButton({ vm.refresh() }, enabled = !ui.loading) { Icon(Icons.Outlined.Refresh, "刷新 AI 会话") }
-                IconButton({ creating = true }, enabled = !ui.working && !ui.loading) { Icon(Icons.Outlined.Add, "新建 AI 对话") }
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "AI 操作") }
-                    DropdownMenu(menu, { menu = false }) {
-                        if (ui.selected != null) DropdownMenuItem(text = { Text("删除对话") }, enabled = !ui.selected!!.running && !ui.working,
-                            onClick = { menu = false; deleting = ui.selected })
-                        DropdownMenuItem(text = { Text("服务连接") }, onClick = { menu = false; connection = true; vm.clearError() })
-                        DropdownMenuItem(text = { Text("退出 AI 服务") }, onClick = { menu = false; vm.logout() })
-                    }
-                }
-            }
-        }
         ui.error?.let { AiError(it, vm::clearError) }
-        if (ui.selected == null) {
-            if (ui.sessions.isEmpty() && !ui.loading) {
-                Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    RoundIcon(Icons.Outlined.AutoAwesome, modifier = Modifier.size(60.dp))
-                    Spacer(Modifier.height(16.dp)); Text("和 Claude / Codex 开始对话", style = MaterialTheme.typography.titleMedium)
-                    Text("选择服务器上的项目，发送消息并查看 AI 回复与执行过程。", Modifier.padding(vertical = 12.dp), color = HuluwaColors.Muted)
-                    Button({ creating = true }) { Text("新建对话") }
-                }
-            } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(ui.sessions, key = { it.id }) { session ->
-                    Surface(onClick = { vm.open(session.id) }, color = Color.White, shape = RoundedCornerShape(18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            RoundIcon(Icons.Outlined.AutoAwesome)
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${session.providerLabel} · ${session.statusLabel}", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Pine)
-                                Text(session.projectPath, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item(key = "connection") {
+                Surface(color = Color.White, shape = RoundedCornerShape(18.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RoundIcon(Icons.Outlined.Dns)
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                            Text(ui.username, style = MaterialTheme.typography.titleSmall)
+                            Text(ui.server, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(vm::refresh, enabled = !ui.loading) {
+                            if (ui.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Outlined.Refresh, "刷新项目和模型")
+                        }
+                        var menu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "服务连接操作") }
+                            DropdownMenu(menu, { menu = false }) {
+                                DropdownMenuItem(text = { Text("服务连接") }, onClick = { menu = false; connection = true; vm.clearError() })
+                                DropdownMenuItem(text = { Text("退出 AI 服务") }, onClick = { menu = false; vm.logout() })
                             }
-                            IconButton({ deleting = session }, enabled = !session.running && !ui.working) { Icon(Icons.Outlined.DeleteOutline, "删除对话", tint = HuluwaColors.Muted) }
                         }
                     }
                 }
             }
-        } else AiConversation(ui, vm, Modifier.weight(1f))
+            item(key = "launch") {
+                Surface(color = Color.White, shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text("开始新的对话", style = MaterialTheme.typography.titleLarge)
+                        Text("选择项目和模型", style = MaterialTheme.typography.bodyMedium, color = HuluwaColors.Muted)
+                        AiChoiceField("项目", ui.launchProject?.name, "选择服务端项目", ui.projects.map { AiChoice(it.path, it.name, it.path) }, !ui.loading && !ui.working, vm::selectProject)
+                        AiChoiceField("模型供应商", ui.launchProvider?.label, "选择模型供应商", ui.availableProviders.map {
+                            AiChoice(it.id, it.label, if (it.isDefault) "服务端默认供应商" else "${it.models.size} 个可用模型")
+                        }, !ui.loading && !ui.working, vm::selectProvider)
+                        AiChoiceField("模型", ui.launchModel?.title, "选择模型", ui.launchProvider?.models.orEmpty().map {
+                            AiChoice(it.id, it.title, if (it.effort.isBlank()) "" else "推理等级：${it.effortLabel}")
+                        }, !ui.loading && !ui.working, vm::selectModel)
+                        when {
+                            ui.loading -> Text("正在同步项目和模型…", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                            ui.projects.isEmpty() -> Text("服务端还没有登记项目，请先添加项目后刷新。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                            ui.availableProviders.isEmpty() -> Text("该项目尚未启用 Claude 或 Codex，请在服务端配置。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                            ui.launchProvider?.models?.isEmpty() == true -> Text("该供应商还没有可用模型，请在服务端配置后刷新。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(vm::create, Modifier.fillMaxWidth().heightIn(min = 50.dp), enabled = ui.canCreate, shape = RoundedCornerShape(16.dp)) {
+                            if (ui.working) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
+                            Text(if (ui.working) "正在创建…" else "开始对话")
+                        }
+                    }
+                }
+            }
+            item(key = "recent-title") { Text("最近对话", style = MaterialTheme.typography.titleMedium) }
+            if (ui.sessions.isEmpty()) item(key = "empty") { Text("还没有对话，选择上方项目和模型即可开始。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodyMedium) }
+            items(ui.sessions, key = { it.id }) { session ->
+                Surface(onClick = { vm.open(session.id) }, color = Color.White, shape = RoundedCornerShape(18.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RoundIcon(Icons.Outlined.AutoAwesome)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(session.targetLabel, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Pine, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${session.statusLabel} · ${session.projectPath}", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton({ deleting = session }, enabled = !session.running && !ui.working) { Icon(Icons.Outlined.DeleteOutline, "删除对话", tint = HuluwaColors.Muted) }
+                    }
+                }
+            }
+        }
     }
-    if (creating) AiCreateDialog(ui, { creating = false }) { project, provider, model -> creating = false; vm.create(project, provider, model) }
-    deleting?.let { session ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除对话") }, text = { Text("删除「${session.title}」在 Ai 中保存的消息？项目文件不会被删除。") },
-            confirmButton = { TextButton({ deleting = null; vm.delete(session) }) { Text("删除") } }, dismissButton = { TextButton({ deleting = null }) { Text("取消") } })
+    deleting?.let { session -> AiDeleteDialog(session, { deleting = null }) { deleting = null; vm.delete(session) } }
+}
+
+private data class AiChoice(val id: String, val title: String, val subtitle: String = "")
+
+@Composable private fun AiChoiceField(label: String, value: String?, placeholder: String, choices: List<AiChoice>, enabled: Boolean, select: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = HuluwaColors.Muted)
+        Box {
+            OutlinedButton({ expanded = true }, Modifier.fillMaxWidth(), enabled = enabled && choices.isNotEmpty(), shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(14.dp)) {
+                Text(value ?: placeholder, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                Icon(Icons.Outlined.ExpandMore, null)
+            }
+            DropdownMenu(expanded && enabled, { expanded = false }, Modifier.heightIn(max = 360.dp).widthIn(max = 560.dp)) {
+                choices.forEach { choice ->
+                    DropdownMenuItem(text = {
+                        Column {
+                            Text(choice.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (choice.subtitle.isNotBlank()) Text(choice.subtitle, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }, onClick = { expanded = false; select(choice.id) })
+                }
+            }
+        }
     }
+}
+
+/** 独立二级会话页，由应用根导航承载；首页的底部标签栏不会出现在这里。 */
+@Composable fun AiConversationScreen(ui: AiUiState, vm: AiViewModel) {
+    val session = ui.selected ?: return
+    var deleting by remember { mutableStateOf(false) }
+    Scaffold(
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            Surface(color = Color.White) {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 Ai 首页") }
+                    Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                        Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(session.targetLabel, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Pine, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${session.statusLabel} · ${if (ui.connected) "实时连接" else "自动同步"}", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
+                    if (ui.loadingSession) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作") }
+                        DropdownMenu(menu, { menu = false }) {
+                            DropdownMenuItem(text = { Text("返回首页选择模型") }, onClick = { menu = false; vm.closeSession() })
+                            DropdownMenuItem(text = { Text("删除对话") }, enabled = !session.running && !ui.working,
+                                onClick = { menu = false; deleting = true })
+                        }
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            ui.error?.let { AiError(it, vm::clearError) }
+            AiConversation(ui, vm, Modifier.weight(1f))
+        }
+    }
+    if (deleting) AiDeleteDialog(session, { deleting = false }) { deleting = false; vm.delete(session) }
+}
+
+@Composable private fun AiDeleteDialog(session: AiSession, dismiss: () -> Unit, confirm: () -> Unit) {
+    AlertDialog(onDismissRequest = dismiss, title = { Text("删除对话") }, text = { Text("删除「${session.title}」在 Ai 中保存的消息？项目文件不会被删除。") },
+        confirmButton = { TextButton(confirm) { Text("删除") } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
 }
 
 @Composable private fun AiConnection(ui: AiUiState, login: (String, String, String) -> Unit, back: (() -> Unit)?) {
@@ -154,7 +229,7 @@ import kotlinx.serialization.json.*
         session.error?.let { Text(it, Modifier.fillMaxWidth().heightIn(max = 100.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
         session.approvals.firstOrNull()?.let { AiApprovalCard(it, ui.working, vm::answer) }
         Surface(color = Color.White) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(ui.draft, vm::draft, Modifier.weight(1f), placeholder = { Text("给 ${session.providerLabel} 发消息…") }, maxLines = 5,
                     enabled = !ui.loadingSession, shape = RoundedCornerShape(16.dp), textStyle = MaterialTheme.typography.bodyMedium)
                 if (session.running) FilledIconButton(vm::stop, enabled = !ui.working, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.Stop, "中断回复") }
@@ -183,35 +258,6 @@ import kotlinx.serialization.json.*
             }
         }
     }
-}
-
-@Composable private fun AiCreateDialog(ui: AiUiState, dismiss: () -> Unit, create: (AiProject, String, String) -> Unit) {
-    var projectPath by rememberSaveable { mutableStateOf(ui.projects.firstOrNull()?.path.orEmpty()) }
-    val project = ui.projects.find { it.path == projectPath }
-    var provider by rememberSaveable { mutableStateOf(if (project?.enabledAgents?.claude != false) "claude" else "codex") }
-    var model by rememberSaveable { mutableStateOf("") }
-    var projectMenu by remember { mutableStateOf(false) }
-    LaunchedEffect(projectPath) {
-        if (provider == "claude" && project?.enabledAgents?.claude == false) provider = "codex"
-        if (provider == "codex" && project?.enabledAgents?.codex == false) provider = "claude"
-    }
-    val enabled = project != null && (if (provider == "claude") project.enabledAgents.claude else project.enabledAgents.codex)
-    AlertDialog(onDismissRequest = dismiss, title = { Text("新建 AI 对话") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (ui.projects.isEmpty()) Text("服务端尚未登记项目，请先在 TerminalBuddy 中添加项目。", color = HuluwaColors.Muted)
-            else Box {
-                OutlinedButton({ projectMenu = true }, Modifier.fillMaxWidth()) { Text(project?.name ?: "选择项目", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                DropdownMenu(projectMenu, { projectMenu = false }) { ui.projects.forEach { item -> DropdownMenuItem(text = { Text(item.name) }, onClick = { projectPath = item.path; projectMenu = false }) } }
-            }
-            project?.let { Text(it.path, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(provider == "claude", { provider = "claude" }, label = { Text("Claude") }, enabled = project?.enabledAgents?.claude == true)
-                FilterChip(provider == "codex", { provider = "codex" }, label = { Text("Codex") }, enabled = project?.enabledAgents?.codex == true)
-            }
-            OutlinedTextField(model, { model = it }, Modifier.fillMaxWidth(), label = { Text("模型（可选）") }, placeholder = { Text("留空使用服务端配置") }, singleLine = true)
-            Text("使用服务端已经配置的模型账号与工具权限。", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-        }
-    }, confirmButton = { TextButton({ project?.let { create(it, provider, model) } }, enabled = enabled && !ui.working) { Text("创建") } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
 }
 
 @Composable private fun AiApprovalCard(approval: AiApproval, working: Boolean, answer: (AiApproval, String, JsonObject) -> Unit) {

@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.huluwa.android.*
 import com.huluwa.android.data.*
@@ -46,33 +47,48 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Ai -> Icons.Outlined.AutoAwesome
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
+private enum class RootPage { Home, Chat, AiConversation }
+
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
     val ui by vm.state.collectAsStateWithLifecycle()
+    val aiVm: AiViewModel = viewModel()
+    val aiUi by aiVm.state.collectAsStateWithLifecycle()
+    val aiActive = ui.auth.loggedIn && ui.tab == MainTab.Ai && !ui.browserVisible
     val reconnecting = rememberReconnecting(vm)
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
+    LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(ui.chat.session != null && ui.sheet == null) { vm.closeChat() }
+    BackHandler(aiActive && aiUi.authenticated && aiUi.selected != null) { aiVm.closeSession() }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else if (ui.browserVisible) {
         HiddenBrowserScreen(vm)
     } else {
         val activeSession = ui.chat.session
+        val page = when {
+            activeSession != null -> RootPage.Chat
+            aiActive && aiUi.authenticated && aiUi.selected != null -> RootPage.AiConversation
+            else -> RootPage.Home
+        }
+        val aiSnapshot = remember { mutableStateOf(aiUi) }
+        SideEffect { if (aiUi.selected != null) aiSnapshot.value = aiUi }
+        val pageAiUi = if (aiUi.selected != null) aiUi else aiSnapshot.value
         // 退场动画期间 closeChat() 已经清空 ui.chat，直接读 ui 会让正在滑出的二级页先变成空白。
         // 这里保留最后一次有效会话的快照，专门供退场那一层绘制。
         val chatSnapshot = remember { mutableStateOf(ui.chat) }
         SideEffect { if (ui.chat.session != null) chatSnapshot.value = ui.chat }
         val pageUi = if (activeSession != null) ui else ui.copy(chat = chatSnapshot.value)
         AnimatedContent(
-            // true = 二级页（会话 / 管理会话 / 在线升级），false = 标签页外壳（列表）
-            targetState = activeSession != null,
+            // 所有二级会话页共用根导航与横向转场。
+            targetState = page,
             transitionSpec = { pageSlideTransition() },
             label = "页面转场",
-        ) { detail ->
-            if (!detail) {
+        ) { destination ->
+            if (destination == RootPage.Home) {
                 // 列表层始终在二级页下方：返回时二级页从列表上方滑出，与微信一致
                 Box(Modifier.fillMaxSize().zIndex(0f)) {
                     Scaffold(
@@ -112,7 +128,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                                     MainTab.Functions -> SessionsScreen(ui, vm)
                                     MainTab.System -> SessionsScreen(ui, vm, system = true)
                                     MainTab.Downloads -> DownloadsScreen(ui, vm)
-                                    MainTab.Ai -> AiScreen()
+                                    MainTab.Ai -> AiScreen(aiUi, aiVm)
                                     MainTab.Mine -> MineScreen(ui, vm)
                                 } }
                                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))
@@ -122,6 +138,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
                 }
             } else Box(Modifier.fillMaxSize().zIndex(1f)) {
                 when {
+                    destination == RootPage.AiConversation ->
+                        holder.SaveableStateProvider("ai-session:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }
@@ -137,8 +155,8 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
  * 微信式页面转场：前进时新页从右滑入、旧页向左让出 1/4 宽度；返回时反向。
  * 时长 320ms，缓动曲线对齐网页端 app-shell.vue 的 cubic-bezier(.32,.72,0,1)。
  */
-private fun AnimatedContentTransitionScope<Boolean>.pageSlideTransition(): ContentTransform {
-    val forward = targetState
+private fun AnimatedContentTransitionScope<RootPage>.pageSlideTransition(): ContentTransform {
+    val forward = targetState != RootPage.Home
     val spec = tween<IntOffset>(durationMillis = 320, easing = CubicBezierEasing(.32f, .72f, 0f, 1f))
     val enter = slideInHorizontally(spec) { width -> if (forward) width else -width / 4 }
     val exit = slideOutHorizontally(spec) { width -> if (forward) -width / 4 else width }

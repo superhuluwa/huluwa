@@ -21,6 +21,15 @@ class AiRepository(context: Context) {
     var lastSession: String
         get() = preferences.getString("session", "").orEmpty()
         set(value) { preferences.edit().putString("session", value).apply() }
+    private fun selected(key: String): String = if (preferences.getString("selection_server", "") == store.server)
+        preferences.getString(key, "").orEmpty() else ""
+    val selectedProject get() = selected("project")
+    val selectedProvider get() = selected("provider")
+    val selectedModel get() = selected("model")
+    fun saveSelection(project: String, provider: String, model: String) {
+        preferences.edit().putString("selection_server", store.server).putString("project", project)
+            .putString("provider", provider).putString("model", model).apply()
+    }
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
     private val realtime = http.newBuilder().callTimeout(0, TimeUnit.MILLISECONDS).readTimeout(0, TimeUnit.MILLISECONDS)
@@ -33,14 +42,16 @@ class AiRepository(context: Context) {
         require(token.isNotBlank()) { "服务未返回登录令牌，请确认这是 TerminalBuddy 服务地址" }
         // 先确认新服务支持原生 AI API，再替换已保存连接。
         request("GET", listOf("ai", "sessions"), server = address, token = token)
+        request("GET", listOf("ai", "catalog"), server = address, token = token)
         store.save(address, result.text("username", fallback = username), token)
         lastSession = ""
     }
     suspend fun sessions(): List<AiSession> = ApiJson.decodeFromJsonElement(request("GET", listOf("ai", "sessions")))
+    suspend fun catalog(): AiCatalog = ApiJson.decodeFromJsonElement(request("GET", listOf("ai", "catalog")))
     suspend fun projects(): List<AiProject> = ApiJson.decodeFromJsonElement(request("GET", listOf("projects")))
     suspend fun session(id: String): AiSession = ApiJson.decodeFromJsonElement(request("GET", listOf("ai", "sessions", id)))
-    suspend fun create(project: AiProject, provider: String, model: String): AiSession = ApiJson.decodeFromJsonElement(
-        request("POST", listOf("ai", "sessions"), jsonBody { put("projectPath", project.path); put("provider", provider); if (model.isNotBlank()) put("model", model.trim()) }))
+    suspend fun create(project: AiProject, provider: AiProvider, model: String): AiSession = ApiJson.decodeFromJsonElement(
+        request("POST", listOf("ai", "sessions"), jsonBody { put("projectPath", project.path); put("provider", provider.agent); put("providerId", provider.id); if (model.isNotBlank()) put("model", model.trim()) }))
     suspend fun send(id: String, text: String, requestId: String): AiSession = ApiJson.decodeFromJsonElement(
         request("POST", listOf("ai", "sessions", id, "messages"), jsonBody { put("text", text); put("requestId", requestId) }))
     suspend fun stop(id: String) { request("POST", listOf("ai", "sessions", id, "stop")) }
