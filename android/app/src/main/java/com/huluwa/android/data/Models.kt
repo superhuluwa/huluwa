@@ -33,7 +33,7 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
-    Functions("功能", true), System("系统", true), Downloads("下载"), Ai("Ai"), Mine("我的")
+    Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
