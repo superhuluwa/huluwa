@@ -1,7 +1,6 @@
 package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -238,7 +237,8 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                 Text(if (ui.loadingSession || !motion.initialized) "正在加载消息…" else "发送第一条消息，开始对话。",
                     Modifier.align(Alignment.Center).padding(24.dp), color = HuluwaColors.Muted)
             }
-            AnimatedVisibility(visible = !scroll.following && motion.messages.isNotEmpty(),
+            // 显式选择通用重载，避免嵌套 Box 时匹配外层 ColumnScope。
+            androidx.compose.animation.AnimatedVisibility(visible = !scroll.following && motion.messages.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
                 enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
                 exit = fadeOut(tween(120)) + slideOutVertically(tween(160)) { it / 2 }) {
