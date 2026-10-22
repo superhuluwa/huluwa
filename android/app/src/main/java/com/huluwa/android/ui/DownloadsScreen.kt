@@ -15,9 +15,9 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,41 +31,38 @@ import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 @Composable fun DownloadsScreen(ui: AppState, vm: HuluwaViewModel) {
-    // 默认展示全部任务：去掉顶部汇总卡片和多余标题，列表直接从筛选条下方开始
-    var filter by rememberSaveable { mutableIntStateOf(2) }
-    var menu by remember { mutableStateOf(false) }
-    val all = ui.downloads.data
-    // 三个来源合并成一个列表：不再按来源分区，来源改由卡片上的标签区分
-    val tasks = all.filter { when (filter) { 0 -> it.active; 1 -> it.completed; else -> true } }
+    // 直接展示全部下载任务，刷新与设置统一放到顶部标题栏。
+    val tasks = ui.downloads.data
     val busy = ui.busy == null && !ui.downloads.loading
     LazyColumn(contentPadding = PaddingValues(horizontal = 22.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Spacer(Modifier.height(10.dp))
-            // 筛选与刷新、更多操作收在同一行，节省列表上方空间
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterRow(listOf("进行中 ${all.count { it.active }}", "已完成 ${all.count { it.completed }}", "全部 ${all.size}"),
-                    filter, { filter = it }, Modifier.weight(1f))
-                DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
-                Box {
-                    DownloadToolButton(Icons.Outlined.MoreHoriz, "下载操作") { menu = true }
-                    DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
-                        DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
-                        DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
-                        DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
-                            onClick = { menu = false; vm.clearDownloads(type) }) }
-                    }
-                }
-            }
             // 连不上服务器时统一显示标题栏的「重连中」徽标，列表里不再叠一张错误卡片。
             Feedback(ui.downloads.loading, ui.downloads.error.takeUnless { it.isServerUnreachable() }, { vm.refreshDownloads() })
         }
         if (tasks.isEmpty()) item {
-            DownloadEmptyState(if (all.isEmpty()) "这里还没有下载任务" else "当前筛选下暂无任务",
-                if (all.isEmpty()) "订阅追更或提交磁力链接后，可在这里查看进度" else "可以切换状态查看其他下载任务",
-                !ui.downloads.loaded)
+            DownloadEmptyState("这里还没有下载任务", "订阅追更或提交磁力链接后，可在这里查看进度", !ui.downloads.loaded)
         }
         items(tasks, key = { it.key }) { task -> DownloadCard(task, busy, vm) }
+    }
+}
+
+/** 下载页标题栏操作，设置入口固定在最右侧。 */
+@Composable internal fun DownloadsHeaderActions(ui: AppState, vm: HuluwaViewModel) {
+    var menu by remember { mutableStateOf(false) }
+    val busy = ui.busy == null && !ui.downloads.loading
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
+        Box {
+            DownloadToolButton(Icons.Outlined.Settings, "下载设置") { menu = true }
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
+                DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
+                DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
+                DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
+                    onClick = { menu = false; vm.clearDownloads(type) }) }
+            }
+        }
     }
 }
 

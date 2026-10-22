@@ -110,6 +110,7 @@ private enum class RootPage { Home, Chat, AiConversation }
                                 reconnecting = reconnecting && ui.tab != MainTab.Ai) {
                                 // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
                                 if (ui.tab.isSessionTab) TitleLoadingIndicator(!ui.sessions.loaded || ui.sessions.loading)
+                                if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
                                 // AI 首页的刷新与「服务连接 / 退出」菜单同样收在标题栏右侧。
                                 if (ui.tab == MainTab.Ai) aiHeader?.let { AiHeaderActions(it) }
                             }
