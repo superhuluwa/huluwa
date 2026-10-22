@@ -1,6 +1,9 @@
 package com.huluwa.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Refresh
@@ -18,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,6 +91,7 @@ import com.huluwa.android.data.*
     var menu by remember { mutableStateOf(false) }
     val failed = task.status == "failed"
     val done = task.completed
+    val context = LocalContext.current
     Panel(Modifier.fillMaxWidth(), if (failed) Color(0xFFFFFDFD) else if (done) Color(0xFFFBFCFA) else Color.White) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             RoundIcon(if (task.source == DownloadSource.Hls) Icons.Outlined.InsertDriveFile else Icons.Outlined.CloudDownload,
@@ -141,6 +147,20 @@ import com.huluwa.android.data.*
             Spacer(Modifier.height(8.dp))
             Text(task.message, color = if (failed) HuluwaColors.Danger else HuluwaColors.Muted,
                 style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        // 保存路径：三种来源都由服务端返回 savePath，留空表示下载器自行决定目录。
+        // 点按整行复制完整路径，路径较长时单行省略显示。
+        Spacer(Modifier.height(8.dp))
+        val path = task.savePath.ifBlank { "由下载器管理" }
+        Row(Modifier.fillMaxWidth().clickable(enabled = task.savePath.isNotBlank()) {
+            context.getSystemService(ClipboardManager::class.java)
+                ?.setPrimaryClip(ClipData.newPlainText("保存路径", task.savePath))
+            vm.notify("保存路径已复制")
+        }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Icon(Icons.Outlined.FolderOpen, null, Modifier.size(14.dp), tint = HuluwaColors.Muted)
+            Text(path, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+                color = if (task.savePath.isBlank()) HuluwaColors.Muted else HuluwaColors.Ink,
+                maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
         }
     }
 }
