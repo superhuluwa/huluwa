@@ -1,5 +1,6 @@
 package com.huluwa.android.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,9 +52,13 @@ private fun contextLabel(context: AiContextUsage?): String {
     return context?.usedTokens?.let { "上下文 ${compactTokens(it)}" } ?: "上下文 —"
 }
 
-/** 随键盘与输入框显示，点击整行打开统计；窄屏及大字体自动分行。 */
+/** 输入框上方的独立浮卡：模型与思考强度在上，用量在下。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun AiUsageBar(session: AiSession, details: () -> Unit) {
+internal fun AiUsageCard(
+    session: AiSession, modelLabel: String, effortLabel: String, details: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = session.usage?.context
     val total = session.usage?.sessionTotal
     val percentage = context?.percentage
@@ -64,46 +70,103 @@ internal fun AiUsageBar(session: AiSession, details: () -> Unit) {
     }
     val label = contextLabel(context)
     val totalLabel = if (total?.coverage == "complete") "累计" else "已统计"
-    val totals = if (session.usage == null) "用量待返回" else "$totalLabel ↑${compactTokens(total?.inputTokens)} ↓${compactTokens(total?.outputTokens)}"
-    val description = "$label，${if (total?.coverage == "complete") "累计" else "已统计"}输入 ${preciseTokens(total?.inputTokens)} token，" +
-        "输出 ${preciseTokens(total?.outputTokens)} token，点击查看用量详情"
-    AiDivider(Modifier.padding(horizontal = 12.dp))
-    BoxWithConstraints(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看用量详情", onClick = details)
-            .semantics(mergeDescendants = true) { contentDescription = description }
-            .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+    val description = "模型 $modelLabel，思考强度 $effortLabel，$label，${totalLabel}输入 ${preciseTokens(total?.inputTokens)} token，" +
+        "输出 ${preciseTokens(total?.outputTokens)} token，点击查看对话用量详情"
+    Surface(
+        modifier = modifier, color = Color.White, shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, AiColors.Line.copy(alpha = .8f)), shadowElevation = 5.dp,
     ) {
-        val narrow = maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            if (percentage != null) {
-                CircularProgressIndicator(
-                    progress = { (percentage / 100).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.size(14.dp),
-                    color = tint, trackColor = AiColors.Line, strokeWidth = 2.dp,
-                )
-            } else Icon(Icons.Outlined.DataUsage, null, Modifier.size(14.dp), tint = tint)
-            if (narrow) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
-                    Text(totals, style = MaterialTheme.typography.labelMedium, color = AiColors.Muted)
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看对话用量详情", onClick = details)
+                .semantics(mergeDescendants = true) { contentDescription = description }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            val narrow = maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    AiAgentBadge(session.provider)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text("模型", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
+                        Text(
+                            modelLabel, style = MaterialTheme.typography.labelLarge, color = HuluwaColors.Ink,
+                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (!narrow) EffortBadge(effortLabel)
+                    Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(16.dp), tint = AiColors.Muted)
                 }
-            } else {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = tint, maxLines = 1)
-                Spacer(Modifier.weight(1f))
-                Text(totals, style = MaterialTheme.typography.labelMedium, color = AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (narrow) EffortBadge(effortLabel)
+                AiDivider()
+                FlowRow(
+                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Surface(color = tint.copy(alpha = .08f), shape = RoundedCornerShape(8.dp)) {
+                        Row(
+                            Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            if (percentage != null) CircularProgressIndicator(
+                                progress = { (percentage / 100).toFloat().coerceIn(0f, 1f) },
+                                modifier = Modifier.size(12.dp), color = tint, trackColor = AiColors.Line, strokeWidth = 2.dp,
+                            ) else Icon(Icons.Outlined.DataUsage, null, Modifier.size(12.dp), tint = tint)
+                            Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
+                        }
+                    }
+                    if (session.usage == null) {
+                        UsageMetric("用量待返回")
+                    } else {
+                        UsageMetric("${totalLabel}输入 ${compactTokens(total?.inputTokens)}")
+                        UsageMetric("输出 ${compactTokens(total?.outputTokens)}")
+                    }
+                }
             }
-            Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(16.dp), tint = AiColors.Muted)
         }
     }
 }
 
 @Composable
-internal fun AiUsageSheet(session: AiSession, dismiss: () -> Unit) {
+private fun EffortBadge(label: String) {
+    Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(9.dp)) {
+        Column(
+            Modifier.widthIn(max = 160.dp).padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text("思考强度", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun UsageMetric(label: String) {
+    Surface(color = AiColors.Background, shape = RoundedCornerShape(8.dp)) {
+        Text(
+            label, Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelMedium, color = AiColors.Muted,
+        )
+    }
+}
+
+@Composable
+internal fun AiUsageSheet(session: AiSession, modelLabel: String, effortLabel: String, dismiss: () -> Unit) {
     val usage = session.usage
     AiSheet("上下文与 Token", dismiss) {
         SelectionContainer(
             Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(16.dp),
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                UsageSection("模型与思考强度") {
+                    UsageRow("模型", modelLabel)
+                    UsageRow("思考强度", effortLabel)
+                    Text(
+                        "思考强度按当前供应商模型配置显示，未提供时跟随服务端。",
+                        style = MaterialTheme.typography.bodySmall, color = AiColors.Muted,
+                    )
+                }
                 if (usage == null) {
                     Text("当前会话暂无用量统计。收到模型用量后会自动显示。", color = AiColors.Muted)
                 } else {
@@ -147,6 +210,7 @@ internal fun AiUsageSheet(session: AiSession, dismiss: () -> Unit) {
                                 "包含未完整结算的回合，当前数值可能小于实际消耗。",
                                 style = MaterialTheme.typography.bodySmall, color = AiColors.Muted,
                             )
+                            else -> Unit
                         }
                     }
                     Text(
