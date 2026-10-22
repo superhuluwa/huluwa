@@ -58,6 +58,8 @@ private enum class RootPage { Home, Chat, AiConversation }
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
+    // AI 首页把自己的刷新 / 菜单操作交给统一标题栏；不在 AI 标签页时保持不可见。
+    var aiHeader by remember { mutableStateOf<AiHeaderActionsState?>(null) }
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -108,6 +110,8 @@ private enum class RootPage { Home, Chat, AiConversation }
                                 reconnecting = reconnecting && ui.tab != MainTab.Ai) {
                                 // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
                                 if (ui.tab.isSessionTab) TitleLoadingIndicator(!ui.sessions.loaded || ui.sessions.loading)
+                                // AI 首页的刷新与「服务连接 / 退出」菜单同样收在标题栏右侧。
+                                if (ui.tab == MainTab.Ai) aiHeader?.let { AiHeaderActions(it) }
                             }
                         },
                         bottomBar = {
@@ -133,10 +137,17 @@ private enum class RootPage { Home, Chat, AiConversation }
                                     MainTab.Functions -> SessionsScreen(ui, vm)
                                     MainTab.System -> SessionsScreen(ui, vm, system = true)
                                     MainTab.Downloads -> DownloadsScreen(ui, vm)
-                                    MainTab.Ai -> AiScreen(aiUi, aiVm)
+                                    MainTab.Ai -> AiScreen(aiUi, aiVm, onHeaderActions = { aiHeader = it })
                                     MainTab.Mine -> MineScreen(ui, vm)
                                 } }
                                 if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth().align(androidx.compose.ui.Alignment.TopCenter))
+                            }
+                            // AI 服务连接与家庭服务器无关，断线时单独在标题下方悬浮提示，不挤动页面。
+                            androidx.compose.animation.AnimatedVisibility(aiActive && aiUi.authenticated && aiUi.reconnecting,
+                                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).padding(top = 8.dp),
+                                enter = androidx.compose.animation.fadeIn(),
+                                exit = androidx.compose.animation.fadeOut()) {
+                                AiConnectingOverlay()
                             }
                         }
                     }

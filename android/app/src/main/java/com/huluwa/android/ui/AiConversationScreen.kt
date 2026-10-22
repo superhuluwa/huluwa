@@ -32,11 +32,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -46,7 +49,7 @@ import com.huluwa.android.AiViewModel
 import com.huluwa.android.data.*
 import kotlinx.serialization.json.*
 
-/** 独立二级对话页：两行导航、自然段回复与紧凑输入区。 */
+/** 独立二级对话页：会话摘要、自然段回复与紧凑输入区。 */
 @Composable fun AiConversationScreen(ui: AiUiState, vm: AiViewModel) {
     val session = ui.selected ?: return
     var menu by rememberSaveable(session.id) { mutableStateOf(false) }
@@ -60,7 +63,9 @@ import kotlinx.serialization.json.*
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-        containerColor = Color.White, contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        containerColor = Color.White,
+        // 底部统一避让系统导航栏和软键盘，输入框与消息区共享同一可用高度。
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom),
         topBar = {
             Surface(color = Color.White) {
                 Column {
@@ -68,11 +73,15 @@ import kotlinx.serialization.json.*
                         verticalAlignment = Alignment.CenterVertically) {
                         IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
                         Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(session.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Box(Modifier.size(5.dp).background(
-                                    if (session.status == "error") HuluwaColors.Danger else if (ui.connected || session.running) HuluwaColors.Pine else AiColors.Muted,
-                                    CircleShape))
+                                AiStatusDot(
+                                    when {
+                                        session.status == "error" -> HuluwaColors.Danger
+                                        ui.connected || session.running -> HuluwaColors.Pine
+                                        else -> AiColors.Muted
+                                    }
+                                )
                                 Text("${session.providerLabel} · ${session.modelLabel} · $status", style = MaterialTheme.typography.labelMedium,
                                     color = AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -80,12 +89,12 @@ import kotlinx.serialization.json.*
                         if (ui.loadingSession) CircularProgressIndicator(Modifier.padding(horizontal = 8.dp).size(18.dp), strokeWidth = 2.dp)
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作", Modifier.size(20.dp), tint = AiColors.Muted) }
                     }
-                    HorizontalDivider(color = AiColors.Line)
+                    AiDivider()
                 }
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             ui.error?.let { AiError(it, vm::clearError) }
             AiConversation(ui, vm, Modifier.weight(1f))
         }
@@ -136,9 +145,12 @@ import kotlinx.serialization.json.*
 @Composable private fun AiConversation(ui: AiUiState, vm: AiViewModel, modifier: Modifier) {
     val session = ui.selected ?: return
     val motion = rememberAiConversationMotion(session, ui.loadingSession)
-    val scroll = rememberAiConversationScroll(session.id, motion.initialized, motion.messages.size)
+    val entries = motion.entries
+    val scroll = rememberAiConversationScroll(session.id, motion.initialized, entries.size)
     val revealing by remember(motion) { derivedStateOf { motion.messages.any { it.isRevealing } } }
-    BoxWithConstraints(modifier.fillMaxWidth().imePadding()) {
+    val replying = !ui.loadingSession && (session.running || revealing)
+    val elapsedSeconds = rememberAiReplyElapsedSeconds(session, replying)
+    BoxWithConstraints(modifier.fillMaxWidth()) {
         // 确认区随键盘后的可用高度收缩，避免把消息区域全部挤出屏幕。
         val approvalMaxHeight = (maxHeight * .45f).coerceIn(120.dp, 260.dp).coerceAtMost(maxHeight)
         Column(Modifier.fillMaxSize()) {
@@ -146,12 +158,17 @@ import kotlinx.serialization.json.*
                 LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize().align(Alignment.TopCenter).nestedScroll(scroll.gestures),
                     state = scroll.list, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(motion.messages, key = { it.id }) { message ->
-                        AiMessageBubble(message, session.providerLabel, Modifier.animateItem(
-                            fadeInSpec = null, placementSpec = spring(stiffness = Spring.StiffnessMediumLow), fadeOutSpec = tween(140)))
+                    items(entries, key = { it.id }) { entry ->
+                        val itemModifier = Modifier.animateItem(
+                            fadeInSpec = null, placementSpec = spring(stiffness = Spring.StiffnessMediumLow), fadeOutSpec = tween(140))
+                        when (entry) {
+                            is AiConversationEntry.Message -> AiMessageBubble(entry.message, session.providerLabel, itemModifier)
+                            is AiConversationEntry.Tools -> AiToolGroup(entry.messages, itemModifier) { scroll.following = false }
+                        }
                     }
-                    if (session.running || revealing) item(key = "ai-status") {
-                        AiReplyIndicator(if (session.running) session.statusLabel else "正在回复",
+                    if (replying) item(key = "ai-status") {
+                        AiReplyIndicator(
+                            session.providerLabel, if (session.status == "approval") "等待确认" else "思考中", elapsedSeconds,
                             Modifier.animateItem(placementSpec = spring(stiffness = Spring.StiffnessMediumLow)))
                     }
                     // 保留真实底部锚点，长于一屏的流式回复也能继续跟随。
@@ -160,7 +177,7 @@ import kotlinx.serialization.json.*
                 if (motion.messages.isEmpty() && (!session.running || ui.loadingSession)) {
                     Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AiSmallIcon(Icons.Outlined.AutoAwesome)
+                        AiAgentBadge(session.provider)
                         Text(if (ui.loadingSession || !motion.initialized) "正在加载消息…" else "发送第一条消息，开始对话。",
                             style = MaterialTheme.typography.bodyMedium, color = AiColors.Muted)
                     }
@@ -192,8 +209,8 @@ import kotlinx.serialization.json.*
     val actionEnabled = if (session.running) !ui.working else ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession
     Surface(color = Color.White) {
         Column {
-            HorizontalDivider(color = AiColors.Line)
-            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+            AiDivider()
+            Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
                 Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(), color = AiColors.Background,
                     border = BorderStroke(1.dp, AiColors.Line), shape = RoundedCornerShape(14.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
@@ -204,7 +221,7 @@ import kotlinx.serialization.json.*
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = HuluwaColors.Ink, fontSize = 14.sp, lineHeight = 20.sp),
                             cursorBrush = SolidColor(HuluwaColors.Pine), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                             decorationBox = { innerTextField ->
-                                Box {
+                                Box(contentAlignment = Alignment.CenterStart) {
                                     if (ui.draft.isEmpty()) Text("给 ${session.providerLabel} 发消息…", color = AiColors.Muted,
                                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
                                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -226,6 +243,9 @@ import kotlinx.serialization.json.*
     }
 }
 
+private val AiAvatarSize = 28.dp
+
+/** 用户消息为右侧小气泡；助手正文与思考状态共用左侧头像。 */
 @Composable private fun AiMessageBubble(message: AiAnimatedMessage, provider: String, modifier: Modifier = Modifier) {
     val mine = message.role == "user"
     val entrance by animateFloatAsState(if (message.entered) 1f else 0f,
@@ -235,9 +255,7 @@ import kotlinx.serialization.json.*
         alpha = entrance
         translationY = (1f - entrance) * 10.dp.toPx()
     }
-    if (message.role == "tool") {
-        AiToolMessage(message, animated.padding(start = 28.dp))
-    } else if (mine) {
+    if (mine) {
         Box(animated, contentAlignment = Alignment.CenterEnd) {
             Surface(Modifier.padding(start = 28.dp).widthIn(max = 600.dp).animateContentSize(tween(160, easing = LinearOutSlowInEasing)),
                 color = AiColors.SoftGreen, shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 3.dp, bottomStart = 12.dp)) {
@@ -248,35 +266,80 @@ import kotlinx.serialization.json.*
             }
         }
     } else {
-        Row(animated, horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.padding(top = 1.dp).size(21.dp).background(AiColors.SoftGreen, RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.AutoAwesome, "$provider 回复", Modifier.size(13.dp), tint = HuluwaColors.Pine)
-            }
-            SelectionContainer(Modifier.weight(1f).animateContentSize(tween(160, easing = LinearOutSlowInEasing))) {
-                Text(message.text, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp))
+        val textStyle = MaterialTheme.typography.bodyMedium.copy(
+            fontSize = 14.sp, lineHeight = 20.sp,
+            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None))
+        val firstLineHeight = with(LocalDensity.current) { textStyle.lineHeight.toDp() }
+        // 头像与首行的中心对齐；字体放大时调整头像，换行时仍锚定首行。
+        val avatarTopPadding = ((firstLineHeight - AiAvatarSize) / 2).coerceAtLeast(0.dp)
+        val textTopPadding = ((AiAvatarSize - firstLineHeight) / 2).coerceAtLeast(0.dp)
+        Row(animated, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+            AiAvatar(provider, Modifier.padding(top = avatarTopPadding))
+            SelectionContainer(Modifier.weight(1f).padding(top = textTopPadding).animateContentSize(tween(160, easing = LinearOutSlowInEasing))) {
+                Text(message.text, style = textStyle)
             }
         }
     }
 }
 
-@Composable private fun AiToolMessage(message: AiAnimatedMessage, modifier: Modifier) {
-    var expanded by rememberSaveable(message.id) { mutableStateOf(false) }
-    val summary = message.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty().ifBlank { "执行过程" }
-    Surface(modifier.animateContentSize(tween(160, easing = LinearOutSlowInEasing)), color = AiColors.Background,
-        shape = RoundedCornerShape(9.dp), border = BorderStroke(1.dp, AiColors.Line)) {
-        Column {
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { expanded = !expanded }.heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Outlined.Terminal, null, Modifier.size(15.dp), tint = AiColors.Muted)
-                Text(summary, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = AiColors.Muted,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (expanded) "收起" else "展开", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
+/** 相邻工具调用合并成一组，默认只露出最新记录，展开后按原始顺序查看历史。 */
+@Composable private fun AiToolGroup(messages: List<AiAnimatedMessage>, modifier: Modifier, onInspect: () -> Unit) {
+    var expanded by rememberSaveable(messages.first().id) { mutableStateOf(false) }
+    val latest = messages.last()
+    val hasHistory = messages.size > 1
+    Column(modifier.fillMaxWidth().padding(start = 38.dp).animateContentSize(tween(160, easing = LinearOutSlowInEasing))) {
+        Row(Modifier.fillMaxWidth().clickable(enabled = hasHistory, role = Role.Button) {
+                expanded = !expanded
+                if (expanded) onInspect()
+            }.semantics { stateDescription = if (expanded) "已展开历史记录" else "已折叠历史记录" }
+                .heightIn(min = 44.dp).padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Outlined.Terminal, null, Modifier.size(15.dp), tint = AiColors.Muted)
+            Text("执行记录", style = MaterialTheme.typography.bodySmall, color = AiColors.Muted)
+            Text(messages.size.toString(), Modifier.background(AiColors.Background, RoundedCornerShape(5.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                style = MaterialTheme.typography.labelMedium, color = AiColors.Muted)
+            Spacer(Modifier.weight(1f))
+            if (hasHistory) {
+                Text(if (expanded) "收起记录" else "展开 " + (messages.size - 1) + " 条",
+                    style = MaterialTheme.typography.labelMedium, color = AiColors.Muted)
                 Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.size(15.dp), tint = AiColors.Muted)
             }
-            if (expanded) {
-                HorizontalDivider(color = AiColors.Line)
-                SelectionContainer {
-                    Text(message.text, Modifier.fillMaxWidth().padding(10.dp), fontFamily = FontFamily.Monospace,
+        }
+        val visibleMessages = if (expanded) messages else listOf(latest)
+        visibleMessages.forEach { message ->
+            key(message.id) {
+                val isLatest = message.id == latest.id
+                if (isLatest) AiDivider()
+                AiToolMessage(message, isLatest, onInspect)
+            }
+        }
+    }
+}
+
+@Composable private fun AiToolMessage(message: AiAnimatedMessage, latest: Boolean, onInspect: () -> Unit) {
+    var expanded by rememberSaveable(message.id) { mutableStateOf(false) }
+    val summary = remember(message.text) {
+        val firstLine = message.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        // 结构化工具输出只在详情中展示，避免把 JSON 挤进摘要行。
+        if (firstLine.startsWith("{") || firstLine.startsWith("[")) "工具返回结果" else firstLine.ifBlank { "执行过程" }
+    }
+    Column(Modifier.fillMaxWidth().animateContentSize(tween(160, easing = LinearOutSlowInEasing))) {
+        Row(Modifier.fillMaxWidth().clickable(role = Role.Button) {
+                expanded = !expanded
+                if (expanded) onInspect()
+            }.semantics { stateDescription = if (expanded) "已展开记录详情" else "已折叠记录详情" }
+                .heightIn(min = 44.dp).padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Outlined.Terminal, null, Modifier.size(15.dp), tint = if (latest) HuluwaColors.Pine else AiColors.Muted)
+            Text(summary, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                color = if (latest) HuluwaColors.Ink else AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (latest) Text("最新", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine)
+            Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.size(14.dp), tint = AiColors.Muted)
+        }
+        if (expanded) {
+            Surface(color = AiColors.Background, shape = RoundedCornerShape(8.dp)) {
+                SelectionContainer(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                    Text(message.text, Modifier.padding(10.dp), fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall, color = AiColors.Muted)
                 }
             }
@@ -284,25 +347,26 @@ import kotlinx.serialization.json.*
     }
 }
 
-@Composable private fun AiReplyIndicator(label: String, modifier: Modifier = Modifier) {
-    val pulse = rememberInfiniteTransition(label = "ai-typing")
-    Row(modifier.padding(start = 28.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.height(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            repeat(3) { index ->
-                val opacity by pulse.animateFloat(initialValue = .3f, targetValue = 1f,
-                    animationSpec = infiniteRepeatable(tween(450, easing = FastOutSlowInEasing), RepeatMode.Reverse,
-                        initialStartOffset = StartOffset(index * 150)), label = "ai-typing-dot-$index")
-                Box(Modifier.size(3.dp).graphicsLayer {
-                    alpha = opacity
-                    translationY = -2.dp.toPx() * opacity
-                }.background(HuluwaColors.Pine, CircleShape))
-            }
-        }
-        Text(label, color = AiColors.Muted, style = MaterialTheme.typography.bodySmall)
+@Composable private fun AiAvatar(provider: String, modifier: Modifier = Modifier) {
+    Box(modifier.size(AiAvatarSize).background(AiColors.SoftGreen, CircleShape), contentAlignment = Alignment.Center) {
+        AiAgentLogo(provider, Modifier.size(20.dp), contentDescription = "$provider 头像")
     }
 }
 
+@Composable private fun AiReplyIndicator(provider: String, label: String, elapsedSeconds: Long, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        AiAvatar(provider)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, color = AiColors.Muted, style = MaterialTheme.typography.bodySmall)
+            AiSpinner(HuluwaColors.Pine, Modifier.size(14.dp))
+            Text((elapsedSeconds / 60).toString().padStart(2, '0') + ":" + (elapsedSeconds % 60).toString().padStart(2, '0'),
+                color = AiColors.Muted, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+/** Codex 操作确认 / 用户问题：无 questions 为二元确认，有 questions 时逐题作答。 */
 @Composable private fun AiApprovalCard(approval: AiApproval, working: Boolean, maxHeight: Dp, answer: (AiApproval, String, JsonObject) -> Unit) {
     var responses by remember(approval.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val questions = approval.details.rows("questions").map { it.asObject() }

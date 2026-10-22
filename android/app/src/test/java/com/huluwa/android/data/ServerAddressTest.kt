@@ -20,6 +20,11 @@ class ServerAddressTest {
         assertEquals("/huluwa/ws/chat", target.encodedPath)
         assertEquals("sample-token", target.queryParameter("token"))
     }
+    @Test fun aiSocketUsesTheSameReverseProxyPrefix() {
+        val target = ServerAddress.aiSocket("https://example.test/huluwa/", "session-1", "sample-token")
+        assertEquals("/huluwa/ws/ai/session-1", target.encodedPath)
+        assertEquals("sample-token", target.queryParameter("token"))
+    }
     @Test fun rejectsCredentialsAndPageLinks() {
         for (value in listOf("http://user:password@example.test", "https://example.test/#/messages", "file:///tmp/server", "https://example.test/?token=sample")) {
             assertTrue(value, runCatching { ServerAddress.normalize(value) }.isFailure)

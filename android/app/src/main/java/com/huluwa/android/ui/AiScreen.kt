@@ -2,6 +2,7 @@ package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,13 +25,17 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.huluwa.android.AiUiState
 import com.huluwa.android.AiViewModel
+import com.huluwa.android.R
 import com.huluwa.android.data.AiSession
 
 /** 只作用于 AI 页，沿用松柏绿品牌色，不改变其他主页面的主题。 */
@@ -41,12 +46,25 @@ internal object AiColors {
     val Line = Color(0xFFE1E8DF)
 }
 
+/** 首页交给根布局标题栏使用的操作；visible=false 时标题栏不显示任何 AI 操作。 */
+data class AiHeaderActionsState(
+    val visible: Boolean, val loading: Boolean, val enabled: Boolean,
+    val onRefresh: () -> Unit, val onConnection: () -> Unit, val onLogout: () -> Unit,
+)
+
 /** 松柏极简首页：紧凑配置区和连续的两行会话列表。 */
-@Composable fun AiScreen(ui: AiUiState, vm: AiViewModel) {
+@Composable fun AiScreen(ui: AiUiState, vm: AiViewModel, onHeaderActions: (AiHeaderActionsState) -> Unit) {
     var connection by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<AiSession?>(null) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
+    val deletableCount = ui.sessions.count { !it.running }
     BackHandler(connection) { connection = false }
     LaunchedEffect(ui.authenticated, ui.connectionRevision) { if (ui.authenticated) connection = false }
+    val header = AiHeaderActionsState(
+        visible = ui.authenticated && !connection, loading = ui.loading, enabled = !ui.deletingAll,
+        onRefresh = vm::refresh, onConnection = { connection = true; vm.clearError() }, onLogout = vm::logout,
+    )
+    SideEffect { onHeaderActions(header) }
     if (!ui.authenticated || connection) {
         AiConnection(ui, vm::login, if (ui.authenticated) ({ connection = false }) else null)
         return
@@ -64,28 +82,16 @@ internal object AiColors {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(ui.username, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Box(Modifier.size(5.dp).background(HuluwaColors.Pine, CircleShape))
+                            AiStatusDot(HuluwaColors.Pine)
                             Text("已登录", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
                         }
                         Text(ui.server, style = MaterialTheme.typography.bodySmall, color = AiColors.Muted,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    IconButton(vm::refresh, enabled = !ui.loading) {
-                        if (ui.loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = AiColors.Muted)
-                    }
-                    var menu by remember { mutableStateOf(false) }
-                    Box {
-                        IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "服务连接操作", Modifier.size(20.dp), tint = AiColors.Muted) }
-                        DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem(text = { Text("服务连接") }, onClick = { menu = false; connection = true; vm.clearError() })
-                            DropdownMenuItem(text = { Text("退出 AI 服务") }, onClick = { menu = false; vm.logout() })
-                        }
-                    }
                 }
             }
             item(key = "launch") {
-                Surface(color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, AiColors.Line)) {
+                AiCard {
                     Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("新对话", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -98,20 +104,26 @@ internal object AiColors {
                             }
                         }
                         AiChoiceField("项目", Icons.Outlined.FolderOpen, ui.projectPath, "选择项目",
-                            ui.projects.map { AiChoice(it.path, it.name, it.path) }, !ui.loading && !ui.working, vm::selectProject)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AiChoiceField("供应商", Icons.Outlined.AutoAwesome, ui.providerId, "选择供应商", ui.availableProviders.map {
-                                AiChoice(it.id, it.label, if (it.isDefault) "服务端默认供应商" else "${it.models.size} 个可用模型")
-                            }, !ui.loading && !ui.working, vm::selectProvider, Modifier.weight(1f))
-                            AiChoiceField("模型", Icons.Outlined.Tune, ui.modelId, "选择模型", ui.launchProvider?.models.orEmpty().map {
-                                AiChoice(it.id, it.title, if (it.effort.isBlank()) "" else "推理等级：${it.effortLabel}")
-                            }, !ui.loading && !ui.working, vm::selectModel, Modifier.weight(1f))
+                            ui.projects.map { AiChoice(it.path, it.name, it.path) }, !ui.initialLoading && !ui.working, vm::selectProject)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AiChoiceField("Agent", Icons.Outlined.AutoAwesome, ui.launchProvider?.agent.orEmpty(), "选择 Agent",
+                                ui.availableAgents.map { AiChoice(it, if (it == "codex") "Codex" else "Claude Code", agent = it) },
+                                !ui.initialLoading && !ui.working, vm::selectAgent, Modifier.weight(1f))
+                            AiChoiceField("模型", Icons.Outlined.Tune, ui.launchModelKey, "选择模型",
+                                ui.availableModels.map { target ->
+                                    val details = buildList {
+                                        add(target.provider.name)
+                                        if (target.provider.isDefault) add("服务端默认供应商")
+                                        if (target.model.effort.isNotBlank()) add("推理等级：${target.model.effortLabel}")
+                                    }
+                                    AiChoice(target.key, target.model.title, details.joinToString(" · "))
+                                }, !ui.initialLoading && !ui.working, vm::selectModel, Modifier.weight(1f))
                         }
                         val hint = when {
-                            ui.loading -> "正在同步项目和模型…"
+                            ui.initialLoading -> "正在同步项目和模型…"
                             ui.projects.isEmpty() -> "服务端还没有登记项目，请添加后刷新。"
-                            ui.availableProviders.isEmpty() -> "该项目尚未启用 Claude 或 Codex，请在服务端配置。"
-                            ui.launchProvider?.models?.isEmpty() == true -> "该供应商暂无可用模型，请配置后刷新。"
+                            ui.availableAgents.isEmpty() -> "该项目尚未启用 Claude Code 或 Codex，请在服务端配置。"
+                            ui.availableModels.isEmpty() -> "该 Agent 暂无可用模型，请在服务端配置后刷新。"
                             else -> null
                         }
                         hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AiColors.Muted) }
@@ -123,10 +135,17 @@ internal object AiColors {
                 Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("最近对话", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                     Text("${ui.sessions.size} 段对话", style = MaterialTheme.typography.labelMedium, color = AiColors.Muted)
+                    TextButton({ confirmDeleteAll = true }, enabled = deletableCount > 0 && !ui.loading && !ui.working,
+                        contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.textButtonColors(contentColor = HuluwaColors.Danger)) {
+                        if (ui.deletingAll) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (ui.deletingAll) "删除中…" else "一键删除", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
             if (ui.sessions.isEmpty()) item(key = "empty") {
-                Surface(color = Color.White, shape = RoundedCornerShape(14.dp)) {
+                AiCard {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         AiSmallIcon(Icons.Outlined.ChatBubbleOutline)
@@ -140,13 +159,14 @@ internal object AiColors {
             itemsIndexed(ui.sessions, key = { _, session -> session.id }) { index, session ->
                 val projectName = ui.projects.find { it.path == session.projectPath }?.name
                     ?: session.projectPath.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
-                Surface(onClick = { vm.open(session.id) }, color = Color.White,
+                Surface(onClick = { vm.open(session.id) }, enabled = !ui.deletingAll, color = Color.White,
                     shape = RoundedCornerShape(topStart = if (index == 0) 14.dp else 0.dp, topEnd = if (index == 0) 14.dp else 0.dp,
-                        bottomStart = if (index == ui.sessions.lastIndex) 14.dp else 0.dp, bottomEnd = if (index == ui.sessions.lastIndex) 14.dp else 0.dp)) {
+                        bottomStart = if (index == ui.sessions.lastIndex) 14.dp else 0.dp, bottomEnd = if (index == ui.sessions.lastIndex) 14.dp else 0.dp),
+                    border = BorderStroke(1.dp, AiColors.Line)) {
                     Column {
                         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            AiSmallIcon(if (session.provider == "codex") Icons.Outlined.Terminal else Icons.Outlined.AutoAwesome)
+                            AiAgentBadge(session.provider)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(session.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
@@ -163,13 +183,37 @@ internal object AiColors {
                                 Icon(Icons.Outlined.DeleteOutline, "删除对话", Modifier.size(18.dp), tint = AiColors.Muted)
                             }
                         }
-                        if (index != ui.sessions.lastIndex) HorizontalDivider(Modifier.padding(start = 52.dp), color = AiColors.Line)
+                        if (index != ui.sessions.lastIndex) AiDivider(Modifier.padding(start = 52.dp))
                     }
                 }
             }
         }
     }
     deleting?.let { session -> AiDeleteDialog(session, { deleting = null }) { deleting = null; vm.delete(session) } }
+    if (confirmDeleteAll) {
+        AlertDialog(onDismissRequest = { confirmDeleteAll = false }, title = { Text("一键删除对话") },
+            text = { Text("将删除 $deletableCount 段未运行对话及其消息。正在回复或等待确认的对话会保留，项目文件不会被删除。") },
+            confirmButton = { TextButton({ confirmDeleteAll = false; vm.deleteAll() }, enabled = deletableCount > 0 && !ui.loading && !ui.working) {
+                Text("删除", color = HuluwaColors.Danger)
+            } }, dismissButton = { TextButton({ confirmDeleteAll = false }) { Text("取消") } })
+    }
+}
+
+/** AI 首页标题栏右侧的刷新与更多菜单。 */
+@Composable internal fun AiHeaderActions(actions: AiHeaderActionsState) {
+    if (!actions.visible) return
+    IconButton(actions.onRefresh, enabled = actions.enabled) {
+        if (actions.loading) AiSpinner(HuluwaColors.Muted, Modifier.size(20.dp))
+        else Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)
+    }
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "服务连接操作", Modifier.size(20.dp), tint = HuluwaColors.Pine) }
+        DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem(text = { Text("服务连接") }, onClick = { menu = false; actions.onConnection() })
+            DropdownMenuItem(text = { Text("退出 AI 服务") }, onClick = { menu = false; actions.onLogout() })
+        }
+    }
 }
 
 @Composable internal fun AiSmallIcon(icon: ImageVector, modifier: Modifier = Modifier) {
@@ -178,7 +222,7 @@ internal object AiColors {
     }
 }
 
-private data class AiChoice(val id: String, val title: String, val subtitle: String = "")
+private data class AiChoice(val id: String, val title: String, val subtitle: String = "", val agent: String? = null)
 
 /** 首页保留紧凑的当前值，完整名称、路径和选中状态放在二级面板。 */
 @Composable private fun AiChoiceField(
@@ -193,7 +237,9 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
         color = AiColors.Background, shape = RoundedCornerShape(9.dp)) {
         Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 8.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(icon, null, Modifier.size(16.dp), tint = AiColors.Muted)
+            val selectedAgent = selected?.agent
+            if (selectedAgent != null) AiAgentLogo(selectedAgent, Modifier.size(20.dp))
+            else Icon(icon, null, Modifier.size(16.dp), tint = AiColors.Muted)
             Column(Modifier.weight(1f)) {
                 Text(label, style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
                 Text(selected?.title ?: placeholder, style = MaterialTheme.typography.labelLarge,
@@ -210,6 +256,7 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                         color = if (choice.id == selectedId) AiColors.SoftGreen else Color.White, shape = RoundedCornerShape(10.dp)) {
                         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            choice.agent?.let { AiAgentLogo(it, Modifier.size(24.dp)) }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text(choice.title, style = MaterialTheme.typography.bodyMedium)
                                 if (choice.subtitle.isNotBlank()) Text(choice.subtitle, style = MaterialTheme.typography.bodySmall, color = AiColors.Muted)
@@ -233,7 +280,7 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 IconButton(dismiss) { Icon(Icons.Outlined.Close, "关闭$title", Modifier.size(20.dp), tint = AiColors.Muted) }
             }
-            HorizontalDivider(color = AiColors.Line)
+            AiDivider()
             content()
         }
     }
@@ -244,63 +291,59 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
         confirmButton = { TextButton(confirm) { Text("删除", color = HuluwaColors.Danger) } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
 }
 
+/** 服务连接表单：品牌与登录内容整体居中，小屏和键盘弹出时仍可滚动。 */
 @Composable private fun AiConnection(ui: AiUiState, login: (String, String, String) -> Unit, back: (() -> Unit)?) {
     var server by rememberSaveable(ui.server) { mutableStateOf(ui.server) }
     var username by rememberSaveable(ui.username) { mutableStateOf(ui.username) }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxSize()) {
         if (back != null) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp)) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
                 Text("服务连接", style = MaterialTheme.typography.titleMedium)
             }
         }
-        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            AiSmallIcon(Icons.Outlined.Link, Modifier.size(36.dp))
-            Column(Modifier.weight(1f)) {
-                Text("连接你的 AI", style = MaterialTheme.typography.titleMedium)
-                Text("继续服务器上的 Claude 与 Codex 对话", style = MaterialTheme.typography.bodySmall, color = AiColors.Muted)
-            }
-        }
-        Surface(color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, AiColors.Line)) {
-            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务地址") },
-                    placeholder = { Text("http://192.168.1.10:9600") }, singleLine = true, enabled = !ui.authenticating,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), shape = RoundedCornerShape(10.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("服务账号") },
-                    singleLine = true, enabled = !ui.authenticating, shape = RoundedCornerShape(10.dp), textStyle = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("服务密码") },
-                    singleLine = true, enabled = !ui.authenticating, textStyle = MaterialTheme.typography.bodyMedium,
-                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), shape = RoundedCornerShape(10.dp),
-                    trailingIcon = { IconButton({ visible = !visible }) {
-                        Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "隐藏密码" else "显示密码", Modifier.size(20.dp))
-                    } })
-                ui.error?.let { Text(it, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
-                Button({ login(server, username, password) }, Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    enabled = !ui.authenticating, shape = RoundedCornerShape(10.dp)) {
-                    if (ui.authenticating) { CircularProgressIndicator(Modifier.size(16.dp), color = AiColors.Muted, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
-                    Text(if (ui.authenticating) "正在连接…" else "连接并登录")
+        Column(Modifier.weight(1f).fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Image(painterResource(R.drawable.terminal_buddy_logo), contentDescription = "Terminal Buddy 标志", modifier = Modifier.size(88.dp))
+                    Text("Terminal Buddy", Modifier.fillMaxWidth(), style = MaterialTheme.typography.headlineMedium,
+                        fontSize = 32.sp, lineHeight = 40.sp, color = HuluwaColors.Ink, textAlign = TextAlign.Center)
+                    Text("继续服务器上的 Claude 与 Codex 对话", Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall,
+                        color = AiColors.Muted, textAlign = TextAlign.Center)
+                }
+                AiCard {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务地址") },
+                            placeholder = { Text("http://192.168.1.10:9600") }, singleLine = true, enabled = !ui.authenticating,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), shape = RoundedCornerShape(10.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("服务账号") },
+                            singleLine = true, enabled = !ui.authenticating, shape = RoundedCornerShape(10.dp), textStyle = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("服务密码") },
+                            singleLine = true, enabled = !ui.authenticating, textStyle = MaterialTheme.typography.bodyMedium,
+                            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), shape = RoundedCornerShape(10.dp),
+                            trailingIcon = { IconButton({ visible = !visible }) {
+                                Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "隐藏密码" else "显示密码", Modifier.size(20.dp))
+                            } })
+                        ui.error?.let { Text(it, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
+                        Button({ login(server, username, password) }, Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            enabled = !ui.authenticating, shape = RoundedCornerShape(10.dp)) {
+                            if (ui.authenticating) { CircularProgressIndicator(Modifier.size(16.dp), color = AiColors.Muted, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
+                            Text(if (ui.authenticating) "正在连接…" else "连接并登录")
+                        }
+                    }
+                }
+                Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Outlined.Lock, null, Modifier.padding(top = 2.dp).size(14.dp), tint = AiColors.Muted)
+                    Text("使用 TerminalBuddy 服务账号。密码不会保存，登录令牌由设备加密保存。",
+                        color = AiColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-        Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Outlined.Lock, null, Modifier.padding(top = 2.dp).size(14.dp), tint = AiColors.Muted)
-            Text("使用 TerminalBuddy 服务账号。密码不会保存，登录令牌由设备加密保存。",
-                color = AiColors.Muted, style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(Modifier.height(8.dp))
-    }
-}
-
-@Composable internal fun AiError(message: String, dismiss: () -> Unit) {
-    Row(Modifier.fillMaxWidth().background(HuluwaColors.Danger.copy(alpha = .08f)).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Outlined.ErrorOutline, null, Modifier.size(16.dp), tint = HuluwaColors.Danger)
-        Text(message, Modifier.weight(1f).heightIn(max = 80.dp).verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 8.dp),
-            color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
-        IconButton(dismiss) { Icon(Icons.Outlined.Close, "关闭提示", Modifier.size(18.dp), tint = HuluwaColors.Danger) }
     }
 }
