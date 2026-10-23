@@ -58,7 +58,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val session = repository.api.store
     private val appUpdates = (application as HuluwaApplication).appUpdates
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
-    private val mutable = MutableStateFlow(AppState(auth = AuthState(session.server, session.username, session.loggedIn)))
+    private val buildPreferences = AndroidBuildPreferences(application)
+    private val mutable = MutableStateFlow(initialState())
+    private fun initialState(error: String? = null) = AppState(
+        auth = AuthState(session.server, session.username, session.loggedIn, error = error),
+        androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
+    )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
         val upgradeTime = upgrade.latest?.publishedAt.orEmpty().ifBlank {
             if (upgrade.checkedAt > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(upgrade.checkedAt), ZoneId.systemDefault())
@@ -212,7 +217,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 val result = repository.login(address, username.trim(), password, setup = !initialized)
                 withContext(Dispatchers.IO) { session.save(address, result.text("username", fallback = username.trim()), result.text("token")) }
                 repository.api.markReachable()
-                mutable.value = AppState(auth = AuthState(session.server, session.username, true))
+                mutable.value = initialState()
                 if (foreground) startForegroundWork()
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) { mutable.update { it.copy(auth = it.auth.copy(working = false, error = error.userMessage())) } }
@@ -224,7 +229,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
         appUpdates.reset(); buildDownloads.reset(); session.clear(); repository.clearCaches()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
-        mutable.value = AppState(auth = AuthState(session.server, session.username, error = message))
+        mutable.value = initialState(error = message)
         if (message != null) notify(message)
     }
     private fun handleError(error: Throwable) {
@@ -562,6 +567,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun toggleAndroidFollow() = mutable.update { it.copy(androidBuild = it.androidBuild.copy(follow = !it.androidBuild.follow)) }
     fun selectAndroidServer(id: String) {
+        buildPreferences.selectServer(session.server, id)
         mutable.update { it.copy(androidBuild = it.androidBuild.copy(serverId = id,
             status = it.androidBuild.status.copy(workerOnline = false, source = AndroidSource()),
             selectedId = null, logs = "", cursor = 0, logComplete = false)) }
