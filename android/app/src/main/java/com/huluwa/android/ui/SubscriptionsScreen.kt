@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -11,9 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
 import com.huluwa.android.data.*
@@ -29,9 +35,32 @@ import com.huluwa.android.data.*
 @Composable fun SubscriptionsScreen(ui: AppState, vm: HuluwaViewModel) {
     val state = ui.subscriptions
     val rows = state.data
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+    val listState = rememberLazyListState()
+    val bounceEffect = rememberBounceOverscroll()
+    // LazyColumn 不会向短列表派发回弹事件，接收剩余手势以支持不足一屏时的双向拖动。
+    val shortListBounce = remember(listState, bounceEffect) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || listState.canScrollForward || listState.canScrollBackward) {
+                    return Offset.Zero
+                }
+                val delta = Offset(0f, available.y)
+                bounceEffect.applyToScroll(delta, source) { Offset.Zero }
+                return delta
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (listState.canScrollForward || listState.canScrollBackward) return Velocity.Zero
+                val velocity = Velocity(0f, available.y)
+                bounceEffect.applyToFling(velocity) { Velocity.Zero }
+                return velocity
+            }
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(shortListBounce), state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
-        overscrollEffect = rememberBounceOverscroll()) {
+        overscrollEffect = bounceEffect) {
         // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
         if (state.error != null && !state.error.isServerUnreachable()) item {
             Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
