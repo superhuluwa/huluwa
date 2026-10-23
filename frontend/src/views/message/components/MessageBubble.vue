@@ -12,7 +12,7 @@
         </div>
         <div v-if="isMine" class="avatar mine">我</div>
         <div class="bubble"
-            :class="{ 'is-cover': isImage, 'is-cover-wide': isImage && hasCoverCaption, 'is-video': isVideo, 'is-error': isError, 'has-corner-action': (isMovie || isDytt) && isImage, 'hold-open': holdOpen }"
+            :class="{ 'is-cover': isImage, 'is-cover-wide': isImage && hasCoverCaption, 'is-gallery': isGallery, 'is-video': isVideo, 'is-error': isError, 'has-corner-action': (isMovie || isDytt) && isImage, 'hold-open': holdOpen }"
             :title="fullTime" @touchstart.passive="onHoldStart" @touchend="endHold" @touchcancel="endHold"
             @touchmove.passive="endHold">
             <div class="bubble-tools">
@@ -36,7 +36,9 @@
             </button>
             <div class="bubble-content">
                 <!-- 图片气泡（影视封面 / 图片消息）：封面 + 配文，点击封面看大图 -->
-                <template v-if="isImage">
+                <ImageGallery v-if="isGallery" :key="message.id" :images="galleryImages" :caption="message.contentText"
+                    @open-cover="$emit('open-cover', $event)" />
+                <template v-else-if="isImage">
                     <div v-if="loadError" class="cover-fallback">
                         <i class="fa-solid fa-image"></i>
                         <span>封面加载失败</span>
@@ -137,6 +139,7 @@ import NotifyCard from './NotifyCard.vue'
 import SessionIcon from './SessionIcon.vue'
 import MagnetListDialog from './MagnetListDialog.vue'
 import VideoBubble from './VideoBubble.vue'
+import ImageGallery from './ImageGallery.vue'
 import MovieSubscriptionDialog from './MovieSubscriptionDialog.vue'
 import PlaySourceDialog from './PlaySourceDialog.vue'
 import MovieSearchWatchAction from './MovieSearchWatchAction.vue'
@@ -150,7 +153,7 @@ export default {
     setup() {
         return { hlsSubscriptions: useHlsSubscriptionsStore() }
     },
-    components: { RichText, SessionIcon, NotifyCard, MagnetListDialog, VideoBubble, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
+    components: { RichText, SessionIcon, NotifyCard, MagnetListDialog, VideoBubble, ImageGallery, MovieSubscriptionDialog, PlaySourceDialog, MovieSearchWatchAction },
     props: {
         message: {
             type: Object,
@@ -181,6 +184,16 @@ export default {
         },
         isImage() {
             return this.message.type === 'image' && !!this.message.content
+        },
+        galleryImages() {
+            if (this.payload.kind !== 'video' || !Array.isArray(this.payload.images)) return []
+            return this.payload.images.map(image => ({
+                url: typeof image === 'string' ? image : image?.url,
+                livePhotoUrl: typeof image === 'object' ? image?.livePhotoUrl || image?.live_photo_url || '' : ''
+            })).filter(image => typeof image.url === 'string' && image.url.trim())
+        },
+        isGallery() {
+            return this.isImage && this.galleryImages.length > 1
         },
         /** 封面卡是否有配文：有配文的卡片铺到右侧头像栏前，纯图（图集后续张）仍保持窄图卡 */
         hasCoverCaption() {
@@ -564,6 +577,11 @@ export default {
 /* 带配文的卡片：正文与操作条铺满两侧头像栏之间的可用宽度。 */
 .bubble.is-cover.is-cover-wide {
     width: calc(100% - var(--chat-rail-both, 96px));
+    max-width: calc(100% - var(--chat-rail-both, 96px));
+}
+
+.bubble.is-cover.is-gallery {
+    width: 320px;
     max-width: calc(100% - var(--chat-rail-both, 96px));
 }
 

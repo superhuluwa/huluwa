@@ -117,6 +117,7 @@ import kotlinx.coroutines.flow.first
     playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit, onMedia: (String, Boolean) -> Unit,
 ) {
     val notify = message.notify
+    val galleryImages = remember(message.payload) { message.videoImages }
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
@@ -128,6 +129,11 @@ import kotlinx.coroutines.flow.first
                     val film = message.film
                     when {
                         film != null -> FilmResultCard(film, ui, vm)
+                        message.type == "image" && galleryImages.size > 1 -> {
+                            VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop) { onMedia(it, false) }
+                            val caption = plainText(message.contentText)
+                            if (caption.isNotBlank()) SelectionContainer { Text(caption, color = HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
+                        }
                         message.type == "image" && message.content.isNotBlank() -> AsyncImage(message.content, "消息图片",
                             Modifier.width(240.dp).heightIn(min = 150.dp, max = 300.dp).clickable { onMedia(message.content, false) }, contentScale = ContentScale.Fit)
                         message.type == "video" && message.content.isNotBlank() -> {
@@ -142,11 +148,8 @@ import kotlinx.coroutines.flow.first
                             if (message.payload.text("kind") == "video" && video.startsWith("http")) {
                                 InlineVideoBubble(video, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
                             }
-                            message.payload.rows("images").take(12).forEach { image ->
-                                val url = (image as? kotlinx.serialization.json.JsonPrimitive)?.content ?: image.asObject().text("url")
-                                if (url.startsWith("http")) AsyncImage(url, "解析图片", Modifier.width(230.dp).heightIn(min = 120.dp, max = 260.dp).clickable { onMedia(url, false) }, contentScale = ContentScale.Fit)
-                            }
-                            if (text.isBlank() && video.isBlank()) Text("收到一条服务消息", style = MaterialTheme.typography.bodySmall)
+                            if (galleryImages.isNotEmpty()) VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop) { onMedia(it, false) }
+                            if (text.isBlank() && video.isBlank() && galleryImages.isEmpty()) Text("收到一条服务消息", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }

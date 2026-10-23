@@ -36,7 +36,7 @@ import java.util.UUID;
  * 发送「视频解析」消息即在后台线程调用内网解析服务（对齐 quantum 的 quantum-video-parse.cs，约 5-30 秒），
  * 把抖音等分享口令解析出的作品按气泡形态逐条落库：
  *  - 有视频直链 → 一条 video 气泡（封面作预览图，配文=标题/作者，点按端内播放）；
- *  - 无视频直链（图文作品）→ 逐张 image 气泡，实况照片按 video 气泡推、图片作预览图；
+ *  - 无视频直链（图文作品）→ 多图合并为一条可翻页的图集气泡，单张实况照片按 video 气泡推；
  *  - 音乐直链不单独推气泡，只落在日志与加载回复里。
  */
 @Service
@@ -1125,17 +1125,15 @@ public class ChatService {
         }
 
         if (!item.images().isEmpty()) {
-            // 图文作品：逐张图片气泡；live_photo_url 非空的实况照片按视频气泡推、图片作预览
-            boolean first = true;
-            for (VideoParseService.ImageItem image : item.images()) {
-                String imageCaption = first ? caption : null;
-                if (notBlank(image.livePhotoUrl())) {
-                    replies.add(append(sessionId, "bot", "video", image.livePhotoUrl(),
-                            imageCaption, videoMeta("ready", item, image.url())));
-                } else {
-                    replies.add(append(sessionId, "bot", "image", image.url(), imageCaption, payload));
-                }
-                first = false;
+            VideoParseService.ImageItem firstImage = item.images().getFirst();
+            if (item.images().size() > 1) {
+                // 图集合为一条消息，客户端用 payload.images 左右翻页；content 保留首图供旧客户端展示。
+                replies.add(append(sessionId, "bot", "image", firstImage.url(), caption, payload));
+            } else if (notBlank(firstImage.livePhotoUrl())) {
+                replies.add(append(sessionId, "bot", "video", firstImage.livePhotoUrl(),
+                        caption, videoMeta("ready", item, firstImage.url())));
+            } else {
+                replies.add(append(sessionId, "bot", "image", firstImage.url(), caption, payload));
             }
             return replies;
         }
@@ -1177,7 +1175,7 @@ public class ChatService {
         return """
                 视频解析已就绪，把分享口令整段发给我即可：
                 1. 支持抖音、快手等 App 的分享口令（形如「7.68 复制打开抖音…https://v.douyin.com/xxxx/」）；
-                2. 视频作品回复一条可播放的视频气泡，图文作品逐张回复图片，实况照片按视频回复；
+                2. 视频作品回复一条可播放的视频气泡，多图作品可左右切换查看，实况照片支持播放；
                 3. 输入「状态」查看当前解析服务配置，「帮助」随时回到本说明。""";
     }
 
@@ -1204,6 +1202,9 @@ public class ChatService {
             meta.put("video", item.videoUrl());
             meta.put("music", item.musicUrl());
             meta.put("imageCount", item.images().size());
+            if (!notBlank(item.videoUrl()) && item.images().size() > 1) {
+                meta.put("images", item.images());
+            }
         }
         return toJson(meta);
     }

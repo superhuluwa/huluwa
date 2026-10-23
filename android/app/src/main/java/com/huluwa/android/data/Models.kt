@@ -61,6 +61,8 @@ data class Session(
             (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
     }
 }
+data class ParsedImage(val url: String, val livePhotoUrl: String = "")
+
 data class ChatMessage(
     val id: Long, val sessionId: String, val role: String, val type: String, val content: String,
     val contentText: String, val payload: JsonObject, val createdAt: String,
@@ -68,6 +70,13 @@ data class ChatMessage(
 ) {
     val mine get() = role == "user"
     val notify: NotifyMessage? get() = if (type == "notify") NotifyMessage.from(this) else null
+    val videoImages: List<ParsedImage> get() = if (payload.text("kind") == "video") payload.rows("images").mapNotNull { image ->
+        val raw = image.asObject()
+        val url = (image as? JsonPrimitive)?.contentOrNull ?: raw.text("url")
+        url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let {
+            ParsedImage(it, raw.text("livePhotoUrl", "live_photo_url"))
+        }
+    } else emptyList()
     val film: FilmCard? get() = payload.takeIf { it.text("title").isNotBlank() && it.containsKey("cover") && it.containsKey("url") && it.text("kind") != "video" }?.let(FilmCard::from)
     companion object {
         fun from(raw: JsonObject): ChatMessage {

@@ -32,8 +32,9 @@ import coil3.compose.AsyncImage
 /** 聊天气泡默认只展示封面，用户点击后才创建播放器并开始加载。 */
 @Composable internal fun InlineVideoBubble(
     url: String, poster: String, active: Boolean, onPlay: () -> Unit, onStop: () -> Unit,
+    modifier: Modifier = Modifier.width(240.dp).aspectRatio(4f / 3f),
 ) {
-    Box(Modifier.width(240.dp).aspectRatio(4f / 3f).clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
         if (active) {
             InlineVideoPlayer(url, onStop)
         } else {
