@@ -207,12 +207,15 @@ import kotlinx.serialization.json.*
     }
 }
 
-/** 48dp 的单行输入区，多行输入最多占四行，按钮保留完整触控区域。 */
+/** 输入框上方统一展示模型与用量轻卡片，输入框保留原有编辑和发送行为。 */
 @Composable private fun AiComposer(ui: AiUiState, session: AiSession, send: () -> Unit, stop: () -> Unit, draft: (String) -> Unit) {
     val actionEnabled = if (session.running) !ui.working else ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession
+    val model = ui.providers.find { it.id == session.providerId }?.models?.find { it.id == session.model.orEmpty() }
     Surface(color = Color.White) {
         Column {
-            AiDivider()
+            Box(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
+                AiConversationUsageCard(session, model, Modifier.widthIn(max = 760.dp).fillMaxWidth())
+            }
             Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
                 Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(), color = AiColors.Background,
                     border = BorderStroke(1.dp, AiColors.Line), shape = RoundedCornerShape(14.dp)) {

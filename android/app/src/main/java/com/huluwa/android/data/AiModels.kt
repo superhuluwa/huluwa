@@ -13,6 +13,13 @@ data class AiMessage(val id: String, val role: String, val text: String, val cre
 @Serializable
 data class AiApproval(val id: String, val method: String, val details: JsonObject = JsonObject(emptyMap()))
 
+/** 最近一次模型调用的实际用量；旧服务端或尚未上报的字段保持未知。 */
+@Serializable
+data class AiTokenUsage(
+    val contextTokens: Long? = null, val contextWindow: Long? = null,
+    val inputTokens: Long? = null, val outputTokens: Long? = null,
+)
+
 @Serializable
 data class AiSession(
     val id: String, val title: String, val provider: String, val projectPath: String,
@@ -20,6 +27,7 @@ data class AiSession(
     val model: String? = null, val status: String = "idle", val messages: List<AiMessage> = emptyList(),
     val approvals: List<AiApproval> = emptyList(), val error: String? = null,
     val updatedAt: Long = 0, val revision: Long = 0,
+    val usage: AiTokenUsage? = null,
 ) {
     /** 服务端仍在该会话执行任务（含等待用户确认）。 */
     val running get() = status == "running" || status == "approval"
@@ -58,12 +66,14 @@ data class AiProvider(
 data class AiModel(val id: String, val label: String = "", val effort: String = "") {
     val title get() = label.ifBlank { id.ifBlank { "服务端默认模型" } }
     val effortLabel get() = when (effort) {
+        "none" -> "关闭"
         "minimal" -> "极低"
         "low" -> "低"
         "medium" -> "中"
         "high" -> "高"
         "xhigh" -> "很高"
         "max" -> "最高"
+        "ultra" -> "极高"
         else -> effort
     }
 }

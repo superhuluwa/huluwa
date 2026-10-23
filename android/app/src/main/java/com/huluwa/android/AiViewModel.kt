@@ -391,6 +391,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
             providerId = provider.id,
             providerName = provider.name,
             model = model.id.takeIf(String::isNotBlank),
+            usage = AiTokenUsage(contextTokens = 0, inputTokens = 0, outputTokens = 0),
         )
         pending = session
         ++generation
