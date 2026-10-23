@@ -42,6 +42,7 @@
  */
 import MessageBubble from './MessageBubble.vue'
 import { formatTimeLabel, shouldInsertTimeSeparator } from '@/utils/chatFormat'
+import { mergeVideoImageMessages } from '@/utils/videoGallery'
 
 export default {
     name: 'MessageList',
@@ -99,7 +100,7 @@ export default {
         rows() {
             const result = []
             let prevTime = null
-            this.messages.forEach((message, index) => {
+            mergeVideoImageMessages(this.messages).forEach((message, index) => {
                 const separator = index === 0 || shouldInsertTimeSeparator(prevTime, message.createdAt)
                     ? formatTimeLabel(message.createdAt)
                     : ''

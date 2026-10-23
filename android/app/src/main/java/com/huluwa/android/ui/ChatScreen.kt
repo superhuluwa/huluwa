@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.first
 
 @Composable fun ChatScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val chat = ui.chat; val session = chat.session ?: return
+    val displayMessages = remember(chat.messages) { mergeVideoImageMessages(chat.messages) }
     val reconnecting = rememberReconnecting(vm)
     val list = rememberLazyListState()
     var content by rememberSaveable(session.id) { mutableStateOf("") }
@@ -92,7 +93,7 @@ import kotlinx.coroutines.flow.first
         LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), state = list, reverseLayout = true,
             contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp, Alignment.Top)) {
             if (chat.processing) item("processing") { Text("正在处理，请稍候…", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, modifier = Modifier.padding(start = 43.dp)) }
-            items(chat.messages.asReversed(), key = { it.id }) { message ->
+            items(displayMessages.asReversed(), key = { it.id }) { message ->
                 MessageBubble(message, session.kind, ui, vm,
                     playingVideo = activeVideoId == message.id,
                     onVideoPlay = { activeVideoId = message.id },
