@@ -57,12 +57,9 @@ import kotlin.math.roundToInt
                 .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                 AiAgentLogo(session.provider, Modifier.size(22.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text(session.providerLabel, style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.Normal),
-                        color = AiColors.Muted, maxLines = 1)
-                    Text(modelLabel, style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                Text("${session.providerLabel} · $modelLabel", Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(7.dp)) {
                     Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(3.dp),
                         verticalAlignment = Alignment.CenterVertically) {
