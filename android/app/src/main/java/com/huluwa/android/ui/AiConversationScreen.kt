@@ -184,7 +184,8 @@ import kotlinx.serialization.json.*
                             style = MaterialTheme.typography.bodyMedium, color = AiColors.Muted)
                     }
                 }
-                androidx.compose.animation.AnimatedVisibility(visible = !scroll.following && motion.messages.isNotEmpty(),
+                // 展开执行记录会暂停自动跟随，仅在下方仍有内容可滚动时显示返回按钮。
+                androidx.compose.animation.AnimatedVisibility(visible = !scroll.following && scroll.list.canScrollForward && motion.messages.isNotEmpty(),
                     modifier = Modifier.align(Alignment.BottomCenter).padding(
                         start = 8.dp, end = if (usageExpanded) 8.dp else 64.dp, bottom = 8.dp),
                     enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
