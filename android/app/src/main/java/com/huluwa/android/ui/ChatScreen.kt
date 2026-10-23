@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
 import com.huluwa.android.data.*
+import kotlinx.coroutines.flow.first
 
 @Composable fun ChatScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val chat = ui.chat; val session = chat.session ?: return
@@ -33,12 +34,19 @@ import com.huluwa.android.data.*
     var content by rememberSaveable(session.id) { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var activeVideoId by remember(session.id) { mutableStateOf<Long?>(null) }
     var initialized by remember(session.id) { mutableStateOf(false) }
     val nearBottom by remember { derivedStateOf { list.firstVisibleItemIndex <= 2 } }
     LaunchedEffect(session.id, chat.messages.lastOrNull()?.id, chat.processing) {
         if (chat.messages.isNotEmpty() && (!initialized || nearBottom || chat.messages.last().mine)) {
             list.scrollToItem(0); initialized = true
         }
+    }
+    // 列表仅保留当前点击的视频；完全滑出可见区域后恢复封面，避免滚回时自动播放。
+    LaunchedEffect(session.id, activeVideoId) {
+        val messageId = activeVideoId ?: return@LaunchedEffect
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.key == messageId } }.first { visible -> !visible }
+        activeVideoId = null
     }
     // 整个聊天布局统一避让键盘，消息区与输入栏随系统键盘动画一起调整高度。
     Scaffold(modifier = Modifier.fillMaxSize().imePadding(), containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
@@ -84,7 +92,13 @@ import com.huluwa.android.data.*
         LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), state = list, reverseLayout = true,
             contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp, Alignment.Top)) {
             if (chat.processing) item("processing") { Text("正在处理，请稍候…", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, modifier = Modifier.padding(start = 43.dp)) }
-            items(chat.messages.asReversed(), key = { it.id }) { message -> MessageBubble(message, session.kind, ui, vm, onMedia = { url, video -> media = url to video }) }
+            items(chat.messages.asReversed(), key = { it.id }) { message ->
+                MessageBubble(message, session.kind, ui, vm,
+                    playingVideo = activeVideoId == message.id,
+                    onVideoPlay = { activeVideoId = message.id },
+                    onVideoStop = { if (activeVideoId == message.id) activeVideoId = null },
+                    onMedia = { url, video -> activeVideoId = null; media = url to video })
+            }
             item("history") {
                 // 加载状态统一显示在标题栏菊花上，消息区只保留错误反馈，避免列表被进度条挤动。
                 Feedback(loading = false, error = chat.error.takeUnless { it.isServerUnreachable() }, onRetry = { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
@@ -98,7 +112,10 @@ import com.huluwa.android.data.*
     media?.let { (url, video) -> MediaViewer(url, video) { media = null } }
 }
 
-@Composable private fun MessageBubble(message: ChatMessage, kind: String, ui: AppState, vm: HuluwaViewModel, onMedia: (String, Boolean) -> Unit) {
+@Composable private fun MessageBubble(
+    message: ChatMessage, kind: String, ui: AppState, vm: HuluwaViewModel,
+    playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit, onMedia: (String, Boolean) -> Unit,
+) {
     val notify = message.notify
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
@@ -113,12 +130,18 @@ import com.huluwa.android.data.*
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && message.content.isNotBlank() -> AsyncImage(message.content, "消息图片",
                             Modifier.width(240.dp).heightIn(min = 150.dp, max = 300.dp).clickable { onMedia(message.content, false) }, contentScale = ContentScale.Fit)
-                        message.type == "video" && message.content.isNotBlank() -> Button({ onMedia(message.content, true) }) { Icon(Icons.Outlined.PlayCircleOutline, null); Spacer(Modifier.width(6.dp)); Text("播放视频") }
+                        message.type == "video" && message.content.isNotBlank() -> {
+                            InlineVideoBubble(message.content, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
+                            val caption = plainText(message.contentText)
+                            if (caption.isNotBlank()) SelectionContainer { Text(caption, color = HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
+                        }
                         else -> {
                             val text = plainText(message.contentText.ifBlank { message.content })
                             if (text.isNotBlank()) SelectionContainer { Text(text, color = if (message.type == "error") HuluwaColors.Danger else HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
                             val video = message.payload.text("videoUrl", "video", "url")
-                            if (message.payload.text("kind") == "video" && video.startsWith("http")) TextButton({ onMedia(video, true) }) { Text("播放解析视频") }
+                            if (message.payload.text("kind") == "video" && video.startsWith("http")) {
+                                InlineVideoBubble(video, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
+                            }
                             message.payload.rows("images").take(12).forEach { image ->
                                 val url = (image as? kotlinx.serialization.json.JsonPrimitive)?.content ?: image.asObject().text("url")
                                 if (url.startsWith("http")) AsyncImage(url, "解析图片", Modifier.width(230.dp).heightIn(min = 120.dp, max = 260.dp).clickable { onMedia(url, false) }, contentScale = ContentScale.Fit)
