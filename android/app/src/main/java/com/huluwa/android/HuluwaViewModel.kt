@@ -525,9 +525,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val previous = mutable.value.androidBuild
         if (!silent) mutable.update { it.copy(androidBuild = it.androidBuild.copy(tasks = it.androidBuild.tasks.copy(loading = true))) }
         try {
-            val status = AndroidBuildStatus.from(repository.androidStatus())
+            val status = AndroidBuildStatus.from(repository.androidStatus(previous.serverId))
             var tasks = repository.androidTasks()
-            if (epoch != generation) return@refresh
+            if (epoch != generation || mutable.value.androidBuild.serverId != previous.serverId) return@refresh
             var selectedId = previous.selectedId?.takeIf { id -> tasks.any { it.id == id } }
                 ?: status.activeTask?.id ?: tasks.firstOrNull()?.id
             var logText = if (selectedId == previous.selectedId) previous.logs else ""
@@ -536,7 +536,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             // 日志按字节游标增量拉取；任务结束后不再请求，避免无谓轮询。
             if (selectedId != null && !complete) {
                 val logs = repository.androidLogs(selectedId, cursor)
-                if (epoch != generation) return@refresh
+                if (epoch != generation || mutable.value.androidBuild.serverId != previous.serverId) return@refresh
                 logText = (if (logs.reset) "" else logText) + logs.text
                 if (logText.length > 200_000) logText = logText.takeLast(200_000)
                 cursor = logs.cursor
@@ -552,7 +552,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
         } catch (error: CancellationException) { throw error }
         catch (error: Throwable) {
-            if (epoch == generation) {
+            if (epoch == generation && mutable.value.androidBuild.serverId == previous.serverId) {
                 mutable.update { it.copy(androidBuild = it.androidBuild.copy(
                     tasks = it.androidBuild.tasks.copy(loading = false, error = error.userMessage(), loaded = true),
                     connectionError = true)) }
@@ -560,19 +560,21 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
-    fun selectAndroidTask(task: AndroidBuildTask) {
-        if (mutable.value.androidBuild.selectedId == task.id) return
-        mutable.update { it.copy(androidBuild = it.androidBuild.copy(selectedId = task.id, logs = "", cursor = 0, logComplete = false, follow = true)) }
+    fun toggleAndroidFollow() = mutable.update { it.copy(androidBuild = it.androidBuild.copy(follow = !it.androidBuild.follow)) }
+    fun selectAndroidServer(id: String) {
+        mutable.update { it.copy(androidBuild = it.androidBuild.copy(serverId = id,
+            status = it.androidBuild.status.copy(workerOnline = false, source = AndroidSource()),
+            selectedId = null, logs = "", cursor = 0, logComplete = false)) }
         refreshAndroidBuild()
     }
-    fun toggleAndroidFollow() = mutable.update { it.copy(androidBuild = it.androidBuild.copy(follow = !it.androidBuild.follow)) }
     fun submitAndroidBuild(type: String) {
         if (mutable.value.androidBuild.submitting != null) return
         val epoch = generation
+        val serverId = mutable.value.androidBuild.serverId
         mutable.update { it.copy(androidBuild = it.androidBuild.copy(submitting = type)) }
         viewModelScope.launch {
             try {
-                val task = if (type == "BUILD") repository.androidBuild() else repository.androidUpdate()
+                val task = if (type == "BUILD") repository.androidBuild(serverId) else repository.androidUpdate(serverId)
                 if (epoch != generation) return@launch
                 mutable.update { it.copy(clock = System.currentTimeMillis(), androidBuild = it.androidBuild.copy(
                     submitting = null, status = it.androidBuild.status.copy(activeTask = task),
@@ -588,7 +590,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun cancelAndroidTask(task: AndroidBuildTask) = confirm("取消构建任务",
-        "确定取消「${task.typeLabel} #${task.id}」？构建容器会停止当前进程，未完成的产物会被清理。", "取消任务") {
+        "确定取消「${task.typeLabel} #${task.id}」？构建服务会停止当前进程，未完成的产物会被清理。", "取消任务") {
         perform("android-cancel", "已发送取消请求", after = { refreshAndroidBuild() }) { repository.androidCancel(task.id) }
     }
     fun downloadAndroidArtifact(task: AndroidBuildTask, logFile: Boolean = false) {

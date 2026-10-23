@@ -103,7 +103,13 @@ class EpisodeLibraryServiceTest {
     void symbolsAreNotListed() throws Exception {
         Path outside = Files.createTempFile("outside-", ".mp4");
         try {
-            Files.createSymbolicLink(downloads.resolve("outside.mp4"), outside);
+            try {
+                Files.createSymbolicLink(downloads.resolve("outside.mp4"), outside);
+            } catch (java.nio.file.FileSystemException error) {
+                org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name").startsWith("Windows"),
+                        "Windows 当前用户未授予创建符号链接权限");
+                throw error;
+            }
             assertTrue(service.scan().entries().isEmpty());
         } finally {
             Files.deleteIfExists(outside);

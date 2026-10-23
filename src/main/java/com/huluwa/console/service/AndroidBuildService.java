@@ -51,15 +51,22 @@ public class AndroidBuildService {
     }
 
     public synchronized Map<String, Object> status() {
+        return status("local");
+    }
+
+    public synchronized Map<String, Object> status(String serverId) {
+        requireServer(serverId);
         refresh();
-        Map<String, Object> worker = readJson(config.directory().resolve("worker.json"));
+        Map<String, Object> worker = readJson(serverDirectory(serverId).resolve("worker.json"));
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("enabled", config.enabled());
         response.put("workerOnline", workerOnline(worker));
         response.put("signingReady", Boolean.TRUE.equals(worker.get("signingReady")));
         response.put("repository", worker.getOrDefault("repository", ""));
         response.put("branch", worker.getOrDefault("branch", "master"));
-        response.put("source", readJson(config.directory().resolve("source.json")));
+        response.put("source", readJson(serverDirectory(serverId).resolve("source.json")));
+        response.put("serverId", serverId);
+        response.put("servers", servers());
         response.put("activeTask", first("SELECT * FROM android_build_task WHERE status IN ('QUEUED','RUNNING','CANCELLING') ORDER BY id LIMIT 1"));
         response.put("latestApk", first("SELECT * FROM android_build_task WHERE type='BUILD' AND status='SUCCESS' AND artifact_name IS NOT NULL ORDER BY id DESC LIMIT 1"));
         return response;
@@ -109,14 +116,20 @@ public class AndroidBuildService {
     }
 
     public synchronized Map<String, Object> submit(String type, String username) {
+        return submit(type, username, "local");
+    }
+
+    public synchronized Map<String, Object> submit(String type, String username, String serverId) {
+        requireServer(serverId);
+        if (!Set.of("BUILD", "UPDATE").contains(type)) throw new BusinessException("任务类型无效");
         refresh();
         if (!config.enabled()) throw new BusinessException(503, "安卓构建服务尚未启用");
-        Map<String, Object> worker = readJson(config.directory().resolve("worker.json"));
+        Map<String, Object> worker = readJson(serverDirectory(serverId).resolve("worker.json"));
         if (!workerOnline(worker)) throw new BusinessException(503, "安卓构建容器离线，请稍后重试");
         if (first("SELECT * FROM android_build_task WHERE status IN ('QUEUED','RUNNING','CANCELLING') LIMIT 1") != null) {
             throw new BusinessException(409, "已有任务执行中，请等待完成或取消后再操作");
         }
-        Map<String, Object> source = readJson(config.directory().resolve("source.json"));
+        Map<String, Object> source = readJson(serverDirectory(serverId).resolve("source.json"));
         if ("BUILD".equals(type)) {
             if (!String.valueOf(source.get("commit")).matches("[0-9a-f]{40}")) {
                 throw new BusinessException("请先更新安卓代码");
@@ -156,6 +169,7 @@ public class AndroidBuildService {
                     username, created.toString(), deadline);
         });
         if (id == null) throw new BusinessException(500, "创建任务失败");
+        jdbc.update("UPDATE android_build_task SET server_id=? WHERE id=?", serverId, id);
         try {
             Map<String, Object> request = new LinkedHashMap<>(requireTask(id));
             Files.createDirectories(taskDirectory(id));
@@ -265,7 +279,7 @@ public class AndroidBuildService {
                     Files.createDirectories(directory);
                     Files.writeString(directory.resolve("cancel"), "timeout");
                     // Keep the lock until a live worker has stopped its process tree.
-                    if (!workerOnline(readJson(config.directory().resolve("worker.json")))) {
+                    if (!workerOnline(readJson(serverDirectory(String.valueOf(task.get("serverId"))).resolve("worker.json")))) {
                         jdbc.update("UPDATE android_build_task SET status='TIMED_OUT',stage='DONE',error_text=?,completed_at=? WHERE id=?",
                                 "构建服务离线且任务超时，请检查构建容器", Instant.now().toString(), id);
                         finished = true;
@@ -326,6 +340,7 @@ public class AndroidBuildService {
     private Map<String, Object> mapTask(ResultSet rs, int row) throws SQLException {
         Map<String, Object> task = new LinkedHashMap<>();
         task.put("id", rs.getLong("id"));
+        task.put("serverId", rs.getString("server_id"));
         for (String column : List.of("type", "status", "stage", "sha256", "deadline")) task.put(column, rs.getObject(column));
         String[][] fields = {{"source_commit", "commit"}, {"commit_subject", "commitSubject"},
                 {"version_code", "versionCode"}, {"version_name", "versionName"}, {"artifact_name", "artifactName"},
@@ -336,7 +351,156 @@ public class AndroidBuildService {
     }
 
     private Path taskDirectory(long id) {
-        return config.directory().toAbsolutePath().normalize().resolve("tasks").resolve(String.valueOf(id));
+        String serverId = jdbc.queryForObject("SELECT server_id FROM android_build_task WHERE id=?", String.class, id);
+        // A separate mailbox also isolates remote work from older Linux workers
+        // during a rolling upgrade: they only ever scan the original tasks/.
+        return config.directory().toAbsolutePath().normalize()
+                .resolve("local".equals(serverId) ? "tasks" : "remote-tasks").resolve(String.valueOf(id));
+    }
+
+    private Path serverDirectory(String id) {
+        return "local".equals(id) ? config.directory() : config.directory().resolve("servers").resolve(id);
+    }
+
+    private void requireServer(String id) {
+        if ("local".equals(id)) return;
+        if (id == null || !id.matches("[a-f0-9]{32}") || jdbc.queryForObject(
+                "SELECT COUNT(*) FROM android_build_server WHERE id=?", Integer.class, id) != 1)
+            throw new BusinessException(404, "构建服务器不存在");
+    }
+
+    public synchronized List<Map<String, Object>> servers() {
+        var result = new java.util.ArrayList<Map<String, Object>>();
+        result.add(new LinkedHashMap<>(Map.of("id", "local", "name", "默认服务器（Linux 容器）")));
+        result.addAll(jdbc.query("SELECT id,name FROM android_build_server ORDER BY created_at", (rs, row) ->
+                new LinkedHashMap<>(Map.<String, Object>of("id", rs.getString(1), "name", rs.getString(2)))));
+        for (var server : result) {
+            var worker = readJson(serverDirectory(String.valueOf(server.get("id"))).resolve("worker.json"));
+            server.put("online", workerOnline(worker));
+            server.put("platform", worker.getOrDefault("platform", "linux"));
+        }
+        return result;
+    }
+
+    public synchronized Map<String, Object> createServer(String name) {
+        if (name == null || name.isBlank() || name.length() > 80) throw new BusinessException("请输入 1–80 字的服务器名称");
+        String id = java.util.UUID.randomUUID().toString().replace("-", "");
+        byte[] secret = new byte[32];
+        new java.security.SecureRandom().nextBytes(secret);
+        String token = java.util.HexFormat.of().formatHex(secret);
+        jdbc.update("INSERT INTO android_build_server(id,name,token_hash,created_at) VALUES(?,?,?,?)", id, name.trim(), hash(token.getBytes(StandardCharsets.UTF_8)), Instant.now().toString());
+        return Map.of("id", id, "name", name.trim(), "token", token);
+    }
+
+    public synchronized void deleteServer(String id) {
+        requireServer(id);
+        if ("local".equals(id)) throw new BusinessException("默认服务器不能删除");
+        Integer active = jdbc.queryForObject("SELECT COUNT(*) FROM android_build_task WHERE server_id=? AND status IN ('QUEUED','RUNNING','CANCELLING')", Integer.class, id);
+        if (active != null && active > 0) throw new BusinessException(409, "请先结束该服务器上的任务");
+        jdbc.update("DELETE FROM android_build_server WHERE id=?", id);
+    }
+
+    private void authenticateAgent(String id, String token) {
+        requireServer(id);
+        if ("local".equals(id) || token == null) throw new BusinessException(401, "构建节点认证失败");
+        String expected = jdbc.queryForObject("SELECT token_hash FROM android_build_server WHERE id=?", String.class, id);
+        if (!java.security.MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), hash(token.getBytes(StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8)))
+            throw new BusinessException(401, "构建节点认证失败");
+    }
+
+    private static String hash(byte[] bytes) {
+        try { return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)); }
+        catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
+    }
+
+    private void requireAgentTask(String serverId, long id) {
+        var task = requireTask(id);
+        if (!serverId.equals(task.get("serverId")) || !ACTIVE.contains(String.valueOf(task.get("status"))))
+            throw new BusinessException(409, "任务不属于该节点或已经结束");
+    }
+
+    /** Worker credentials only grant access to the node's own mailbox. */
+    public synchronized Map<String, Object> pollAgent(String serverId, String token, Map<String, Object> payload) throws IOException {
+        authenticateAgent(serverId, token);
+        Path node = serverDirectory(serverId);
+        Files.createDirectories(node);
+        Map<String, Object> worker = new LinkedHashMap<>();
+        for (String key : List.of("repository", "branch", "signingReady", "platform")) if (payload.containsKey(key)) worker.put(key, payload.get(key));
+        worker.put("heartbeat", Instant.now().getEpochSecond());
+        writeJson(node.resolve("worker.json"), worker);
+        if (payload.get("source") instanceof Map<?, ?> source) writeJson(node.resolve("source.json"), json.convertValue(source, JSON_MAP));
+        long taskId = number(payload.get("taskId"), 0);
+        if (taskId > 0) {
+            var task = requireTask(taskId);
+            if (!serverId.equals(task.get("serverId"))) throw new BusinessException(403, "任务不属于该节点");
+            if (ACTIVE.contains(String.valueOf(task.get("status")))) {
+                Path directory = taskDirectory(taskId);
+                if (payload.get("log") instanceof String encoded && !encoded.isEmpty()) {
+                    if (encoded.length() > 90000) throw new BusinessException("日志分片过大");
+                    byte[] chunk;
+                    try { chunk = java.util.Base64.getDecoder().decode(encoded); }
+                    catch (IllegalArgumentException error) { throw new BusinessException("日志编码无效"); }
+                    try (RandomAccessFile file = new RandomAccessFile(directory.resolve("build.log").toFile(), "rw")) {
+                        long offset = number(payload.get("logOffset"), -1);
+                        if (offset == file.length()) { file.seek(offset); file.write(chunk); }
+                    }
+                }
+                if (payload.get("state") instanceof Map<?, ?> state) {
+                    Map<String, Object> value = json.convertValue(state, JSON_MAP);
+                    if (!"RUNNING".equals(value.get("status"))) throw new BusinessException("任务状态无效");
+                    writeJson(directory.resolve("state.json"), value);
+                }
+                if (payload.get("result") instanceof Map<?, ?> raw) {
+                    Map<String, Object> result = json.convertValue(raw, JSON_MAP);
+                    if (!TERMINAL.contains(String.valueOf(result.get("status")))) throw new BusinessException("任务结果无效");
+                    if ("SUCCESS".equals(result.get("status")) && "BUILD".equals(task.get("type"))) {
+                        String filename = String.valueOf(result.get("artifactName"));
+                        if (!filename.matches("huluwa-[A-Za-z0-9._-]+\\.apk")) throw new BusinessException("APK 文件名无效");
+                        Path apk = directory.resolve(filename);
+                        if (!Files.isRegularFile(apk) || Files.size(apk) != number(result.get("apkSize"), -1)) throw new BusinessException("APK 尚未完整回传");
+                        String digest;
+                        try (var input = Files.newInputStream(apk)) {
+                            var sha = java.security.MessageDigest.getInstance("SHA-256");
+                            byte[] buffer = new byte[65536]; int count;
+                            while ((count = input.read(buffer)) != -1) sha.update(buffer, 0, count);
+                            digest = java.util.HexFormat.of().formatHex(sha.digest());
+                        } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
+                        if (!digest.equals(result.get("sha256")) || !String.valueOf(result.get("signatureSha256")).matches("[a-f0-9]{64}")
+                                || number(task.get("versionCode"), -1) != number(result.get("versionCode"), -2)
+                                || !task.get("versionName").equals(result.get("versionName"))) throw new BusinessException("APK 校验失败");
+                    }
+                    writeJson(directory.resolve("result.json"), result);
+                }
+            }
+        }
+        refresh();
+        var tasks = jdbc.query("SELECT * FROM android_build_task WHERE server_id=? AND status IN ('QUEUED','RUNNING','CANCELLING') ORDER BY id", this::mapTask, serverId);
+        for (var task : tasks) {
+            long id = number(task.get("id"), 0);
+            Path directory = taskDirectory(id);
+            task.put("cancel", Files.exists(directory.resolve("cancel")));
+            task.put("logOffset", Files.exists(directory.resolve("build.log")) ? Files.size(directory.resolve("build.log")) : 0L);
+        }
+        return Map.of("tasks", tasks);
+    }
+
+    public synchronized void uploadAgent(String serverId, String token, long id, String name, java.io.InputStream input) throws IOException {
+        authenticateAgent(serverId, token);
+        requireAgentTask(serverId, id);
+        if (!name.matches("huluwa-[A-Za-z0-9._-]+\\.apk") && !"mapping.txt".equals(name)) throw new BusinessException("文件名无效");
+        Path target = taskDirectory(id).resolve(name);
+        Path temporary = target.resolveSibling(name + ".upload");
+        try {
+            try (var output = Files.newOutputStream(temporary)) {
+                byte[] bytes = new byte[65536]; int count; long total = 0;
+                while ((count = input.read(bytes)) != -1) {
+                    total += count;
+                    if (total > 300L * 1024 * 1024) throw new BusinessException("构建产物超过 300MB 限制");
+                    output.write(bytes, 0, count);
+                }
+            }
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
     }
 
     private boolean workerOnline(Map<String, Object> worker) {

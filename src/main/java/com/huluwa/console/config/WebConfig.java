@@ -24,6 +24,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/auth/status",
                         "/api/auth/setup",
                         "/api/public/**",
+                        "/api/android/agents/**",
                         "/api/health",
                         "/error"
                 );

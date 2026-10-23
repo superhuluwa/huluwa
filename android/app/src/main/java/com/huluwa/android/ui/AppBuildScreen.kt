@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -35,7 +34,7 @@ import kotlinx.coroutines.launch
 
 /**
  * App 构建管理：迁移网页端「安卓 App」页面。
- * 概览卡片（源码 / 最近安装包 / 当前任务 / 签名）+ 构建操作 + 增量执行日志 + 任务历史。
+ * 概览卡片（源码 / 最近安装包 / 当前任务 / 签名）+ 构建操作 + 增量执行日志。
  */
 @Composable fun AppBuildScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val build = ui.androidBuild
@@ -85,24 +84,37 @@ import kotlinx.coroutines.launch
             Feedback(loading = false, error = build.tasks.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshAndroidBuild() })
             val notice = when {
                 build.connectionError -> "暂时无法连接构建服务，正在自动重连。服务器上的任务会继续执行。"
-                build.tasks.loaded && !status.enabled -> "安卓构建服务尚未启用，请配置并启动构建容器。"
-                build.tasks.loaded && !status.workerOnline -> "构建容器暂时离线，恢复后即可更新代码和编译。已生成的 APK 仍可下载。"
+                build.tasks.loaded && !status.enabled -> "安卓构建服务尚未启用，请配置并启动构建服务。"
+                build.tasks.loaded && !status.workerOnline -> "构建服务暂时离线，恢复后即可更新代码和编译。已生成的 APK 仍可下载。"
                 else -> ""
             }
             if (notice.isNotBlank()) Text(notice, Modifier.padding(top = 8.dp),
                 color = if (build.connectionError || status.enabled) HuluwaColors.Amber else HuluwaColors.Muted,
                 style = MaterialTheme.typography.bodySmall)
         }
+        item {
+            var expanded by remember { mutableStateOf(false) }
+            Panel(Modifier.fillMaxWidth()) {
+                Text("构建服务器", style = MaterialTheme.typography.titleMedium)
+                Box {
+                    OutlinedButton({ expanded = true }, Modifier.fillMaxWidth(), enabled = build.submitting == null) {
+                        Text(status.servers.firstOrNull { it.id == build.serverId }?.let {
+                            "${it.name} · ${if (it.online) "在线" else "离线"}"
+                        } ?: "默认服务器")
+                    }
+                    DropdownMenu(expanded, { expanded = false }) {
+                        status.servers.forEach { server ->
+                            DropdownMenuItem(text = { Text("${server.name} · ${if (server.online) "在线" else "离线"}") },
+                                onClick = { expanded = false; vm.selectAndroidServer(server.id) })
+                        }
+                    }
+                }
+                Text("更新代码和编译将在所选服务器执行", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+            }
+        }
         item { BuildActions(build, ui.busy != null, vm) }
         if (download.phase != UpgradePhase.Idle) item { DownloadCard(download, vm, ::install) }
         item { LogPanel(build, ui.clock, vm, snackbar) }
-        item { SectionTitle("任务历史", Modifier.padding(top = 4.dp)) }
-        if (build.tasks.loaded && build.tasks.data.isEmpty()) item {
-            EmptyContent("暂无任务记录", "先更新代码，再编译安装包", Icons.Outlined.Android)
-        }
-        items(build.tasks.data, key = { it.id }) { task ->
-            TaskRow(task, task.id == build.selectedId, ui.clock) { vm.selectAndroidTask(task) }
-        }
         item { Spacer(Modifier.height(8.dp)) }
     }
 }
@@ -115,7 +127,7 @@ import kotlinx.coroutines.launch
             Icon(Icons.Outlined.Android, null, Modifier.size(32.dp), tint = HuluwaColors.Lime)
             Column(Modifier.weight(1f)) {
                 Text("App 构建服务", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                Text((if (status.workerOnline) "构建容器在线 · " else "构建容器离线 · ") + status.branch,
+                Text((if (status.workerOnline) "构建服务在线 · " else "构建服务离线 · ") + status.branch,
                     style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = .8f))
             }
             Tag(if (status.workerOnline) "在线" else "离线", tone = if (status.workerOnline) HuluwaColors.Lime else Color(0xFFFFD7BD))
@@ -170,7 +182,7 @@ import kotlinx.coroutines.launch
         if (submitting == null && active == null && !status.canBuild) {
             val reason = when {
                 !status.enabled -> "安卓构建服务尚未启用"
-                !status.workerOnline -> "构建容器离线，暂时无法编译"
+                !status.workerOnline -> "构建服务离线，暂时无法编译"
                 !status.hasSource -> "请先更新代码，获取最新安卓源码"
                 !status.signingReady -> "尚未配置 Release 签名，暂时无法编译"
                 else -> ""
@@ -283,36 +295,5 @@ import kotlinx.coroutines.launch
         }
         if (task != null) Text(if (build.logComplete) "日志已全部加载，完整内容可下载" else "日志每秒增量更新，完整内容可下载",
             Modifier.padding(top = 7.dp), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-    }
-}
-
-@Composable private fun TaskRow(task: AndroidBuildTask, selected: Boolean, clock: Long, onClick: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
-        color = if (selected) HuluwaColors.SoftGreen else Color.White, shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, if (selected) HuluwaColors.Pine.copy(alpha = .35f) else HuluwaColors.Line)) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("#${task.id}", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-                Text(task.typeLabel, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StatusTag(task.statusLabel, healthy = task.status == "SUCCESS",
-                    alert = task.status in setOf("FAILED", "TIMED_OUT", "INTERRUPTED"))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Outlined.Commit, null, Modifier.size(14.dp), tint = HuluwaColors.Muted)
-                Text(task.commit.take(8).ifBlank { "—" }, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-                if (task.building && task.versionName.isNotBlank()) Text("v${task.versionName}（${task.versionCode ?: "—"}）",
-                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.weight(1f))
-                if (task.downloadable) Tag(formatBytes(task.apkSize.toDouble()), outlined = true)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(task.startedLabel, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-                Text(task.elapsedLabel(clock), style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-                Spacer(Modifier.weight(1f))
-                Text(if (selected) "正在查看日志" else "点击查看日志", style = MaterialTheme.typography.labelSmall,
-                    color = if (selected) HuluwaColors.Pine else HuluwaColors.Muted)
-            }
-            if (task.active) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = HuluwaColors.Pine)
-        }
     }
 }

@@ -33,7 +33,31 @@ public class AndroidBuildController {
     }
 
     @GetMapping("/status")
-    public ApiResult<Map<String, Object>> status() { return ApiResult.ok(builds.status()); }
+    public ApiResult<Map<String, Object>> status(@RequestParam(defaultValue = "local") String serverId) { return ApiResult.ok(builds.status(serverId)); }
+
+    @GetMapping("/servers")
+    public ApiResult<List<Map<String, Object>>> servers() { return ApiResult.ok(builds.servers()); }
+
+    public record ServerRequest(String name) {}
+
+    @PostMapping("/servers")
+    public ApiResult<Map<String, Object>> createServer(@RequestBody ServerRequest request) { return ApiResult.ok(builds.createServer(request.name())); }
+
+    @DeleteMapping("/servers/{id}")
+    public ApiResult<Void> deleteServer(@PathVariable String id) { builds.deleteServer(id); return ApiResult.ok(); }
+
+    @PostMapping("/agents/{serverId}/poll")
+    public ApiResult<Map<String, Object>> pollAgent(@PathVariable String serverId,
+            @RequestHeader("X-Build-Token") String token, @RequestBody Map<String, Object> payload) throws IOException {
+        return ApiResult.ok(builds.pollAgent(serverId, token, payload));
+    }
+
+    @PutMapping("/agents/{serverId}/tasks/{id}/files/{name}")
+    public ApiResult<Void> uploadAgent(@PathVariable String serverId, @PathVariable long id, @PathVariable String name,
+            @RequestHeader("X-Build-Token") String token, HttpServletRequest request) throws IOException {
+        builds.uploadAgent(serverId, token, id, name, request.getInputStream());
+        return ApiResult.ok();
+    }
 
     @GetMapping("/releases/latest")
     public ApiResult<Map<String, Object>> latestRelease() { return ApiResult.ok(builds.latestRelease()); }
@@ -47,13 +71,13 @@ public class AndroidBuildController {
     public ApiResult<Map<String, Object>> task(@PathVariable long id) { return ApiResult.ok(builds.task(id)); }
 
     @PostMapping("/update")
-    public ApiResult<Map<String, Object>> update(HttpServletRequest request) {
-        return ApiResult.ok(builds.submit("UPDATE", username(request)));
+    public ApiResult<Map<String, Object>> update(HttpServletRequest request, @RequestParam(defaultValue = "local") String serverId) {
+        return ApiResult.ok(builds.submit("UPDATE", username(request), serverId));
     }
 
     @PostMapping("/build")
-    public ApiResult<Map<String, Object>> build(HttpServletRequest request) {
-        return ApiResult.ok(builds.submit("BUILD", username(request)));
+    public ApiResult<Map<String, Object>> build(HttpServletRequest request, @RequestParam(defaultValue = "local") String serverId) {
+        return ApiResult.ok(builds.submit("BUILD", username(request), serverId));
     }
 
     @PostMapping("/tasks/{id}/cancel")

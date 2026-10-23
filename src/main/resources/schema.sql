@@ -358,6 +358,7 @@ VALUES (8, datetime('now', 'localtime'));
 -- 安卓更新 / Release 编译任务。日志、请求和 APK 位于独立持久化卷。
 CREATE TABLE IF NOT EXISTS android_build_task (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id TEXT NOT NULL DEFAULT 'local',
     type TEXT NOT NULL,
     status TEXT NOT NULL,
     stage TEXT NOT NULL DEFAULT 'QUEUED',
@@ -378,3 +379,10 @@ CREATE TABLE IF NOT EXISTS android_build_task (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_android_single_active
     ON android_build_task ((1)) WHERE status IN ('QUEUED', 'RUNNING', 'CANCELLING');
+
+CREATE TABLE IF NOT EXISTS android_build_server (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);

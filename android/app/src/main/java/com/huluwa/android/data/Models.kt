@@ -279,6 +279,7 @@ data class AndroidBuildTask(
     val commit: String, val commitSubject: String, val versionCode: Long?, val versionName: String,
     val artifactName: String, val apkSize: Long, val error: String,
     val requestedBy: String, val createdAt: String, val startedAt: String, val completedAt: String,
+    val serverId: String = "local",
 ) {
     val building get() = type == "BUILD"
     val active get() = status in setOf("QUEUED", "RUNNING", "CANCELLING")
@@ -321,6 +322,7 @@ data class AndroidBuildTask(
             raw.text("commit"), raw.text("commitSubject"), raw.number("versionCode")?.toLong(), raw.text("versionName"),
             raw.text("artifactName"), raw.number("apkSize")?.toLong() ?: 0, raw.text("error"),
             raw.text("requestedBy"), raw.text("createdAt"), raw.text("startedAt"), raw.text("completedAt"),
+            raw.text("serverId", fallback = "local"),
         )
     }
 }
@@ -332,10 +334,17 @@ data class AndroidSource(val commit: String = "", val commitSubject: String = ""
     }
 }
 
+data class AndroidBuildServer(val id: String, val name: String, val online: Boolean) {
+    companion object {
+        fun from(raw: JsonObject) = AndroidBuildServer(raw.text("id"), raw.text("name"), raw.flag("online"))
+    }
+}
+
 data class AndroidBuildStatus(
     val enabled: Boolean = false, val workerOnline: Boolean = false, val signingReady: Boolean = false,
     val branch: String = "master", val source: AndroidSource = AndroidSource(),
     val activeTask: AndroidBuildTask? = null, val latestApk: AndroidBuildTask? = null,
+    val servers: List<AndroidBuildServer> = emptyList(),
 ) {
     /** 只有完整的 40 位提交号才允许发起编译。 */
     val hasSource get() = Regex("[0-9a-f]{40}").matches(source.commit)
@@ -348,6 +357,7 @@ data class AndroidBuildStatus(
             raw.text("branch", fallback = "master"), AndroidSource.from(raw.child("source")),
             (raw["activeTask"] as? JsonObject)?.let(AndroidBuildTask::from),
             (raw["latestApk"] as? JsonObject)?.let(AndroidBuildTask::from),
+            (raw["servers"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let(AndroidBuildServer::from) } ?: emptyList(),
         )
     }
 }
@@ -363,6 +373,7 @@ data class AndroidLogChunk(val task: AndroidBuildTask?, val text: String, val cu
 }
 
 data class AndroidBuildState(
+    val serverId: String = "local",
     val status: AndroidBuildStatus = AndroidBuildStatus(),
     val tasks: LoadState<List<AndroidBuildTask>> = LoadState(emptyList()),
     val selectedId: Long? = null, val logs: String = "", val cursor: Long = 0,

@@ -26,8 +26,9 @@ RUN yes | sdkmanager --licenses >/dev/null \
 ENV ANDROID_USER_HOME=/workspace/android-user
 RUN usermod --home /workspace huluwa \
     && sdkmanager "platform-tools"
-COPY worker.py android.init.gradle git-askpass.py /opt/builder/
-RUN chmod 755 /opt/builder/git-askpass.py
+COPY worker.py process_tree.py android.init.gradle git-askpass.py /opt/builder/
+RUN sed -i 's/\r$//' /opt/builder/*.py \
+    && chmod 755 /opt/builder/git-askpass.py
 USER 10001:10001
 WORKDIR /workspace
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \

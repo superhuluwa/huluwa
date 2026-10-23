@@ -1,6 +1,8 @@
 # Java / Maven
 target/
 *.class
+__pycache__/
+*.pyc
 *.jar
 !.mvn/wrapper/maven-wrapper.jar
 
@@ -29,6 +31,7 @@ output/performance-audit/
 # 本地部署配置与备份（必须保留在宿主机，不能提交）
 .env
 backups/
+.deploy-backups/
 .deploy-state
 .compose.yaml.fnos-backup
 .compose.fnos.override.yaml
@@ -40,5 +43,6 @@ backups/
 
 # 本地生成的安卓设计预览与交付压缩包
 /output/android-design/
+/output/windows-builder-validation/
 /output/android-design.zip
 /output/huluwa-android-design.zip
