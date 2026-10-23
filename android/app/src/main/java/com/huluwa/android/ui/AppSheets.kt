@@ -50,14 +50,21 @@ import com.huluwa.android.data.isServerUnreachable
                     is AppSheet.CreateResource -> if (sheet.section == com.huluwa.android.data.DockerSection.Images) "拉取镜像" else "新增${sheet.section.title}"
                     else -> "操作"
                 }
-                // 弹层标题右侧同样显示「重连中」，与各页面标题行保持一致。
+                val loading = when (sheet) {
+                    is AppSheet.Settings -> sheet.data.loading
+                    is AppSheet.Text -> sheet.data.loading
+                    is AppSheet.ContainerDetail -> sheet.data.loading
+                    else -> false
+                }
+                // 弹层加载与重连同样紧挨标题展示。
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TitleLoadingIndicator(loading || ui.busy != null)
                     TitleReconnectBadge(rememberReconnecting(vm))
                 }
                 IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭弹层") }
             }
-            if (ui.busy != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             ui.actionError?.takeUnless { it.isServerUnreachable() }?.let { Text(it, color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall) }
             when (sheet) {
                 AppSheet.Account -> AccountSheet(ui, vm)
@@ -77,7 +84,6 @@ import com.huluwa.android.data.isServerUnreachable
 }
 @Composable private fun TextSheet(sheet: AppSheet.Text, busy: Boolean) {
     var edited by remember(sheet.data.data) { mutableStateOf(sheet.data.data) }
-    if (sheet.data.loading) CircularProgressIndicator(Modifier.size(26.dp))
     sheet.data.error?.let { Text(it, color = HuluwaColors.Danger) }
     if (sheet.data.loaded && sheet.data.error == null) {
         if (sheet.onSave != null) {

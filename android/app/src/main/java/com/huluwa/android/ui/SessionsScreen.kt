@@ -47,7 +47,7 @@ private object SessionsColors {
         // 加载状态显示在标题右侧，列表只保留错误反馈，避免切换标签时挤动内容。
         // 「无法连接服务器」由标题栏的「重连中」徽标统一承载，这里不再重复渲染成错误卡片。
         if (ui.sessions.error != null && !ui.sessions.error.isServerUnreachable()) item {
-            Feedback(loading = false, error = ui.sessions.error, onRetry = { vm.refreshSessions() })
+            Feedback(error = ui.sessions.error, onRetry = { vm.refreshSessions() })
         }
         if (rows.isEmpty()) item {
             EmptyContent(if (system) "暂无系统会话" else "暂无功能会话", "", loading = !ui.sessions.loaded)

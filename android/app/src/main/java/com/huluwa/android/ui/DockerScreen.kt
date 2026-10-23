@@ -94,7 +94,7 @@ import com.huluwa.android.data.*
                     }
                 }
             }
-            if (section != DockerSection.Containers) Feedback(false, resourceState.error.takeUnless { it.isServerUnreachable() }, { vm.refreshResources() })
+            if (section != DockerSection.Containers) Feedback(resourceState.error.takeUnless { it.isServerUnreachable() }, { vm.refreshResources() })
         }
         if (section == DockerSection.Containers) {
             if (!ui.containers.loaded && !snapshot) item { StatusSkeleton() }

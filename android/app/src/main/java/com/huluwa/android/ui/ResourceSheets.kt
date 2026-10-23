@@ -74,7 +74,7 @@ import kotlinx.serialization.json.*
                         actionError?.takeUnless { it.isServerUnreachable() }?.let {
                             Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
                         }
-                        Feedback(sheet.data.loading, sheet.data.error, { vm.reloadFilmResources(card) })
+                        Feedback(sheet.data.error, { vm.reloadFilmResources(card) })
                         if (!sheet.data.loaded || sheet.data.error != null) return@Column
                         if (card.isHls) HlsSourceList(card, sheet.data.data, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                         else MagnetSourceList(card, sheet.data.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
@@ -92,7 +92,11 @@ import kotlinx.serialization.json.*
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(if (card.isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.CloudDownload, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
-        Text(data.text("title", fallback = card.title), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(data.text("title", fallback = card.title), Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TitleLoadingIndicator(loading)
+        }
         // 电影港按磁力条数、电影天堂按各线路可复制条目合计（与网页端「可复制 N 条」一致）
         val count = if (card.isHls) data.rows("playSources").sumOf { source -> source.asObject().rows("items").size }
         else data.rows("magnets").size
@@ -280,7 +284,7 @@ private fun episodeNumber(title: String): Int? {
     }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !busy) { Text("加入离线下载") }
 }
 @Composable fun ContainerDetail(sheet: AppSheet.ContainerDetail, busy: Boolean, vm: HuluwaViewModel) {
-    Feedback(sheet.data.loading, sheet.data.error, { vm.containerDetail(sheet.container) })
+    Feedback(sheet.data.error, { vm.containerDetail(sheet.container) })
     if (!sheet.data.loaded || sheet.data.error != null) return
     val raw = sheet.data.data
     LabelValue("容器名称", sheet.container.name)

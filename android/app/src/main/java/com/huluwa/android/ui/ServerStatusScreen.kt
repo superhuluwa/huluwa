@@ -33,9 +33,12 @@ import com.huluwa.android.HuluwaViewModel
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closeServerStatus) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回我的") }
-                Text("服务器状态", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                TitleLoadingIndicator(state.loading)
-                TitleReconnectBadge(reconnecting)
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("服务器状态", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TitleLoadingIndicator(state.loading)
+                    TitleReconnectBadge(reconnecting)
+                }
                 IconButton({ vm.refreshServer() }, enabled = !state.loading) { Icon(Icons.Outlined.Refresh, "刷新服务器状态") }
             }
         },

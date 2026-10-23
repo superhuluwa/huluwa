@@ -60,7 +60,7 @@ import kotlinx.coroutines.flow.first
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             // 标题按剩余宽度省略，确保右侧的加载菊花与重连徽标始终可见。
                             Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TitleLoadingIndicator(chat.loading)
+                            TitleLoadingIndicator(chat.loading || chat.loadingEarlier)
                             TitleReconnectBadge(reconnecting)
                         }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -102,7 +102,7 @@ import kotlinx.coroutines.flow.first
             }
             item("history") {
                 // 加载状态统一显示在标题栏菊花上，消息区只保留错误反馈，避免列表被进度条挤动。
-                Feedback(loading = false, error = chat.error.takeUnless { it.isServerUnreachable() }, onRetry = { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
+                Feedback(error = chat.error.takeUnless { it.isServerUnreachable() }, onRetry = { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
                 if (chat.hasEarlier) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }

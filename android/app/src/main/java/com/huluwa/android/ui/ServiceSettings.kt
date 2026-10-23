@@ -24,7 +24,7 @@ fun settingsTitle(kind: String) = when (kind) {
 }
 private data class SettingField(val key: String, val label: String, val secret: Boolean = false)
 @Composable fun ServiceSettings(sheet: AppSheet.Settings, busy: Boolean, vm: HuluwaViewModel) {
-    Feedback(sheet.data.loading, sheet.data.error, { vm.showSettings(sheet.kind) })
+    Feedback(sheet.data.error, { vm.showSettings(sheet.kind) })
     if (!sheet.data.loaded || sheet.data.error != null) return
     val raw = sheet.data.data
     val settings = (raw["settings"] as? JsonObject) ?: raw

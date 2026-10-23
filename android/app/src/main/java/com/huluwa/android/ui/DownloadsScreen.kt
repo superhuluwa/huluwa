@@ -3,7 +3,6 @@ package com.huluwa.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
@@ -107,7 +105,7 @@ private enum class DownloadFilter(val title: String) {
         })
         HorizontalDivider(color = HuluwaColors.Line)
         // 内容区仅保留业务错误和重试入口，连接异常由共用标题栏提示。
-        Feedback(loading = false, error = ui.downloads.error.takeUnless { it.isServerUnreachable() },
+        Feedback(error = ui.downloads.error.takeUnless { it.isServerUnreachable() },
             onRetry = { vm.refreshDownloads() })
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)) {
@@ -198,10 +196,10 @@ private enum class DownloadFilter(val title: String) {
 @Composable internal fun DownloadsHeaderActions(ui: AppState, vm: HuluwaViewModel) {
     var menu by remember { mutableStateOf(false) }
     val busy = ui.busy == null && !ui.downloads.loading
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        DownloadToolButton(Icons.Outlined.Refresh, "刷新下载", !ui.downloads.loading) { vm.refreshDownloads() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        HeaderAction(Icons.Outlined.Refresh, "刷新下载", { vm.refreshDownloads() }, enabled = !ui.downloads.loading)
         Box {
-            DownloadToolButton(Icons.Outlined.Settings, "下载设置") { menu = true }
+            HeaderAction(Icons.Outlined.Settings, "下载设置", { menu = true })
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
                 DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
@@ -213,16 +211,9 @@ private enum class DownloadFilter(val title: String) {
     }
 }
 
-@Composable private fun DownloadToolButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(shape = RoundedCornerShape(13.dp), color = Color.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
-        IconButton(onClick, enabled = enabled, modifier = Modifier.size(40.dp)) { Icon(icon, label, tint = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted) }
-    }
-}
-
 @Composable private fun DownloadEmptyState(title: String, detail: String, loading: Boolean, onReset: (() -> Unit)? = null) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        if (loading) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-        else RoundIcon(Icons.Outlined.FileDownload, modifier = Modifier.size(62.dp))
+        if (!loading) RoundIcon(Icons.Outlined.FileDownload, modifier = Modifier.size(62.dp))
         Spacer(Modifier.height(13.dp))
         Text(if (loading) "正在同步…" else title, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(5.dp))

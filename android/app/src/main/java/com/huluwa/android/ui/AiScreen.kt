@@ -26,8 +26,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
@@ -211,22 +209,9 @@ data class AiHeaderActionsState(
 /** AI 首页标题栏右侧的刷新与更多菜单。 */
 @Composable internal fun AiHeaderActions(actions: AiHeaderActionsState) {
     if (!actions.visible) return
-    // 刷新与重连共用一个指示器，断线重试时优先展示重连状态。
-    val progressDescription = when {
-        actions.reconnecting -> "正在重新连接"
-        actions.loading -> "正在刷新项目和模型"
-        else -> null
-    }
-    IconButton(actions.onRefresh, enabled = actions.enabled) {
-        if (progressDescription != null) {
-            AiSpinner(
-                if (actions.reconnecting) HuluwaColors.Pine else HuluwaColors.Muted,
-                Modifier.size(20.dp).semantics {
-                    liveRegion = LiveRegionMode.Polite
-                    stateDescription = progressDescription
-                },
-            )
-        } else Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)
+    // 加载与重连由 PageHeader 紧挨标题展示，刷新按钮始终保留图标。
+    IconButton(actions.onRefresh, enabled = actions.enabled && !actions.loading) {
+        Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)
     }
     var menu by remember { mutableStateOf(false) }
     Box {

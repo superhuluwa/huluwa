@@ -33,7 +33,7 @@ import com.huluwa.android.data.*
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
         if (state.error != null && !state.error.isServerUnreachable()) item {
-            Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
+            Feedback(error = state.error, onRetry = { vm.refreshSubscriptions() })
         }
         if (rows.isEmpty()) item {
             EmptyContent(

@@ -1,5 +1,7 @@
 package com.huluwa.android.ui
 
+import android.os.SystemClock
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -24,8 +26,12 @@ import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +58,7 @@ import coil3.compose.AsyncImage
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.R
 import com.huluwa.android.data.*
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -115,10 +122,9 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         RoundIcon(sessionIcon(kind), sessionColor(kind), modifier)
     }
 }
+/** 标题栏操作统一使用透明背景图标按钮，与「我的」页保持一致。 */
 @Composable fun HeaderAction(icon: ImageVector, label: String, onClick: () -> Unit, enabled: Boolean = true) {
-    Surface(shape = RoundedCornerShape(16.dp), color = Color.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
-        IconButton(onClick, enabled = enabled, modifier = Modifier.size(48.dp)) { Icon(icon, label, tint = HuluwaColors.Pine) }
-    }
+    IconButton(onClick, enabled = enabled, modifier = Modifier.size(48.dp)) { Icon(icon, label) }
 }
 /**
  * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；标题左对齐。
@@ -128,7 +134,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
  * 服务器暂时连不上的状态；连接恢复后由调用方置回 false，徽标自动淡出。
  */
 @Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onTap: (() -> Unit)? = null,
-    reconnecting: Boolean = false, action: @Composable () -> Unit = {}) {
+    reconnecting: Boolean = false, loading: Boolean = false, action: @Composable () -> Unit = {}) {
     val tapModifier = if (onTap != null) Modifier.clickable(
         interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap,
     ) else Modifier
@@ -138,10 +144,12 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
             .heightIn(min = 63.dp).padding(start = 22.dp, end = 22.dp, top = 15.dp, bottom = 16.dp).then(tapModifier),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // 标题与重连徽标同属左侧一组，徽标紧贴标题文字右侧，不再占据右侧操作区。
+        // 加载菊花与重连徽标紧贴标题，右侧操作区只放按钮。
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             // 与底部导航使用同一套标题色，避免各标签标题观感不一致。
-            Text(title, color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(title, Modifier.weight(1f, fill = false), color = HuluwaColors.Ink, fontSize = 26.sp, lineHeight = 32.sp,
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TitleLoadingIndicator(loading)
             TitleReconnectBadge(reconnecting)
         }
         action()
@@ -152,21 +160,35 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
  * 所有页面（主标签、二级页、底部弹层）的标题行都调用它，保证同一套提示逻辑。
  */
 @Composable fun TitleReconnectBadge(reconnecting: Boolean) {
-    AnimatedVisibility(reconnecting, enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
+    AnimatedVisibility(rememberMinimumIndicatorVisible(reconnecting), enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
         exit = fadeOut(tween(260)) + shrinkHorizontally(tween(260)), label = "重连提示") {
         ReconnectingBadge()
     }
 }
 /**
- * 标题右侧的加载菊花：二级页（会话 / 管理会话 / 在线升级）拉取数据时淡入并横向展开，
- * 加载完成后淡出收起。取代原先内容区顶部的扫描进度条与刷新按钮里的小圆圈，
- * 让所有页面只在标题行展示加载状态。
+ * 所有页面与弹层共用的标题加载菊花：紧挨标题右侧，至少展示一秒后再淡出收起。
+ * 仅延长动画展示，不延迟数据更新或阻塞页面操作。
  */
 @Composable fun TitleLoadingIndicator(loading: Boolean) {
-    AnimatedVisibility(loading, enter = fadeIn(tween(180)) + expandHorizontally(tween(180)),
+    AnimatedVisibility(rememberMinimumIndicatorVisible(loading), enter = fadeIn(tween(180)) + expandHorizontally(tween(180)),
         exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220)), label = "加载提示") {
         HeaderLoadingIndicator()
     }
+}
+/** 每次开始加载重新计时，快速完成时补足一秒；状态变化或离开页面会取消旧的延迟。 */
+@Composable private fun rememberMinimumIndicatorVisible(active: Boolean): Boolean {
+    var visible by remember { mutableStateOf(active) }
+    var startedAt by remember { mutableLongStateOf(if (active) SystemClock.elapsedRealtime() else 0L) }
+    LaunchedEffect(active) {
+        if (active) {
+            startedAt = SystemClock.elapsedRealtime()
+            visible = true
+        } else if (visible) {
+            delay((1_000L - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(0L))
+            visible = false
+        }
+    }
+    return active || visible
 }
 /** 订阅服务器可达性，返回「是否正在重连」，供各页面标题行直接使用。 */
 @Composable fun rememberReconnecting(vm: HuluwaViewModel): Boolean {
@@ -294,8 +316,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
         } else band(0f, value, color)
     }
 }
-@Composable fun Feedback(loading: Boolean, error: String?, onRetry: () -> Unit) {
-    if (loading) DownloadProgress(null, Modifier.fillMaxWidth(), height = 4.dp)
+@Composable fun Feedback(error: String?, onRetry: () -> Unit) {
     if (error != null) Panel(Modifier.fillMaxWidth(), Color(0xFFF8F0E4)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Outlined.Info, null, tint = HuluwaColors.Amber, modifier = Modifier.size(20.dp))
@@ -307,8 +328,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
 @Composable fun EmptyContent(title: String, detail: String, icon: ImageVector = Icons.Outlined.Inbox, loading: Boolean = false, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 46.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (loading) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-        else RoundIcon(icon, modifier = Modifier.size(56.dp))
+        if (!loading) RoundIcon(icon, modifier = Modifier.size(56.dp))
         Text(if (loading) "正在同步…" else title, style = MaterialTheme.typography.titleMedium)
         Text(detail, color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
     }

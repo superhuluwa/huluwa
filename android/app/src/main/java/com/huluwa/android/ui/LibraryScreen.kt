@@ -81,7 +81,7 @@ import com.huluwa.android.data.isServerUnreachable
             }
             Spacer(Modifier.height(8.dp))
             // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
-            Feedback(loading = false, error = scanState.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshLibrary() })
+            Feedback(error = scanState.error.takeUnless { it.isServerUnreachable() }, onRetry = { vm.refreshLibrary() })
         }
         if (scan.entries.isEmpty() && scanState.loaded) item {
             EmptyContent("下载目录里还没有可管理的剧集", "支持 MP4、MKV、AVI、TS 等常见格式；隐藏目录会被跳过", Icons.Outlined.FolderOpen)
