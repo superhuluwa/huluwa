@@ -79,12 +79,33 @@ import com.huluwa.android.data.formatBytes
                             }
                             "连接状态：$connection\n服务端版本：${overview.version.ifBlank { "未知" }}\n${current.containers.error ?: overview.message}"
                         } }) { Icon(Icons.Outlined.Dns, "Docker 主机信息") }
-                        ManagementService.AppBuild -> IconButton({ vm.loadText("构建宿主信息") {
-                            val current = vm.state.value
-                            val status = current.androidBuild.status
-                            "构建服务：${if (status.enabled) "已启用" else "未启用"}\n构建容器：${if (status.workerOnline) "在线" else "离线"}" +
-                                "\n签名配置：${if (status.signingReady) "已配置" else "未配置"}\n分支：${status.branch}"
-                        } }) { Icon(Icons.Outlined.Dns, "构建宿主信息") }
+                        ManagementService.AppBuild -> IconButton({ vm.loadText("构建详情") {
+                            val build = vm.state.value.androidBuild
+                            val status = build.status
+                            val server = status.servers.firstOrNull { it.id == build.serverId }
+                            buildString {
+                                appendLine("构建服务：${if (status.enabled) "已启用" else "未启用"}")
+                                appendLine("构建节点：${server?.name ?: "默认服务器"}")
+                                appendLine("节点状态：${if (status.workerOnline) "在线" else "离线"}")
+                                appendLine("分支：${status.branch}")
+                                appendLine("Release 签名：${if (status.signingReady) "已配置" else "未配置"}")
+                                appendLine("源码版本：${status.source.commit.ifBlank { "尚未更新" }}")
+                                appendLine("提交说明：${status.source.commitSubject.ifBlank { "—" }}")
+                                appendLine("更新时间：${status.source.updatedAt.ifBlank { "—" }}")
+                                status.latestApk?.let {
+                                    appendLine("\n最近安装包：v${it.versionName}（${it.versionCode ?: "—"}）")
+                                    appendLine("文件大小：${formatBytes(it.apkSize.toDouble())}")
+                                }
+                                build.selectedTask?.let {
+                                    appendLine("\n查看任务：${it.typeLabel} #${it.id} · ${it.statusLabel}")
+                                    appendLine("任务阶段：${it.stageLabel}")
+                                    appendLine("任务源码：${it.commit.ifBlank { "—" }}")
+                                    it.error.takeIf { error -> error.isNotBlank() }?.let { error -> appendLine("任务错误：$error") }
+                                }
+                                status.activeTask?.let { appendLine("当前任务：${it.typeLabel} #${it.id} · ${it.stageLabel}") }
+                                build.tasks.error?.takeIf { it.isNotBlank() }?.let { appendLine("\n服务提示：$it") }
+                            }.trim()
+                        } }) { Icon(Icons.Outlined.Dns, "查看构建详情") }
                         ManagementService.CheckLogs -> IconButton(vm::clearCheckLogs, enabled = ui.checkLogs.data.isNotEmpty() && ui.busy == null) {
                             Icon(Icons.Outlined.DeleteSweep, "清空巡检记录")
                         }
