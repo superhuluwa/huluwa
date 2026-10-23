@@ -30,7 +30,8 @@ import com.huluwa.android.data.*
     val state = ui.subscriptions
     val rows = state.data
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        overscrollEffect = rememberBounceOverscroll()) {
         // 加载状态统一显示在标题栏菊花上，内容区只保留错误反馈。
         if (state.error != null && !state.error.isServerUnreachable()) item {
             Feedback(loading = false, error = state.error, onRetry = { vm.refreshSubscriptions() })
