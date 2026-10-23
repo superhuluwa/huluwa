@@ -433,16 +433,10 @@ public class MovieSubscriptionService {
         // 之前失败（例如当时还没配置 qB）的条目在本轮顺手重试，避免要等下一次更新才有机会补下
         submitted += retryFailed(subscription);
 
-        // 更新通知：写系统通知会话（消息中心的「系统通知」）
-        StringBuilder content = new StringBuilder();
-        content.append("【").append(subscription.title()).append("】采集到 ")
-                .append(fresh.size()).append(" 条新剧集，已提交最高清晰度 ")
-                .append(submitted).append(" 条：\n");
-        for (String line : downloadedTitles) {
-            content.append("• ").append(line).append('\n');
-        }
-        content.append("\n详情：").append(url);
-        messageService.publish("电影港更新：" + subscription.title(), content.toString().trim(), "success", "movie");
+        // 更新通知完整列出本轮采集的资源，包括未提交下载的集数与清晰度。
+        String content = SubscriptionUpdateNotice.content("电影港", subscription.title(), fresh.size(),
+                "已提交最高清晰度 " + submitted + " 条", describeAll(fresh, subscription), url);
+        messageService.publish(SubscriptionUpdateNotice.title("电影港", subscription.title()), content, "success", "movie");
         log.info("订阅 {}（{}）新增 {} 条、提交下载 {} 条", subscriptionId, subscription.title(), fresh.size(), submitted);
 
         // 巡检记录：明细优先展示本轮真正提交的条目，没有提交时展示新发现的条目

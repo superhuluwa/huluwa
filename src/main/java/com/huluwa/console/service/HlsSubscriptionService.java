@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -185,8 +186,13 @@ public class HlsSubscriptionService {
         return result;
     }
 
-    private int recordEpisodes(Map<String, Object> row, Map<Integer, DyttSearchService.PlayItem> episodes, boolean skipExisting) {
+    /** 本轮真正新增的剧集与入队数量，避免通知误用完整目录开头的集数。 */
+    private record EpisodeUpdates(Map<Integer, DyttSearchService.PlayItem> discovered, int queued) {
+    }
+
+    private EpisodeUpdates recordEpisodes(Map<String, Object> row, Map<Integer, DyttSearchService.PlayItem> episodes, boolean skipExisting) {
         long id = HlsSupport.number(row.get("id"));
+        Map<Integer, DyttSearchService.PlayItem> discovered = new LinkedHashMap<>();
         int newTasks = 0;
         for (var entry : episodes.entrySet()) {
             boolean skip = skipExisting || entry.getKey() < HlsSupport.number(row.get("from_episode"));
@@ -196,9 +202,12 @@ public class HlsSubscriptionService {
                     HlsSupport.text(row.get("res_id")), HlsSupport.text(row.get("title")), HlsSupport.text(row.get("year")),
                     (int) HlsSupport.number(row.get("season")), entry.getKey(), entry.getValue().title(),
                     HlsSupport.text(row.get("source_name")), entry.getValue().url(), HlsSupport.text(row.get("headers")), skip);
-            if (before != null && before == 0 && !skip) newTasks++;
+            if (before != null && before == 0) {
+                discovered.put(entry.getKey(), entry.getValue());
+                if (!skip) newTasks++;
+            }
         }
-        return newTasks;
+        return new EpisodeUpdates(discovered, newTasks);
     }
 
     /** 兼容旧签名：立即检查（页面按钮触发） */
@@ -224,29 +233,39 @@ public class HlsSubscriptionService {
             Map<Integer, DyttSearchService.PlayItem> items = episodes(
                     HlsDownloadService.selectSource(detail, HlsSupport.text(row.get("source_name"))), (int) HlsSupport.number(row.get("season")));
             if (items.isEmpty()) throw new BusinessException(400, "作品暂未返回可识别的正片剧集");
-            int added = transaction.execute(status -> {
-                int count = recordEpisodes(row, items, false);
+            EpisodeUpdates updates = transaction.execute(status -> {
+                EpisodeUpdates recorded = recordEpisodes(row, items, false);
                 db.update("""
                         UPDATE hls_subscription SET last_check_at = ?, next_check_at = ?, last_error = NULL,
                                initialized = 1, cover = COALESCE(NULLIF(?, ''), cover), updated_at = ? WHERE id = ?
                         """, HlsSupport.now(), HlsSupport.afterMinutes(HlsSupport.number(row.get("interval_minutes"))),
                         HlsSupport.text(detail.cover()), HlsSupport.now(), id);
-                return count;
+                return recorded;
             });
-            if (added > 0) notices.publish("订阅剧集更新", title + " 发现 " + added + " 集更新，已加入下载队列", false);
+            int added = updates.queued();
+            int found = updates.discovered().size();
+            List<String> details = episodeLines(row, updates.discovered());
+            if (found > 0) {
+                String detailUrl = HlsSupport.text(detail.url());
+                if (detailUrl.isBlank()) detailUrl = DyttSearchService.detailUrl(HlsSupport.text(row.get("res_id")));
+                notices.publish(SubscriptionUpdateNotice.title("电影天堂", title),
+                        SubscriptionUpdateNotice.content("电影天堂", title, found,
+                                "已加入离线下载队列 " + added + " 条", details, detailUrl), false);
+            }
             downloads.kick();
-            if (added == 0) {
+            if (found == 0) {
                 checkLogs.record(SubscriptionCheckLogService.SOURCE_DYTT, id, title, triggerType,
                         SubscriptionCheckLogService.STATUS_OK, 0, 0,
                         "检查完成：暂无新剧集（当前第 " + (int) HlsSupport.number(row.get("season")) + " 季共 "
                                 + items.size() + " 集可识别）。", null, elapsedMs22(startedAt));
             } else {
                 checkLogs.record(SubscriptionCheckLogService.SOURCE_DYTT, id, title, triggerType,
-                        SubscriptionCheckLogService.STATUS_UPDATED, added, added,
-                        "发现 " + added + " 集更新，已加入离线下载队列。",
-                        episodeLines(items, added), elapsedMs22(startedAt));
+                        SubscriptionCheckLogService.STATUS_UPDATED, found, added,
+                        "发现 " + found + " 集更新，已加入离线下载队列 " + added + " 集。",
+                        details, elapsedMs22(startedAt));
             }
-            return Map.of("added", added, "message", added == 0 ? "检查完成，暂无新剧集" : "已发现并排队下载 " + added + " 集");
+            return Map.of("added", added, "message", found == 0 ? "检查完成，暂无新剧集"
+                    : "已发现 " + found + " 集更新，已排队下载 " + added + " 集");
         } catch (Exception e) {
             String error = HlsSupport.error(e);
             db.update("UPDATE hls_subscription SET last_check_at = ?, next_check_at = ?, last_error = ?, updated_at = ? WHERE id = ?",
@@ -259,20 +278,21 @@ public class HlsSubscriptionService {
         }
     }
 
-    /**
-     * 巡检记录明细：只列本轮新入库的集（按集号升序，最多 12 条）。
-     * 采集站的集标题通常已自带「第 N 集」，此时直接用原标题，避免出现「第 1 集 第1集」这类重复。
-     */
-    private static java.util.List<String> episodeLines(Map<Integer, DyttSearchService.PlayItem> items, int added) {
-        java.util.List<String> lines = new java.util.ArrayList<>();
-        for (Map.Entry<Integer, DyttSearchService.PlayItem> entry : items.entrySet()) {
-            if (lines.size() >= Math.max(added, 0)) break;
+    /** 通知与巡检记录共用本轮新增明细，按集号排序并保留季号、原标题和播放线路。 */
+    private static List<String> episodeLines(Map<String, Object> row, Map<Integer, DyttSearchService.PlayItem> items) {
+        List<String> lines = new ArrayList<>();
+        items.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
             String episodeTitle = HlsSupport.text(entry.getValue().title()).trim();
-            String prefix = "第 " + entry.getKey() + " 集";
-            lines.add(episodeTitle.contains(String.valueOf(entry.getKey())) || episodeTitle.isBlank()
-                    ? (episodeTitle.isBlank() ? prefix : episodeTitle)
-                    : prefix + " " + episodeTitle);
-        }
+            String line = "第 " + HlsSupport.number(row.get("season")) + " 季 第 " + entry.getKey()
+                    + " 集 [" + HlsSupport.text(row.get("source_name")) + "]";
+            if (!episodeTitle.isBlank() && !episodeTitle.replaceAll("\\s+", "").equals("第" + entry.getKey() + "集")) {
+                line += " " + episodeTitle;
+            }
+            if (entry.getKey() < HlsSupport.number(row.get("from_episode"))) {
+                line += "（未达到起始集号，未加入队列）";
+            }
+            lines.add(line);
+        });
         return lines;
     }
 
