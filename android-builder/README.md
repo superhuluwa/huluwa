@@ -33,6 +33,10 @@
 4. 等节点显示在线，在网页或 App 中选择它，先“更新代码”，再“编译 APK”。更新和编译都使用当前选择的节点；切换节点后需要先更新该节点的源码。
 5. APK 完成签名、包名、版本和 SHA-256 校验后回传主服务，完整回传校验通过才发布。下载始终通过主服务；Windows 节点离线后仍可下载已经回传的 APK。
 
+安装后可在仓库根目录双击 `启动Windows打包服务.cmd`，通过现有计划任务在后台启动节点；窗口关闭后服务继续运行。重复点击会检查已有实例，不会重复启动。脚本会验证构建进程心跳，主服务连接状态以 App 或网页显示为准；失败时窗口会显示原因。脚本使用 Windows PowerShell 5.1，复用已安装的配置、签名和缓存，不重新安装服务。现有登录自启设置保持不变。
+
+默认安装目录为 `%LOCALAPPDATA%\HuluwaAndroidBuilder`。使用其他安装目录时执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\android-builder\start-windows.ps1 -InstallDirectory "D:\Your Builder"`。
+
 常用运维命令：
 
 ```powershell
