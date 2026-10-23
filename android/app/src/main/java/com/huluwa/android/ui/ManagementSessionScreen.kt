@@ -5,7 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -20,6 +20,7 @@ import com.huluwa.android.data.formatBytes
     val session = ui.chat.session ?: return
     val service = session.managementService ?: return
     val reconnecting = rememberReconnecting(vm)
+    var frpMenu by remember { mutableStateOf(false) }
     val loading = when (service) {
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
@@ -54,8 +55,18 @@ import com.huluwa.android.data.formatBytes
                         Icon(Icons.Outlined.Refresh, "刷新管理会话")
                     }
                     when (service) {
-                        ManagementService.Frp -> IconButton(vm::showFrpConfig, enabled = ui.busy == null) {
-                            Icon(Icons.Outlined.Description, "查看或编辑 Frp 配置文件")
+                        ManagementService.Frp -> Box {
+                            IconButton({ frpMenu = true }) { Icon(Icons.Outlined.MoreHoriz, "FRP 更多操作") }
+                            DropdownMenu(frpMenu, { frpMenu = false }) {
+                                DropdownMenuItem(text = { Text("查看配置文件") }, enabled = !reconnecting && ui.busy == null,
+                                    onClick = { frpMenu = false; vm.showFrpConfig() })
+                                val canOperate = !reconnecting && ui.busy == null && !ui.tunnels.loading &&
+                                    ui.tunnels.error == null && ui.runtime.running && ui.runtime.configAvailable
+                                DropdownMenuItem(text = { Text("热加载配置") }, enabled = canOperate,
+                                    onClick = { frpMenu = false; vm.reloadFrp() })
+                                DropdownMenuItem(text = { Text("重启 frpc", color = HuluwaColors.Danger) }, enabled = !reconnecting && ui.busy == null,
+                                    onClick = { frpMenu = false; vm.restartFrp() })
+                            }
                         }
                         ManagementService.Docker -> IconButton({ vm.loadText("Docker 主机") {
                             val current = vm.state.value

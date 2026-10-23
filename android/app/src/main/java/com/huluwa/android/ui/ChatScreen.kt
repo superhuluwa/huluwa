@@ -34,13 +34,14 @@ import com.huluwa.android.data.*
     var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var initialized by remember(session.id) { mutableStateOf(false) }
-    val nearBottom by remember { derivedStateOf { val layout = list.layoutInfo; layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 3 } ?: true } }
-    LaunchedEffect(session.id, chat.messages.lastOrNull()?.id, chat.messages.size) {
+    val nearBottom by remember { derivedStateOf { list.firstVisibleItemIndex <= 2 } }
+    LaunchedEffect(session.id, chat.messages.lastOrNull()?.id, chat.processing) {
         if (chat.messages.isNotEmpty() && (!initialized || nearBottom || chat.messages.last().mine)) {
-            list.scrollToItem(chat.messages.lastIndex + 1); initialized = true
+            list.scrollToItem(0); initialized = true
         }
     }
-    Scaffold(containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
+    // 整个聊天布局统一避让键盘，消息区与输入栏随系统键盘动画一起调整高度。
+    Scaffold(modifier = Modifier.fillMaxSize().imePadding(), containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -67,7 +68,7 @@ import com.huluwa.android.data.*
             }
         }, bottomBar = {
             if (session.kind != "system") Surface(color = Color.White) {
-                Row(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 14.dp, vertical = 10.dp),
+                Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(content, { content = it }, Modifier.weight(1f), maxLines = 4,
                         placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
@@ -79,7 +80,11 @@ import com.huluwa.android.data.*
             } else Text("系统通知会自动同步到这里", Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp), color = HuluwaColors.Muted,
                 style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), state = list, contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
+        // 从最新消息处锚定：键盘改变可用高度时，消息随底部上移；短会话仍从顶部排列。
+        LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), state = list, reverseLayout = true,
+            contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(17.dp, Alignment.Top)) {
+            if (chat.processing) item("processing") { Text("正在处理，请稍候…", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, modifier = Modifier.padding(start = 43.dp)) }
+            items(chat.messages.asReversed(), key = { it.id }) { message -> MessageBubble(message, session.kind, ui, vm, onMedia = { url, video -> media = url to video }) }
             item("history") {
                 // 加载状态统一显示在标题栏菊花上，消息区只保留错误反馈，避免列表被进度条挤动。
                 Feedback(loading = false, error = chat.error.takeUnless { it.isServerUnreachable() }, onRetry = { if (chat.messages.isEmpty()) vm.openSession(session) else vm.refreshChat() })
@@ -88,8 +93,6 @@ import com.huluwa.android.data.*
                 }
                 if (!chat.loading && chat.messages.isEmpty() && chat.error == null) EmptyContent("发条消息，开始吧", "搜索影视、提交下载，都可以从这里开始", sessionIcon(session.kind))
             }
-            items(chat.messages, key = { it.id }) { message -> MessageBubble(message, session.kind, ui, vm, onMedia = { url, video -> media = url to video }) }
-            if (chat.processing) item("processing") { Text("正在处理，请稍候…", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, modifier = Modifier.padding(start = 43.dp)) }
         }
     }
     media?.let { (url, video) -> MediaViewer(url, video) { media = null } }

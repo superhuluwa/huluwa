@@ -62,12 +62,12 @@ import com.huluwa.android.data.isServerUnreachable
             when (sheet) {
                 AppSheet.Account -> AccountSheet(ui, vm)
                 AppSheet.NewDownload -> NewDownloadSheet(ui.busy != null, vm)
-                is AppSheet.TunnelEdit -> TunnelEditor(sheet.tunnel, ui.busy != null, vm)
+                is AppSheet.TunnelEdit -> TunnelEditor(sheet.tunnel, ui.busy != null || rememberReconnecting(vm) || ui.tunnels.error != null, vm)
                 is AppSheet.Settings -> ServiceSettings(sheet, ui.busy != null, vm)
                 is AppSheet.Episode -> EpisodeForm(sheet, ui.busy != null, vm)
-                is AppSheet.Text -> TextSheet(sheet, ui.busy != null)
-                is AppSheet.ContainerDetail -> ContainerDetail(sheet, ui.busy != null, vm)
-                is AppSheet.CreateResource -> CreateResource(sheet, ui.busy != null, vm)
+                is AppSheet.Text -> TextSheet(sheet, ui.busy != null || rememberReconnecting(vm))
+                is AppSheet.ContainerDetail -> ContainerDetail(sheet, ui.busy != null || rememberReconnecting(vm) || ui.containers.error != null || !ui.overview.online, vm)
+                is AppSheet.CreateResource -> CreateResource(sheet, ui.busy != null || rememberReconnecting(vm) || ui.containers.error != null || !ui.overview.online, vm)
                 else -> Unit
             }
             Spacer(Modifier.height(22.dp))

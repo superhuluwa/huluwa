@@ -117,6 +117,10 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         put("url", card.url); put("title", card.title); put("magnet", item.text("magnet")); put("quality", item.text("quality")); put("episode", item.text("episode"))
     }).requireSuccess()
 
+    suspend fun serverMetrics() = ServerMetrics.from(api.get("dashboard", "server").asObject())
+    suspend fun frpSummary() = FrpRuntime.from(api.get("frp", "runtime").asObject())
+    suspend fun dockerSummary() = DockerSummary.from(api.get("docker", "summary").asObject())
+
     suspend fun frp(): Pair<List<Tunnel>, FrpRuntime> = coroutineScope {
         val tunnels = async { api.get("frp", "tunnels").asArray().map { Tunnel.from(it.asObject()) } }
         val runtime = async { FrpRuntime.from(api.get("frp", "runtime").asObject()) }
@@ -149,22 +153,27 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             }
         } else Result.success(JsonObject(emptyMap()))
         (statsResult.exceptionOrNull() as? ApiException)?.takeIf { it.code == 401 }?.let { throw it }
-        var totalCpu = 0.0; var totalMemory = 0.0; var cpuKnown = false; var memoryKnown = false
+        var totalCpu = 0.0; var totalMemory = 0.0; var cpuSamples = 0; var memorySamples = 0
         statsResult.getOrNull()?.forEach { (id, value) ->
+            if (id !in ids) return@forEach
             val stats = value.asObject(); val cpu = stats.child("cpu_stats")
             val previous = previousCpu[id] ?: stats.child("precpu_stats")
-            val systemDelta = (cpu.number("system_cpu_usage") ?: 0.0) - (previous.number("system_cpu_usage") ?: 0.0)
-            val cpuDelta = (cpu.child("cpu_usage").number("total_usage") ?: 0.0) - (previous.child("cpu_usage").number("total_usage") ?: 0.0)
+            val systemNow = cpu.number("system_cpu_usage")
+            val systemBefore = previous.number("system_cpu_usage")
+            val usageNow = cpu.child("cpu_usage").number("total_usage")
+            val usageBefore = previous.child("cpu_usage").number("total_usage")
+            val systemDelta = if (systemNow != null && systemBefore != null) systemNow - systemBefore else null
+            val cpuDelta = if (usageNow != null && usageBefore != null) usageNow - usageBefore else null
             val cores = cpu.number("online_cpus") ?: cpu.child("cpu_usage").rows("percpu_usage").size.coerceAtLeast(1).toDouble()
-            if (systemDelta > 0 && cpuDelta >= 0) { totalCpu += cpuDelta / systemDelta * cores * 100.0; cpuKnown = true }
-            else stats.number("CPUPercRaw")?.let { totalCpu += it; cpuKnown = true }
-            (stats.child("memory_stats").number("usage") ?: stats.number("MemoryUsageRaw"))?.let { totalMemory += it; memoryKnown = true }
+            if (systemDelta != null && cpuDelta != null && systemDelta > 0 && cpuDelta >= 0) { totalCpu += cpuDelta / systemDelta * cores * 100.0; cpuSamples++ }
+            else stats.number("CPUPercRaw")?.takeIf { it >= 0 }?.let { totalCpu += it; cpuSamples++ }
+            (stats.child("memory_stats").number("usage") ?: stats.number("MemoryUsageRaw"))?.takeIf { it >= 0 }?.let { totalMemory += it; memorySamples++ }
             if (cpu.isNotEmpty()) previousCpu[id] = cpu
         }
         previousCpu.keys.retainAll(ids.toSet())
         list to DockerOverview(host.flag("daemonOnline") && counts.flag("available", true), counts.number("total")?.toInt() ?: list.size,
             counts.number("running")?.toInt() ?: list.count { it.running }, counts.number("images")?.toInt() ?: 0, host.text("serverVersion"),
-            host.text("message").ifBlank { counts.text("message") }, ResourceUsage(if (cpuKnown) totalCpu else null, if (memoryKnown) totalMemory else null))
+            host.text("message").ifBlank { counts.text("message") }, ResourceUsage(totalCpu.takeIf { cpuSamples > 0 }, totalMemory.takeIf { memorySamples > 0 }, cpuSamples, memorySamples, ids.size))
     }
     suspend fun dockerResources(section: DockerSection): List<DockerResource> {
         val data = when (section) {
@@ -234,11 +243,11 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     }
 
     // ---- 安卓 App 构建管理（对应网页端「安卓 App」页面） ----
-    suspend fun androidStatus(): JsonObject = api.get("android", "status").asObject()
+    suspend fun androidStatus(serverId: String = "local"): JsonObject = api.get("android", "status", query = mapOf("serverId" to serverId)).asObject()
     suspend fun androidTasks(limit: Int = 30): List<AndroidBuildTask> =
         api.get("android", "tasks", query = mapOf("limit" to limit.toString())).asArray().map { AndroidBuildTask.from(it.asObject()) }
-    suspend fun androidUpdate(): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "update").asObject())
-    suspend fun androidBuild(): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "build").asObject())
+    suspend fun androidUpdate(serverId: String = "local"): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "update", query = mapOf("serverId" to serverId)).asObject())
+    suspend fun androidBuild(serverId: String = "local"): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "build", query = mapOf("serverId" to serverId)).asObject())
     suspend fun androidCancel(id: Long): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "tasks", id.toString(), "cancel").asObject())
     suspend fun androidLogs(id: Long, cursor: Long): AndroidLogChunk =
         AndroidLogChunk.from(api.get("android", "tasks", id.toString(), "logs", query = mapOf("cursor" to cursor.toString())).asObject())

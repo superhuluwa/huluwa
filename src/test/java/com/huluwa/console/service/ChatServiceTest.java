@@ -27,10 +27,12 @@ class ChatServiceTest {
         JdbcTemplate jdbc = new JdbcTemplate(source);
         QBittorrentService qb = mock(QBittorrentService.class);
         when(qb.settings()).thenReturn(new QBittorrentService.Settings(null, null, null, null));
-        ChatService service = new ChatService(jdbc, mock(MovieSearchService.class), mock(DyttSearchService.class), qb,
+        ChatService service = spy(new ChatService(jdbc, mock(MovieSearchService.class), mock(DyttSearchService.class), qb,
                 mock(MessageService.class), mock(MovieSubscriptionService.class), mock(VideoParseService.class),
                 mock(XunleiService.class), mock(XunleiWinService.class),
-                mock(ChatRequestService.class), mock(ChatPushService.class));
+                mock(ChatRequestService.class), mock(ChatPushService.class)));
+        // 本例只验证同步 INSERT 返回值；隔离异步聊天业务，避免临时库清理时仍被线程占用。
+        doNothing().when(service).processRequest(anyString(), anyString(), anyString());
         try {
             var submitted = service.submit("magnet", "request-fixture", "fixture text");
             long id = submitted.userMessage().id();

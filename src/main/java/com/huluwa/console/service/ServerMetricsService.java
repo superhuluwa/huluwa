@@ -62,9 +62,15 @@ public class ServerMetricsService {
         this.procRoot = procRoot;
     }
 
-    /** 首页概览使用的整机快照：CPU / 内存 / 负载 / 运行时长。 */
+    /** 首页与 App 使用的整机快照，包含采集时间及过期状态。 */
     public Map<String, Object> snapshot() {
-        return snapshot;
+        Map<String, Object> current = new LinkedHashMap<>(snapshot);
+        Object collected = current.get("sampledAt");
+        if (collected instanceof Number time && System.currentTimeMillis() - time.longValue() > 10_000L) {
+            current.put("stale", true);
+            current.putIfAbsent("message", "资源采样已过期");
+        }
+        return current;
     }
 
     @PreDestroy
@@ -92,6 +98,12 @@ public class ServerMetricsService {
             log.debug("采样宿主机资源失败: {}", ex.getMessage());
             if (!sampled) {
                 snapshot = unavailable("读取 /proc 失败：" + ex.getMessage());
+            } else {
+                Map<String, Object> previous = new LinkedHashMap<>(snapshot);
+                previous.put("stale", true);
+                previous.put("lastAttemptAt", System.currentTimeMillis());
+                previous.put("message", "资源采样失败，显示上次数据");
+                snapshot = previous;
             }
         }
     }
@@ -101,6 +113,10 @@ public class ServerMetricsService {
         data.put("available", true);
         data.put("cpu", readCpu(previous, current));
         data.put("memory", readMemory());
+        long now = System.currentTimeMillis();
+        data.put("sampledAt", now);
+        data.put("lastAttemptAt", now);
+        data.put("stale", false);
         return data;
     }
 
@@ -196,6 +212,8 @@ public class ServerMetricsService {
     private static Map<String, Object> unavailable(String message) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("available", false);
+        data.put("lastAttemptAt", System.currentTimeMillis());
+        data.put("stale", false);
         data.put("message", message);
         return data;
     }

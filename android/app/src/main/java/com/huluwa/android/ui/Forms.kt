@@ -21,7 +21,8 @@ import com.huluwa.android.data.*
     var confirm by remember { mutableStateOf("") }
     LabelValue("服务器地址", ui.auth.server)
     LabelValue("当前账号", ui.auth.username)
-    StatusTag(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", ui.realtime)
+    val reconnecting = rememberReconnecting(vm)
+    StatusTag(when { reconnecting -> "消息同步中断"; ui.realtime -> "实时消息已连接"; else -> "消息自动轮询同步" }, ui.realtime && !reconnecting)
     OutlinedButton({ changePassword = !changePassword }, Modifier.fillMaxWidth(), enabled = ui.busy == null) { Text(if (changePassword) "收起修改密码" else "修改密码") }
     if (changePassword) {
         OutlinedTextField(old, { old = it }, Modifier.fillMaxWidth(), label = { Text("原密码") }, visualTransformation = PasswordVisualTransformation(),
@@ -30,7 +31,7 @@ import com.huluwa.android.data.*
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = ui.busy == null, singleLine = true)
         OutlinedTextField(confirm, { confirm = it }, Modifier.fillMaxWidth(), label = { Text("再次输入新密码") }, visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = ui.busy == null, singleLine = true)
-        Button({ vm.changePassword(old, new, confirm) }, Modifier.fillMaxWidth(), enabled = ui.busy == null && old.isNotBlank() && new.isNotBlank() && confirm.isNotBlank()) { Text("确认修改") }
+        Button({ vm.changePassword(old, new, confirm) }, Modifier.fillMaxWidth(), enabled = ui.busy == null && !reconnecting && old.isNotBlank() && new.isNotBlank() && confirm.isNotBlank()) { Text("确认修改") }
     }
     TextButton({ vm.confirm("退出登录", "退出后可以切换服务器或账号，服务器任务会继续运行。", "退出") { vm.logout() } }, Modifier.fillMaxWidth(), enabled = ui.busy == null) { Text("退出登录 / 切换服务器", color = HuluwaColors.Danger) }
 }

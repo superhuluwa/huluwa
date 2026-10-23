@@ -169,19 +169,87 @@ data class Subscription(
             raw.text("lastCheckAt"), raw.text("nextCheckAt"), raw.text("lastError"), raw.text("createdAt"), raw)
     }
 }
-data class Tunnel(val draft: TunnelDraft, val status: String, val statusText: String, val failed: Boolean, val localAddress: String, val remoteAddress: String) {
+data class Tunnel(
+    val draft: TunnelDraft, val status: String, val statusText: String, val failed: Boolean,
+    val localAddress: String, val remoteAddress: String,
+    val probe: String = "", val probeText: String = "", val error: String = "",
+) {
     val name get() = draft.name
     val enabled get() = draft.enabled
     val running get() = enabled && status == "running"
     companion object {
         fun from(raw: JsonObject) = Tunnel(TunnelDraft(raw.text("name"), raw.text("proxyType", fallback = "tcp"), raw.text("localIp", fallback = "127.0.0.1"),
             raw.number("localPort")?.toInt(), raw.number("remotePort")?.toInt(), raw.text("customDomains"), raw.text("subdomain"), raw.text("remark"),
-            raw.flag("encryption"), raw.flag("compression"), raw.flag("enabled")), raw.text("status"), raw.text("statusText"), raw.flag("failed"), raw.text("localAddress"), raw.text("remoteAddress"))
+            raw.flag("encryption"), raw.flag("compression"), raw.flag("enabled")), raw.text("status"), raw.text("statusText"), raw.flag("failed"), raw.text("localAddress"), raw.text("remoteAddress"),
+            raw.text("probe"), raw.text("probeText"), raw.text("error"))
     }
 }
-data class FrpRuntime(val running: Boolean = false, val status: String = "未知", val message: String = "", val container: String = "frpc", val sharedConfig: Boolean? = null) {
-    companion object { fun from(raw: JsonObject) = FrpRuntime(raw.flag("containerRunning"), raw.text("containerStatus", fallback = "未知"), raw.text("message"), raw.text("container", fallback = "frpc"), (raw["configSharedWithFrpc"] as? JsonPrimitive)?.booleanOrNull) }
+data class FrpRuntime(
+    val running: Boolean = false, val status: String = "未知", val message: String = "", val container: String = "frpc",
+    val sharedConfig: Boolean? = null, val configAvailable: Boolean = false,
+    val total: Int? = null, val runningTunnels: Int? = null, val failedTunnels: Int? = null, val disabledTunnels: Int? = null,
+) {
+    companion object {
+        fun from(raw: JsonObject): FrpRuntime {
+            val configured = raw.flag("configAvailable")
+            return FrpRuntime(
+                raw.flag("containerRunning"), raw.text("containerStatus", fallback = "未知"), raw.text("message"),
+                raw.text("container", fallback = "frpc"), (raw["configSharedWithFrpc"] as? JsonPrimitive)?.booleanOrNull,
+                configured, raw.number("total")?.toInt()?.takeIf { configured && it >= 0 },
+                raw.number("running")?.toInt()?.takeIf { configured && it >= 0 },
+                raw.number("error")?.toInt()?.takeIf { configured && it >= 0 },
+                raw.number("disabled")?.toInt()?.takeIf { configured && it >= 0 },
+            )
+        }
+    }
 }
+
+/** 服务器整机指标与 Docker 容器采样分开建模；缺失的数值保持未知。 */
+data class ServerMetrics(
+    val available: Boolean = false, val cpuPercent: Double? = null, val cores: Int? = null,
+    val load1: Double? = null, val load5: Double? = null, val load15: Double? = null,
+    val memoryPercent: Double? = null, val memoryUsed: Double? = null, val memoryTotal: Double? = null,
+    val memoryAvailable: Double? = null, val sampledAt: Long? = null, val stale: Boolean = false, val message: String = "",
+) {
+    companion object {
+        fun from(raw: JsonObject): ServerMetrics {
+            val cpu = raw.child("cpu")
+            val memory = raw.child("memory")
+            return ServerMetrics(
+                available = raw.flag("available"), cpuPercent = cpu.number("percent")?.takeIf { it in 0.0..100.0 },
+                cores = cpu.number("cores")?.toInt()?.takeIf { it > 0 },
+                load1 = cpu.number("load1")?.takeIf { it >= 0 }, load5 = cpu.number("load5")?.takeIf { it >= 0 },
+                load15 = cpu.number("load15")?.takeIf { it >= 0 },
+                memoryPercent = memory.number("percent")?.takeIf { it in 0.0..100.0 },
+                memoryUsed = memory.number("used")?.takeIf { it >= 0 }, memoryTotal = memory.number("total")?.takeIf { it > 0 },
+                memoryAvailable = memory.number("available")?.takeIf { it >= 0 },
+                sampledAt = raw.number("sampledAt")?.toLong()?.takeIf { it > 0 }, stale = raw.flag("stale"), message = raw.text("message"),
+            )
+        }
+    }
+}
+
+data class DockerSummary(
+    val available: Boolean = false, val total: Int? = null, val running: Int? = null, val message: String = "",
+) {
+    val notRunning: Int? get() = total?.let { count -> running?.let { (count - it).coerceAtLeast(0) } }
+    companion object {
+        fun from(raw: JsonObject): DockerSummary {
+            val available = raw.flag("available")
+            return DockerSummary(available, raw.number("total")?.toInt()?.takeIf { available && it >= 0 },
+                raw.number("running")?.toInt()?.takeIf { available && it >= 0 }, raw.text("message"))
+        }
+    }
+}
+
+data class MineOverview(
+    val server: LoadState<ServerMetrics> = LoadState(ServerMetrics()),
+    val frp: LoadState<FrpRuntime> = LoadState(FrpRuntime()),
+    val docker: LoadState<DockerSummary> = LoadState(DockerSummary()),
+) {
+    val loading: Boolean get() = server.loading || frp.loading || docker.loading
+}
+
 data class DockerContainer(val id: String, val name: String, val image: String, val state: String, val status: String, val ports: String, val raw: JsonObject) {
     val running get() = state.equals("running", true)
     companion object {
@@ -199,7 +267,10 @@ data class DockerContainer(val id: String, val name: String, val image: String, 
 }
 data class DockerResource(val id: String, val name: String, val subtitle: String, val raw: JsonObject)
 enum class DockerSection(val title: String) { Containers("容器"), Images("镜像"), Networks("网络"), Volumes("存储卷") }
-data class ResourceUsage(val cpuPercent: Double? = null, val memoryBytes: Double? = null)
+data class ResourceUsage(
+    val cpuPercent: Double? = null, val memoryBytes: Double? = null,
+    val cpuSamples: Int = 0, val memorySamples: Int = 0, val expectedSamples: Int = 0,
+)
 data class DockerOverview(val online: Boolean = false, val total: Int = 0, val running: Int = 0, val images: Int = 0, val version: String = "", val message: String = "", val usage: ResourceUsage = ResourceUsage())
 
 /** 安卓构建任务：字段与后端 android_build_task 表一一对应。 */
@@ -208,6 +279,7 @@ data class AndroidBuildTask(
     val commit: String, val commitSubject: String, val versionCode: Long?, val versionName: String,
     val artifactName: String, val apkSize: Long, val error: String,
     val requestedBy: String, val createdAt: String, val startedAt: String, val completedAt: String,
+    val serverId: String = "local",
 ) {
     val building get() = type == "BUILD"
     val active get() = status in setOf("QUEUED", "RUNNING", "CANCELLING")
@@ -250,6 +322,7 @@ data class AndroidBuildTask(
             raw.text("commit"), raw.text("commitSubject"), raw.number("versionCode")?.toLong(), raw.text("versionName"),
             raw.text("artifactName"), raw.number("apkSize")?.toLong() ?: 0, raw.text("error"),
             raw.text("requestedBy"), raw.text("createdAt"), raw.text("startedAt"), raw.text("completedAt"),
+            raw.text("serverId", fallback = "local"),
         )
     }
 }
@@ -261,10 +334,17 @@ data class AndroidSource(val commit: String = "", val commitSubject: String = ""
     }
 }
 
+data class AndroidBuildServer(val id: String, val name: String, val online: Boolean) {
+    companion object {
+        fun from(raw: JsonObject) = AndroidBuildServer(raw.text("id"), raw.text("name"), raw.flag("online"))
+    }
+}
+
 data class AndroidBuildStatus(
     val enabled: Boolean = false, val workerOnline: Boolean = false, val signingReady: Boolean = false,
     val branch: String = "master", val source: AndroidSource = AndroidSource(),
     val activeTask: AndroidBuildTask? = null, val latestApk: AndroidBuildTask? = null,
+    val servers: List<AndroidBuildServer> = emptyList(),
 ) {
     /** 只有完整的 40 位提交号才允许发起编译。 */
     val hasSource get() = Regex("[0-9a-f]{40}").matches(source.commit)
@@ -277,6 +357,7 @@ data class AndroidBuildStatus(
             raw.text("branch", fallback = "master"), AndroidSource.from(raw.child("source")),
             (raw["activeTask"] as? JsonObject)?.let(AndroidBuildTask::from),
             (raw["latestApk"] as? JsonObject)?.let(AndroidBuildTask::from),
+            (raw["servers"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let(AndroidBuildServer::from) } ?: emptyList(),
         )
     }
 }
@@ -292,6 +373,7 @@ data class AndroidLogChunk(val task: AndroidBuildTask?, val text: String, val cu
 }
 
 data class AndroidBuildState(
+    val serverId: String = "local",
     val status: AndroidBuildStatus = AndroidBuildStatus(),
     val tasks: LoadState<List<AndroidBuildTask>> = LoadState(emptyList()),
     val selectedId: Long? = null, val logs: String = "", val cursor: Long = 0,
@@ -392,7 +474,10 @@ data class LibraryDeleteResult(
     }
 }
 
-data class LoadState<T>(val data: T, val loading: Boolean = false, val error: String? = null, val loaded: Boolean = false)
+data class LoadState<T>(
+    val data: T, val loading: Boolean = false, val error: String? = null, val loaded: Boolean = false,
+    val updatedAt: Long = 0L,
+)
 data class MultiSourceResult<T>(val items: List<T>, val warnings: List<String> = emptyList(), val failedSources: Set<String> = emptySet())
 
 fun statusLabel(value: String): String = when (value.lowercase(Locale.ROOT)) {

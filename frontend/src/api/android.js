@@ -1,9 +1,11 @@
 import http from '@/libs/http'
 
-export const getAndroidStatus = (config) => http.get('/android/status', null, config)
+export const getAndroidStatus = (config, serverId = 'local') => http.get('/android/status', { serverId }, config)
+export const createAndroidServer = (name) => http.post('/android/servers', { name })
+export const deleteAndroidServer = (id) => http.delete(`/android/servers/${id}`)
 export const getAndroidTasks = (config) => http.get('/android/tasks', { limit: 30 }, config)
-export const updateAndroidCode = () => http.post('/android/update')
-export const buildAndroidApk = () => http.post('/android/build')
+export const updateAndroidCode = (serverId = 'local') => http.post('/android/update', null, { params: { serverId } })
+export const buildAndroidApk = (serverId = 'local') => http.post('/android/build', null, { params: { serverId } })
 export const cancelAndroidTask = (id) => http.post(`/android/tasks/${id}/cancel`)
 export const getAndroidLogs = (id, cursor, config) => http.get(`/android/tasks/${id}/logs`, { cursor }, config)
 

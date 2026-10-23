@@ -8,13 +8,27 @@
         </template>
 
         <div class="mgmt-content">
+            <section class="panel">
+                <label for="build-server">构建服务器</label>
+                <select id="build-server" v-model="serverId" :disabled="Boolean(submitting)" @change="changeServer" style="width:100%;padding:12px;margin:8px 0">
+                    <option v-for="server in status.servers || []" :key="server.id" :value="server.id">{{ server.name }} · {{ server.online ? '在线' : '离线' }}</option>
+                </select>
+                <details>
+                    <summary>管理构建服务器</summary>
+                    <input v-model="serverName" maxlength="80" placeholder="例如：Windows 打包电脑" style="padding:10px;margin:10px 0" />
+                    <n-button @click="addServer" :disabled="!serverName.trim()">添加节点</n-button>
+                    <n-button v-if="serverId !== 'local'" @click="removeServer" :disabled="Boolean(activeTask)">删除所选节点</n-button>
+                    <p>添加后，在 Windows 电脑运行 android-builder\install-windows.ps1，输入主服务地址、节点 ID 和密钥。</p>
+                    <pre v-if="enrollment" style="white-space:pre-wrap;overflow-wrap:anywhere;user-select:text">{{ enrollment }}</pre>
+                </details>
+            </section>
             <!-- 速览：构建服务状态 + 源码 / 安装包 / 任务 / 签名 -->
             <section class="hero-panel">
                 <div class="hero-head">
                     <i class="fa-brands fa-android"></i>
                     <div class="hero-head-text">
                         <strong>App 构建服务</strong>
-                        <span>{{ status.workerOnline ? '构建容器在线' : '构建容器离线' }} · {{ status.branch || 'master' }}</span>
+                        <span>{{ status.workerOnline ? '构建节点在线' : '构建节点离线' }} · {{ status.branch || 'master' }}</span>
                     </div>
                     <span class="hero-tag" :class="{ alert: !status.workerOnline }">{{ status.workerOnline ? '在线' : '离线' }}</span>
                 </div>
@@ -46,10 +60,10 @@
                 <i class="fa-solid fa-triangle-exclamation"></i>暂时无法连接构建服务，正在自动重连。服务器上的任务会继续执行。
             </div>
             <div v-else-if="loaded && !status.enabled" class="notice-line">
-                <i class="fa-solid fa-circle-info"></i>安卓构建服务尚未启用，请配置并启动构建容器。
+                <i class="fa-solid fa-circle-info"></i>安卓构建服务尚未启用，请配置并启动构建节点。
             </div>
             <div v-else-if="loaded && !status.workerOnline" class="notice-line">
-                <i class="fa-solid fa-triangle-exclamation"></i>构建容器暂时离线，恢复后即可更新代码和编译。
+                <i class="fa-solid fa-triangle-exclamation"></i>构建节点暂时离线，恢复后即可更新代码和编译。
             </div>
 
             <!-- 构建操作 -->
@@ -109,36 +123,6 @@
                 <p class="log-foot">{{ logComplete ? '日志已全部加载，完整内容可下载' : '日志每秒增量更新，完整内容可下载' }}</p>
             </section>
 
-            <!-- 任务历史 -->
-            <div class="section-title"><h2>任务历史</h2><span class="history-tip">点击任务查看日志</span></div>
-            <div v-if="loaded && !tasks.data.length" class="empty-panel">
-                <span class="empty-icon"><i class="fa-brands fa-android"></i></span>
-                <strong>暂无任务记录</strong>
-                <span>先更新代码，再编译安装包</span>
-            </div>
-            <article v-for="task in tasks.data" :key="task.id" class="panel task-row"
-                :class="{ selected: selectedId === task.id }" @click="selectTask(task)">
-                <div class="task-head">
-                    <span class="task-id">#{{ task.id }}</span>
-                    <strong>{{ typeLabel(task.type) }}</strong>
-                    <span class="chip-tag" :class="taskTone(task.status)">{{ taskStatusLabel(task.status) }}</span>
-                </div>
-                <div class="task-meta">
-                    <span class="mono">{{ short(task.commit) }}</span>
-                    <span v-if="task.type === 'BUILD' && task.versionName">v{{ task.versionName }}（{{ task.versionCode }}）</span>
-                    <span class="task-spacer"></span>
-                    <span v-if="isDownloadable(task)" class="chip-tag outline">{{ formatBytes(task.apkSize) }}</span>
-                </div>
-                <div class="task-foot">
-                    <span>{{ formatTime(task.startedAt || task.createdAt) }}</span>
-                    <span>{{ elapsed(task) }}</span>
-                    <span class="task-spacer"></span>
-                    <button v-if="isDownloadable(task)" class="link-btn" type="button" @click.stop="downloadApk(task)">
-                        <i class="fa-solid fa-download"></i>下载
-                    </button>
-                    <span v-else class="task-hint">{{ selectedId === task.id ? '正在查看日志' : '点击查看日志' }}</span>
-                </div>
-            </article>
         </div>
     </ManagementShell>
 </template>
@@ -149,14 +133,13 @@
  *  - 速览：当前源码、最近构建、当前任务、签名配置；
  *  - 构建操作：更新代码 / 编译 APK / 下载 APK / 取消任务；
  *  - 执行日志：按游标增量拉取，支持跟随滚动、复制、下载日志；
- *  - 任务历史：点击切换日志，可下载成功产物。
  */
 import { NButton } from 'naive-ui'
 import ManagementShell from '@/components/main/management-shell.vue'
 import { message } from '@/libs/discrete'
 import {
     getAndroidStatus, getAndroidTasks, updateAndroidCode, buildAndroidApk,
-    cancelAndroidTask, getAndroidLogs, prepareAndroidDownload, startAndroidDownload
+    cancelAndroidTask, getAndroidLogs, prepareAndroidDownload, startAndroidDownload, createAndroidServer, deleteAndroidServer
 } from '@/api/android'
 import { formatBytes } from '@/utils/format'
 
@@ -174,6 +157,8 @@ export default {
     components: { ManagementShell, NButton },
     data() {
         return {
+            serverId: sessionStorage.getItem('huluwa.buildServer') || 'local',
+            serverName: '', enrollment: '',
             status: {
                 enabled: false, workerOnline: false, signingReady: false, branch: 'master',
                 source: {}, activeTask: null, latestApk: null
@@ -223,7 +208,7 @@ export default {
         reason() {
             if (this.submitting || this.activeTask || this.canBuild) return ''
             if (!this.status.enabled) return '安卓构建服务尚未启用'
-            if (!this.status.workerOnline) return '构建容器离线，暂时无法编译'
+            if (!this.status.workerOnline) return '构建节点离线，暂时无法编译'
             if (!/^[0-9a-f]{40}$/.test((this.status.source && this.status.source.commit) || '')) return '请先更新代码，获取最新安卓源码'
             if (!this.status.signingReady) return '尚未配置 Release 签名，暂时无法编译'
             return ''
@@ -239,10 +224,25 @@ export default {
         clearInterval(this.clockTimer)
     },
     methods: {
-        formatBytes,
-        short(commit) {
-            return (commit || '').slice(0, 8) || '—'
+        changeServer() {
+            sessionStorage.setItem('huluwa.buildServer', this.serverId)
+            this.status = { ...this.status, workerOnline: false, source: {} }
+            this.load()
         },
+        async addServer() {
+            const node = await createAndroidServer(this.serverName)
+            this.enrollment = `节点 ID：${node.id}\n密钥（仅显示一次）：${node.token}\n主服务地址：${window.location.origin}`
+            this.serverName = ''
+            this.serverId = node.id
+            this.changeServer()
+        },
+        async removeServer() {
+            if (!window.confirm('删除所选构建节点？该节点的密钥将立即失效。')) return
+            await deleteAndroidServer(this.serverId)
+            this.serverId = 'local'
+            this.changeServer()
+        },
+        formatBytes,
         typeLabel(type) {
             return type === 'BUILD' ? '编译 APK' : '更新代码'
         },
@@ -258,10 +258,6 @@ export default {
             if (['QUEUED', 'RUNNING', 'CANCELLING'].includes(status)) return 'amber'
             return 'muted'
         },
-        formatTime(value) {
-            if (!value) return '—'
-            return String(value).replace('T', ' ').slice(0, 16)
-        },
         /** 任务耗时：未结束的任务以当前时钟兜底（对齐安卓 elapsedLabel） */
         elapsed(task) {
             const start = Date.parse(String(task.startedAt || task.createdAt || '').replace(' ', 'T'))
@@ -270,13 +266,12 @@ export default {
             const seconds = Math.max(0, Math.floor((end - start) / 1000))
             return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
         },
-        isDownloadable(task) {
-            return Boolean(task && task.type === 'BUILD' && task.status === 'SUCCESS' && task.artifactName && task.apkSize > 0)
-        },
         async load() {
+            const serverId = this.serverId
             this.tasks = { ...this.tasks, loading: true }
             try {
-                const status = await getAndroidStatus()
+                const status = await getAndroidStatus(undefined, serverId)
+                if (serverId !== this.serverId) return
                 this.status = { ...this.status, ...(status || {}) }
                 this.connectionError = false
                 const tasks = await getAndroidTasks()
@@ -293,12 +288,14 @@ export default {
         },
         /** 每秒轮询：状态 + 任务 + 选中任务的增量日志 */
         async poll() {
+            const serverId = this.serverId
             if (this.connectionError) {
                 this.load()
                 return
             }
             try {
-                const status = await getAndroidStatus()
+                const status = await getAndroidStatus(undefined, serverId)
+                if (serverId !== this.serverId) return
                 this.status = { ...this.status, ...(status || {}) }
                 if (!this.selectedId) {
                     this.selectedId = (this.activeTask && this.activeTask.id) || (this.tasks.data[0] && this.tasks.data[0].id) || null
@@ -347,20 +344,11 @@ export default {
                 // 日志接口失败下一轮自动重试
             }
         },
-        selectTask(task) {
-            if (this.selectedId === task.id) return
-            this.selectedId = task.id
-            this.logs = ''
-            this.cursor = 0
-            this.logComplete = false
-            this.follow = true
-            this.refreshLogs()
-        },
         async submit(type) {
             if (!this.canUpdate || this.submitting) return
             this.submitting = type
             try {
-                const task = type === 'BUILD' ? await buildAndroidApk() : await updateAndroidCode()
+                const task = type === 'BUILD' ? await buildAndroidApk(this.serverId) : await updateAndroidCode(this.serverId)
                 message.success(type === 'BUILD' ? '已提交 APK 编译任务' : '已提交代码更新任务')
                 this.selectedId = task.id
                 this.logs = ''
@@ -376,7 +364,7 @@ export default {
         cancelTask(task) {
             this.$dialog.warning({
                 title: '取消构建任务',
-                content: `确定取消「${this.typeLabel(task.type)} #${task.id}」？构建容器会停止当前进程，未完成的产物会被清理。`,
+                content: `确定取消「${this.typeLabel(task.type)} #${task.id}」？构建节点会停止当前进程，未完成的产物会被清理。`,
                 positiveText: '取消任务',
                 negativeText: '再等等',
                 onPositiveClick: async () => {
@@ -438,8 +426,9 @@ export default {
         showHostInfo() {
             const status = this.status
             const lines = [
+                `所选服务器：${(status.servers || []).find(s => s.id === this.serverId)?.name || this.serverId}`,
                 `构建服务：${status.enabled ? '已启用' : '未启用'}`,
-                `构建容器：${status.workerOnline ? '在线' : '离线'}`,
+                `构建节点：${status.workerOnline ? '在线' : '离线'}`,
                 `签名配置：${status.signingReady ? '已配置' : '未配置'}`,
                 `分支：${status.branch || 'master'}`
             ]
@@ -635,60 +624,4 @@ export default {
     color: var(--muted);
 }
 
-.history-tip {
-    font-size: 11px;
-    color: var(--muted);
-}
-
-.task-row {
-    cursor: pointer;
-    padding: 14px;
-}
-
-.task-row.selected {
-    background: var(--soft-green);
-    border-color: rgba(32, 108, 84, .35);
-}
-
-.task-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.task-id {
-    font-size: 11px;
-    color: var(--muted);
-}
-
-.task-head strong {
-    flex: 1;
-    min-width: 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--ink);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.task-meta,
-.task-foot {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    flex-wrap: wrap;
-}
-
-.task-spacer {
-    flex: 1;
-}
-
-.task-hint {
-    font-size: 11px;
-    color: var(--muted);
-}
 </style>

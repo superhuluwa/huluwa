@@ -54,13 +54,8 @@ import kotlinx.serialization.json.*
     val session = ui.selected ?: return
     var menu by rememberSaveable(session.id) { mutableStateOf(false) }
     var information by rememberSaveable(session.id) { mutableStateOf(false) }
+    var usageInformation by rememberSaveable(session.id) { mutableStateOf(false) }
     var deleting by rememberSaveable(session.id) { mutableStateOf(false) }
-    val status = when {
-        ui.loadingSession -> "正在加载"
-        session.running || session.status == "error" || session.status == "interrupted" -> session.statusLabel
-        ui.connected -> "实时同步"
-        else -> "自动同步"
-    }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = Color.White,
@@ -72,24 +67,10 @@ import kotlinx.serialization.json.*
                     Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
-                        Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                AiReconnectingIndicator(ui.reconnecting, Modifier.padding(start = 8.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                AiStatusDot(
-                                    when {
-                                        session.status == "error" -> HuluwaColors.Danger
-                                        ui.connected || session.running -> HuluwaColors.Pine
-                                        else -> AiColors.Muted
-                                    }
-                                )
-                                Text("${session.providerLabel} · ${session.modelLabel} · $status", style = MaterialTheme.typography.labelMedium,
-                                    color = AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                        Text(
+                            session.title, Modifier.weight(1f).padding(start = 4.dp),
+                            style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作", Modifier.size(20.dp), tint = AiColors.Muted) }
                     }
                     AiDivider()
@@ -99,13 +80,14 @@ import kotlinx.serialization.json.*
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             ui.error?.let { AiError(it, vm::clearError) }
-            AiConversation(ui, vm, Modifier.weight(1f))
+            AiConversation(ui, vm, Modifier.weight(1f), ui.selectedModelLabel, ui.selectedEffortLabel) { usageInformation = true }
         }
     }
     if (menu) {
         AiSheet("对话操作", { menu = false }) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
                 AiConversationAction(Icons.Outlined.Info, "对话信息", { menu = false; information = true })
+                AiConversationAction(Icons.Outlined.DataUsage, "上下文与 Token", { menu = false; usageInformation = true })
                 AiConversationAction(Icons.Outlined.FolderOpen, "返回首页选择模型", { menu = false; vm.closeSession() })
                 AiConversationAction(Icons.Outlined.DeleteOutline, "删除对话", { menu = false; deleting = true },
                     enabled = !session.running && !ui.working, color = HuluwaColors.Danger)
@@ -119,12 +101,14 @@ import kotlinx.serialization.json.*
                     AiInfoField("对话标题", session.title)
                     AiInfoField("项目路径", session.projectPath, monospace = true)
                     AiInfoField("供应商与模型", session.targetLabel)
+                    AiInfoField("思考强度", ui.selectedEffortLabel)
                     AiInfoField("当前状态", "${session.statusLabel} · ${if (ui.connected) "实时连接" else "自动同步"}")
                     AiInfoField("消息数量", "${session.messages.size} 条")
                 }
             }
         }
     }
+    if (usageInformation) AiUsageSheet(session, ui.selectedModelLabel, ui.selectedEffortLabel) { usageInformation = false }
     if (deleting) AiDeleteDialog(session, { deleting = false }) { deleting = false; vm.delete(session) }
 }
 
@@ -145,7 +129,10 @@ import kotlinx.serialization.json.*
     }
 }
 
-@Composable private fun AiConversation(ui: AiUiState, vm: AiViewModel, modifier: Modifier) {
+@Composable private fun AiConversation(
+    ui: AiUiState, vm: AiViewModel, modifier: Modifier, modelLabel: String, effortLabel: String,
+    usageDetails: () -> Unit,
+) {
     val session = ui.selected ?: return
     val motion = rememberAiConversationMotion(session, ui.loadingSession)
     val entries = motion.entries
@@ -202,6 +189,12 @@ import kotlinx.serialization.json.*
                     color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
             }
             session.approvals.firstOrNull()?.let { AiApprovalCard(it, ui.working, approvalMaxHeight, vm::answer) }
+            Box(
+                Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AiUsageCard(session, modelLabel, effortLabel, usageDetails, Modifier.widthIn(max = 760.dp).fillMaxWidth())
+            }
             AiComposer(ui, session, { scroll.following = true; vm.send() }, vm::stop, vm::draft)
         }
     }
@@ -210,12 +203,8 @@ import kotlinx.serialization.json.*
 /** 输入框上方统一展示模型与用量轻卡片，输入框保留原有编辑和发送行为。 */
 @Composable private fun AiComposer(ui: AiUiState, session: AiSession, send: () -> Unit, stop: () -> Unit, draft: (String) -> Unit) {
     val actionEnabled = if (session.running) !ui.working else ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession
-    val model = ui.providers.find { it.id == session.providerId }?.models?.find { it.id == session.model.orEmpty() }
     Surface(color = Color.White) {
         Column {
-            Box(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
-                AiConversationUsageCard(session, model, Modifier.widthIn(max = 760.dp).fillMaxWidth())
-            }
             Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
                 Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(), color = AiColors.Background,
                     border = BorderStroke(1.dp, AiColors.Line), shape = RoundedCornerShape(14.dp)) {

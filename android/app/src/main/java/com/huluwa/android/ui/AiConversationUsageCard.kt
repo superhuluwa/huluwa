@@ -4,12 +4,14 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.NorthEast
 import androidx.compose.material.icons.outlined.SouthWest
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -22,41 +24,52 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.huluwa.android.data.AiModel
 import com.huluwa.android.data.AiSession
 import java.util.Locale
 import kotlin.math.roundToInt
 
 /** 模型信息与真实用量共用一张轻卡片；缺失统计不按零用量展示。 */
-@Composable internal fun AiConversationUsageCard(session: AiSession, model: AiModel?, modifier: Modifier = Modifier) {
+@Composable internal fun AiConversationUsageCard(
+    session: AiSession, modelLabel: String, effortLabel: String, details: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val usage = session.usage
-    val used = usage?.contextTokens?.takeIf { it >= 0 }
-    val capacity = usage?.contextWindow?.takeIf { it > 0 }
-    val ratio = if (used != null && capacity != null) used.toDouble() / capacity else null
+    val contextUsage = usage?.context
+    val used = contextUsage?.usedTokens?.takeIf { it >= 0 }
+    val capacity = contextUsage?.windowTokens?.takeIf { it > 0 }
+    val ratio = contextUsage?.percentage?.div(100)
     val percent = ratio?.let { (it * 100).roundToInt().toString() } ?: "—"
-    val context = "$percent%(${formatAiTokensK(used)}/${formatAiTokensK(capacity)})"
-    val effort = model?.effortLabel?.ifBlank { "默认" } ?: "—"
+    val estimate = if (contextUsage?.estimated == true && ratio != null) "≈" else ""
+    val context = if (contextUsage?.updating == true) "更新中(${formatAiTokensK(used)}/${formatAiTokensK(capacity)})"
+        else "$estimate$percent%(${formatAiTokensK(used)}/${formatAiTokensK(capacity)})"
+    val tokens = usage?.lastTurn ?: usage?.sessionTotal
     val fontScale = LocalDensity.current.fontScale
     Surface(modifier, color = AiColors.Background, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, AiColors.Line)) {
         Column {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看模型与用量详情", onClick = details)
+                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                 AiAgentLogo(session.provider, Modifier.size(22.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(session.providerLabel, style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.Normal),
                         color = AiColors.Muted, maxLines = 1)
-                    Text(model?.title ?: session.modelLabel, style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
+                    Text(modelLabel, style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp, lineHeight = 17.sp),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(7.dp)) {
-                    Text("思考 $effort", Modifier.padding(horizontal = 8.dp, vertical = 5.dp), color = HuluwaColors.Pine,
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.Normal))
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("思考 $effortLabel", color = HuluwaColors.Pine,
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.Normal))
+                        Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(12.dp), tint = HuluwaColors.Pine)
+                    }
                 }
             }
             AiDivider()
@@ -79,13 +92,13 @@ import kotlin.math.roundToInt
                     }
                     if (stackedAmounts) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            AiTokenAmount("输入", usage?.inputTokens, Icons.Outlined.SouthWest)
-                            AiTokenAmount("输出", usage?.outputTokens, Icons.Outlined.NorthEast)
+                            AiTokenAmount("输入", tokens?.inputTokens, Icons.Outlined.SouthWest)
+                            AiTokenAmount("输出", tokens?.outputTokens, Icons.Outlined.NorthEast)
                         }
                     } else {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            AiTokenAmount("输入", usage?.inputTokens, Icons.Outlined.SouthWest)
-                            AiTokenAmount("输出", usage?.outputTokens, Icons.Outlined.NorthEast)
+                            AiTokenAmount("输入", tokens?.inputTokens, Icons.Outlined.SouthWest)
+                            AiTokenAmount("输出", tokens?.outputTokens, Icons.Outlined.NorthEast)
                         }
                     }
                 }

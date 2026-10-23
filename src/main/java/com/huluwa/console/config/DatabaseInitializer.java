@@ -32,6 +32,7 @@ public class DatabaseInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        addColumnIfMissing("android_build_task", "server_id", "TEXT NOT NULL DEFAULT 'local'");
         for (String table : REQUIRED_TABLES) {
             Integer found = jdbcTemplate.queryForObject(
                     "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = ?",

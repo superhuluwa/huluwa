@@ -1,13 +1,12 @@
 """Single Android build worker. The shared directory is its durable job mailbox."""
 import codecs
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import selectors
+import queue
 import shutil
 import signal
 import subprocess
@@ -17,12 +16,15 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 DATA = Path(os.environ.get('HULUWA_ANDROID_DATA', '/build-data'))
-WORK = Path('/workspace')
+WORK = Path(os.environ.get('HULUWA_ANDROID_WORK', '/workspace'))
 TASKS = DATA / 'tasks'
 REPO = WORK / 'repository.git'
 REPOSITORY = os.environ.get('HULUWA_ANDROID_REPOSITORY', 'https://gitee.com/wangjing71/huluwa.git')
 BRANCH = os.environ.get('HULUWA_ANDROID_BRANCH', 'master')
-SIGNING = Path('/signing')
+SIGNING = Path(os.environ.get('HULUWA_ANDROID_SIGNING', '/signing'))
+CREDENTIALS = Path(os.environ.get('HULUWA_ANDROID_CREDENTIALS', '/credentials'))
+BUILDER = Path(__file__).resolve().parent
+NODE_ID = os.environ.get('HULUWA_ANDROID_NODE_ID', 'local')
 STOP = threading.Event()
 CURRENT = None
 SECRET_VALUES = []
@@ -36,7 +38,15 @@ def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + '.tmp')
     temporary.write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
-    os.replace(temporary, path)
+    # A Windows reader or antivirus scanner can briefly deny rename access.
+    for attempt in range(20):
+        try:
+            os.replace(temporary, path)
+            break
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(.05)
 
 
 def read_json(path, default=None):
@@ -91,34 +101,53 @@ class Job:
 
     def run(self, arguments, cwd=None, env=None, capture=False, check=True):
         self.check()
+        executable = Path(arguments[0]).name
         process_env = os.environ.copy()
         process_env.update({
-            'GIT_TERMINAL_PROMPT': '0', 'GIT_ASKPASS': '/opt/builder/git-askpass.py',
-            'GRADLE_USER_HOME': '/workspace/gradle',
+            'GIT_TERMINAL_PROMPT': '0',
+            'GRADLE_USER_HOME': os.environ.get('GRADLE_USER_HOME', str(WORK / 'gradle')),
         })
+        if os.name != 'nt':
+            process_env['GIT_ASKPASS'] = str(BUILDER / 'git-askpass.py')
         if env:
             process_env.update(env)
+        if os.name == 'nt' and str(arguments[0]).lower().endswith(('.bat', '.cmd')):
+            # Pass a command line to cmd.exe so paths containing spaces work too.
+            arguments = subprocess.list2cmdline([os.environ.get('COMSPEC', 'cmd.exe')]) + ' /d /s /c "' + subprocess.list2cmdline(arguments) + '"'
+        options = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
         process = subprocess.Popen(arguments, cwd=cwd, env=process_env,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   start_new_session=True)
+                                   **options)
+        from process_tree import ProcessTree
+        tree = ProcessTree(process)
         decoder = codecs.getincrementaldecoder('utf-8')('replace')
         output = []
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ)
-        try:
-            while selector.get_map():
-                self.check()
-                for key, _ in selector.select(timeout=0.3):
-                    chunk = os.read(key.fileobj.fileno(), 16384)
+        chunks = queue.Queue(maxsize=128)
+        def read_output():
+            try:
+                while True:
+                    chunk = os.read(process.stdout.fileno(), 16384)
+                    chunks.put(chunk)
                     if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    text = decoder.decode(chunk)
-                    # Secret-bearing tools are captured privately; only their validated result is logged.
-                    if capture:
-                        output.append(text)
-                    else:
-                        log(self.directory, text)
+                        return
+            except (OSError, ValueError):
+                chunks.put(b'')
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        try:
+            while True:
+                self.check()
+                try:
+                    chunk = chunks.get(timeout=0.3)
+                except queue.Empty:
+                    continue
+                if not chunk:
+                    break
+                text = decoder.decode(chunk)
+                if capture:
+                    output.append(text)
+                else:
+                    log(self.directory, text)
             tail = decoder.decode(b'', final=True)
             if capture:
                 output.append(tail)
@@ -126,21 +155,14 @@ class Job:
                 log(self.directory, tail)
             code = process.wait(timeout=5)
             if check and code != 0:
-                raise RuntimeError(f'{Path(arguments[0]).name} 执行失败（退出码 {code}），请查看上方日志。')
+                raise RuntimeError(f'{executable} 执行失败（退出码 {code}），请查看上方日志。')
             return ''.join(output) if capture else code
         finally:
-            selector.close()
             # The Gradle launcher can exit before its descendants. Stop the entire
             # group even when the launcher itself has already exited.
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+            tree.close()
             process.wait()
+            reader.join(timeout=2)
             process.stdout.close()
 
     def update(self):
@@ -218,7 +240,7 @@ class Job:
         if not keystore.is_relative_to(SIGNING.resolve()) or not keystore.is_file():
             raise RuntimeError('签名文件不存在，storeFile 必须指向签名卷内的文件。')
         SECRET_VALUES.extend([signing['storePassword'], signing['keyPassword']])
-        token = Path('/credentials/git-token')
+        token = CREDENTIALS / 'git-token'
         if token.is_file():
             SECRET_VALUES.append(token.read_text().strip())
         job_dir = WORK / 'jobs' / str(self.request['id'])
@@ -241,17 +263,18 @@ class Job:
                 'LC_ALL': 'C.UTF-8',
             }
             self.stage('COMPILING', '执行 Gradle Release 编译，首次运行需要下载依赖……')
-            self.run(['bash', './gradlew', ':app:assembleRelease', '--no-daemon', '--console=plain',
+            (android / 'keystore.properties').unlink(missing_ok=True)
+            self.run(([str(android / 'gradlew.bat')] if os.name == 'nt' else ['bash', './gradlew']) + [':app:assembleRelease', '--no-daemon', '--console=plain',
                       '--stacktrace', '--build-cache', '--max-workers=2',
                       '-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8',
                       '-Pkotlin.compiler.execution.strategy=in-process',
-                      '--init-script', '/opt/builder/android.init.gradle'], cwd=android, env=env)
+                      '--init-script', str(BUILDER / 'android.init.gradle')], cwd=android, env=env)
             self.stage('VERIFYING', '读取 APK 信息并校验 Release 签名……')
             candidates = list((android / 'app/build/outputs/apk/release').glob('*.apk'))
             if len(candidates) != 1:
                 raise RuntimeError('预期生成一个 Release APK，实际产物数量不符。')
             apk = candidates[0]
-            signature_output = self.run(['apksigner', 'verify', '--print-certs', str(apk)], capture=True)
+            signature_output = self.run([android_tool('apksigner'), 'verify', '--print-certs', str(apk)], capture=True)
             digest = re.search(r'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)', signature_output)
             if not digest:
                 raise RuntimeError('APK 未通过签名校验。')
@@ -265,7 +288,7 @@ class Job:
             expected = hashlib.sha256(base64.b64decode(certificate.group(1))).hexdigest()
             if digest.group(1).lower() != expected:
                 raise RuntimeError('APK 签名与配置的 Release 证书不一致。')
-            badging = self.run(['aapt', 'dump', 'badging', str(apk)], capture=True)
+            badging = self.run([android_tool('aapt'), 'dump', 'badging', str(apk)], capture=True)
             package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
             if (not package or package.group(1) != 'com.huluwa.android'
                     or int(package.group(2)) != self.request['versionCode']
@@ -297,9 +320,9 @@ class Job:
             shutil.rmtree(job_dir, ignore_errors=True)
 
     def execute(self):
-        credential = read_json(Path('/credentials/git-credentials.json'), {})
+        credential = read_json(CREDENTIALS / 'git-credentials.json', {})
         SECRET_VALUES[:] = [credential.get('password', '')]
-        token_file = Path('/credentials/git-token')
+        token_file = CREDENTIALS / 'git-token'
         if token_file.is_file():
             SECRET_VALUES.append(token_file.read_text().strip())
         result = {'status': 'SUCCESS', 'stage': 'DONE'}
@@ -328,7 +351,22 @@ class Job:
 
 def file_sha256(path):
     with path.open('rb') as source:
-        return hashlib.file_digest(source, 'sha256').hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+        return digest.hexdigest()
+
+
+def android_tool(name):
+    if os.name != 'nt':
+        return name
+    root = Path(os.environ.get('ANDROID_HOME', os.environ.get('ANDROID_SDK_ROOT', ''))) / 'build-tools'
+    candidates = sorted(root.glob('*'), key=lambda p: tuple(int(n) for n in re.findall(r'\d+', p.name)), reverse=True)
+    for candidate in candidates:
+        tool = candidate / (name + ('.bat' if name == 'apksigner' else '.exe'))
+        if tool.is_file():
+            return str(tool)
+    raise RuntimeError(f'Android SDK 缺少 {name}，请安装 Build Tools。')
 
 
 def read_properties(path):
@@ -353,6 +391,7 @@ def heartbeat():
             'heartbeat': time.time(), 'currentTask': CURRENT,
             'repository': REPOSITORY, 'branch': BRANCH,
             'signingReady': (SIGNING / 'keystore.properties').is_file(),
+            'platform': 'windows' if os.name == 'nt' else 'linux',
         })
         STOP.wait(2)
 
@@ -361,12 +400,27 @@ def main():
     global CURRENT
     TASKS.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
-    lock = (WORK / 'worker.lock').open('w')
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    lock = (WORK / 'worker.lock').open('a+b')
+    if os.name == 'nt':
+        import msvcrt
+        lock.seek(0)
+        if lock.read(1) == b'':
+            lock.write(b'0')
+            lock.flush()
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: STOP.set())
+    if os.name == 'nt':
+        signal.signal(signal.SIGBREAK, lambda *_: STOP.set())
     # A prior process may have died mid-build. Never silently rerun a started job.
     for directory in TASKS.iterdir():
+        request = read_json(directory / 'running.json', read_json(directory / 'request.json', {}))
+        if request.get('serverId', 'local') != NODE_ID:
+            continue
         if directory.is_dir() and ((directory / 'state.json').is_file() or (directory / 'running.json').is_file()) and not (directory / 'result.json').exists():
             state = read_json(directory / 'state.json', {})
             atomic_json(directory / 'result.json', {
@@ -384,7 +438,7 @@ def main():
         directories = sorted((p for p in TASKS.iterdir() if p.is_dir() and p.name.isdigit()), key=lambda p: int(p.name))
         for directory in directories:
             request = read_json(directory / 'request.json')
-            if request and not (directory / 'result.json').exists():
+            if request and request.get('serverId', 'local') == NODE_ID and not (directory / 'result.json').exists():
                 # Claim once before running. A history cleanup must never turn an
                 # already-completed request back into an executable queue entry.
                 try:

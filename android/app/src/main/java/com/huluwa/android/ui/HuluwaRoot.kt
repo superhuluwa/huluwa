@@ -47,7 +47,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Ai -> Icons.Outlined.AutoAwesome
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
-private enum class RootPage { Home, Chat, AiConversation }
+private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
 
 @Composable fun HuluwaRoot(vm: HuluwaViewModel) {
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -64,6 +64,7 @@ private enum class RootPage { Home, Chat, AiConversation }
     LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(ui.chat.session != null && ui.sheet == null) { vm.closeChat() }
+    BackHandler(ui.serverStatusVisible && ui.sheet == null) { vm.closeServerStatus() }
     BackHandler(aiActive && aiUi.authenticated && aiUi.selected != null) { aiVm.closeSession() }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
@@ -72,6 +73,7 @@ private enum class RootPage { Home, Chat, AiConversation }
     } else {
         val activeSession = ui.chat.session
         val page = when {
+            ui.serverStatusVisible -> RootPage.ServerStatus
             activeSession != null -> RootPage.Chat
             aiActive && aiUi.authenticated && aiUi.selected != null -> RootPage.AiConversation
             else -> RootPage.Home
@@ -110,6 +112,12 @@ private enum class RootPage { Home, Chat, AiConversation }
                                 reconnecting = reconnecting && ui.tab != MainTab.Ai) {
                                 // 会话列表首次加载 / 刷新时，在标题右侧显示菊花；与二级页同一套加载提示。
                                 if (ui.tab.isSessionTab) TitleLoadingIndicator(!ui.sessions.loaded || ui.sessions.loading)
+                                if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
+                                if (ui.tab == MainTab.Mine) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    TitleLoadingIndicator(ui.mine.loading)
+                                    IconButton(vm::refreshMine, enabled = !ui.mine.loading) { Icon(Icons.Outlined.Refresh, "刷新服务状态") }
+                                    IconButton({ vm.showSheet(AppSheet.Account) }) { Icon(Icons.Outlined.Settings, "连接与账户") }
+                                }
                                 // AI 首页的刷新与「服务连接 / 退出」菜单同样收在标题栏右侧。
                                 if (ui.tab == MainTab.Ai) aiHeader?.let { AiHeaderActions(it) }
                             }
@@ -147,6 +155,8 @@ private enum class RootPage { Home, Chat, AiConversation }
                 }
             } else Box(Modifier.fillMaxSize().zIndex(1f)) {
                 when {
+                    destination == RootPage.ServerStatus ->
+                        holder.SaveableStateProvider("server-status") { ServerStatusScreen(ui, vm, snackbar) }
                     destination == RootPage.AiConversation ->
                         holder.SaveableStateProvider("ai-session:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)

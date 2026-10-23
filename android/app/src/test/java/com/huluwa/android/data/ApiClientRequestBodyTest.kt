@@ -1,6 +1,7 @@
 package com.huluwa.android.data
 
 import okhttp3.Request
+import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -36,7 +37,9 @@ class ApiClientRequestBodyTest {
     /** 带 body 的 POST 原样透传，不做二次包装 */
     @Test fun postWithBodyKeepsPayload() {
         val request = build("POST", """{"content":"hi"}""")
-        assertEquals("""{"content":"hi"}""", request.body!!.toString())
+        val bytes = Buffer()
+        request.body!!.writeTo(bytes)
+        assertEquals("""{"content":"hi"}""", bytes.readUtf8())
     }
 
     /** DELETE 可以没有正文：批量删除才带 body */
