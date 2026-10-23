@@ -68,7 +68,7 @@ class HlsSubscriptionServiceTest {
     }
 
     @Test
-    void oneClickSubscribeQueuesExistingEpisodesWithAutomaticDefaults() {
+    void oneClickSubscribeRecordsExistingEpisodesAndQueuesOnlyFutureUpdates() {
         DyttSearchService.DyttItem original = detail(65, "old");
         when(source.detail(anyString(), anyString())).thenReturn(new DyttSearchService.DyttItem(
                 original.id(), "剧名（第二季）更新至第65集", "2026", "", "", "", "https://dyttzyw.com/series/42", "", "",
@@ -79,8 +79,16 @@ class HlsSubscriptionServiceTest {
         assertEquals(60L, HlsSupport.number(subscription.get("intervalMinutes")));
         assertEquals(1L, HlsSupport.number(subscription.get("fromEpisode")));
         assertEquals("m3u8", subscription.get("sourceName"));
-        assertEquals(65, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
+        assertEquals(65, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'skipped'", Integer.class));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
         verify(source, times(1)).detail(anyString(), anyString());
+
+        when(source.detail(anyString(), anyString())).thenReturn(detail(66, "new"));
+        long id = HlsSupport.number(subscription.get("id"));
+        assertEquals(1, subscriptions.check(id).get("added"));
+        assertEquals(66, db.queryForObject("SELECT episode FROM hls_download_task WHERE status = 'pending'", Integer.class));
+        assertEquals(65, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'skipped'", Integer.class));
+        assertEquals(0, subscriptions.check(id).get("added"));
     }
 
     @Test
@@ -111,7 +119,8 @@ class HlsSubscriptionServiceTest {
         Map<?, ?> subscription = (Map<?, ?>) subscriptions.quickSubscribe(new HlsRequests.QuickSubscription(null, "42")).get("subscription");
         assertEquals("m3u8", subscription.get("sourceName"));
         assertEquals("", subscription.get("year"));
-        assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
+        assertEquals(2, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'skipped'", Integer.class));
+        assertEquals(0, db.queryForObject("SELECT COUNT(*) FROM hls_download_task WHERE status = 'pending'", Integer.class));
     }
 
     @Test

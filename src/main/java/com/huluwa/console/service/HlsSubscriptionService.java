@@ -102,7 +102,7 @@ public class HlsSubscriptionService {
         return saveSubscription(body, source.detail(HlsSupport.providerUrl(body.apiUrl()), HlsSupport.resourceId(body.resId())));
     }
 
-    /** 卡片只提交作品身份，参数从完整资源目录生成；再次点击保留原有订阅设置。 */
+    /** 卡片只提交作品身份，首次记录已有剧集并只追后续更新；再次点击保留原有订阅设置。 */
     public synchronized Map<String, Object> quickSubscribe(HlsRequests.QuickSubscription body) {
         downloads.requireEnvironment();
         String api = HlsSupport.providerUrl(body.apiUrl());
@@ -126,7 +126,7 @@ public class HlsSubscriptionService {
                 }).findFirst().orElseThrow(() -> new BusinessException(400, "该资源暂没有可自动下载的正片剧集线路"));
         String year = HlsSupport.text(detail.year()).matches("[12][0-9]{3}") ? detail.year() : "";
         return saveSubscription(new HlsRequests.Subscription(api, resId, HlsSupport.defaultTitle(detail.title()),
-                year, season, selected.name(), 60, 1, true, detail.url(), null, null, false), detail);
+                year, season, selected.name(), 60, 1, false, detail.url(), null, null, false), detail);
     }
 
     private Map<String, Object> saveSubscription(HlsRequests.Subscription body, DyttSearchService.DyttItem detail) {
@@ -146,7 +146,7 @@ public class HlsSubscriptionService {
         if (episodes.isEmpty()) throw new BusinessException(400, "该线路没有可识别季集编号的正片，请选择剧集资源");
         String now = HlsSupport.now();
         boolean existing = !old.isEmpty();
-        boolean downloadExisting = !Boolean.FALSE.equals(body.downloadExisting());
+        boolean downloadExisting = Boolean.TRUE.equals(body.downloadExisting());
         long id = transaction.execute(status -> {
             db.update("""
                     INSERT INTO hls_subscription(series_key, api_url, res_id, title, year, cover, season, source_name,

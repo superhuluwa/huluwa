@@ -54,7 +54,7 @@ import { DownloadHls, GetHlsDetail, GetHlsSettings, GetHlsSubscriptions, Subscri
 
 const API = 'https://dyttzyw.com/api.php/provide/vod/'
 const blank = () => ({ apiUrl: API, resId: '', title: '', year: '', season: 1, sourceName: '', intervalMinutes: 60,
-    fromEpisode: 1, initialMode: 'all', episode: null, referer: '', userAgent: '', cookie: '', clearCookie: false })
+    fromEpisode: 1, initialMode: 'future', episode: null, referer: '', userAgent: '', cookie: '', clearCookie: false })
 
 export default {
     name: 'HlsResourceDialog',
@@ -63,7 +63,7 @@ export default {
         play: { type: Object, default: null }, sourceName: { type: String, default: '' } },
     emits: ['update:show', 'saved'],
     data() { return { form: blank(), settings: null, subscription: null, sources: [], loading: false, loaded: false, saving: false,
-        initialOptions: [{ label: '下载当前已发布剧集，并追后续更新', value: 'all' }, { label: '只下载后续新增剧集', value: 'future' }] } },
+        initialOptions: [{ label: '只下载后续新增剧集', value: 'future' }, { label: '下载当前已发布剧集，并追后续更新', value: 'all' }] } },
     computed: {
         visible: { get() { return this.show }, set(value) { this.$emit('update:show', value) } },
         editing() { return !!this.subscription && this.mode === 'subscribe' },

@@ -446,7 +446,7 @@ export default {
             try {
                 const result = await QuickSubscribeHls({ resId: String(this.parsedPayload.id || ''), apiUrl: this.parsedPayload.apiUrl })
                 this.onSubscriptionSaved(result)
-                window.$message?.success(result.message || '已订阅，剧集将自动下载')
+                window.$message?.success(result.message || '已订阅，只下载后续新增剧集')
             } catch (error) {
                 // 请求拦截器已提示，失败后仍可再次点击订阅。
             } finally {
