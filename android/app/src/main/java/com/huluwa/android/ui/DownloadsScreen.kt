@@ -2,6 +2,7 @@ package com.huluwa.android.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -37,6 +39,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -103,9 +106,9 @@ private enum class DownloadFilter(val title: String) {
             scope.launch { listState.scrollToItem(0) }
         })
         HorizontalDivider(color = HuluwaColors.Line)
-        // 连接异常仍由共用标题栏提示；内容区保留具体业务错误及有数据时的刷新进度。
-        Feedback(ui.downloads.loading && tasks.isNotEmpty(), ui.downloads.error.takeUnless { it.isServerUnreachable() },
-            { vm.refreshDownloads() })
+        // 内容区仅保留业务错误和重试入口，连接异常由共用标题栏提示。
+        Feedback(loading = false, error = ui.downloads.error.takeUnless { it.isServerUnreachable() },
+            onRetry = { vm.refreshDownloads() })
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)) {
             if (tasks.isEmpty()) item(key = "empty") {
@@ -230,6 +233,7 @@ private enum class DownloadFilter(val title: String) {
 }
 
 @Composable private fun DownloadListRow(task: DownloadTask, enabled: Boolean, vm: HuluwaViewModel) {
+    val context = LocalContext.current
     val failed = task.hasDownloadIssue()
     val progress = when {
         task.completed -> 1f
@@ -280,8 +284,33 @@ private enum class DownloadFilter(val title: String) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 DownloadRowStatus(task)
             }
+            Spacer(Modifier.height(8.dp))
+            DownloadSavePath(task.savePath) { copyDownloadPath(task.savePath, context, vm) }
         }
     }
+}
+
+/** 保存位置作为独立辅助行，单行中间省略，复制时始终使用服务端返回的完整路径。 */
+@Composable private fun DownloadSavePath(savePath: String, onCopy: () -> Unit) {
+    val hasPath = savePath.isNotBlank()
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+        .background(HuluwaColors.SoftGreen.copy(alpha = .45f))
+        .clickable(enabled = hasPath, role = Role.Button, onClickLabel = "复制完整保存位置", onClick = onCopy)
+        .heightIn(min = 40.dp).padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Icons.Outlined.FolderOpen, null, Modifier.size(14.dp), tint = HuluwaColors.Muted)
+        Text("保存至", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+        Text(savePath.ifBlank { "由下载器管理" }, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+            color = if (hasPath) HuluwaColors.Ink else HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        if (hasPath) Icon(Icons.Outlined.ContentCopy, null, Modifier.size(12.dp), tint = HuluwaColors.Muted)
+    }
+}
+
+private fun copyDownloadPath(savePath: String, context: Context, vm: HuluwaViewModel) {
+    if (savePath.isBlank()) return
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText("保存路径", savePath))
+    vm.notify("保存路径已复制")
 }
 
 @Composable private fun DownloadRowStatus(task: DownloadTask) {
@@ -326,8 +355,7 @@ private enum class DownloadFilter(val title: String) {
             DropdownMenuItem(text = { Text("复制保存路径") }, enabled = task.savePath.isNotBlank(),
                 leadingIcon = { Icon(Icons.Outlined.FolderOpen, null) }, onClick = {
                     menu = false
-                    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("保存路径", task.savePath))
-                    vm.notify("保存路径已复制")
+                    copyDownloadPath(task.savePath, context, vm)
                 })
             DropdownMenuItem(text = { Text("详细信息") }, onClick = { menu = false; showDownloadDetails(task, vm) })
         }

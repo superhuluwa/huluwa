@@ -15,3 +15,16 @@
 .layout-a .task-row{padding-top:14px;padding-bottom:13px}.layout-a .task-icon{height:38px}.layout-a .task-meta{margin-top:2px;line-height:16px}.layout-a .progress-track{margin-top:8px}.layout-a .task-footer{margin-top:6px}.filter-sort{margin-left:auto;min-width:22px;justify-content:center;padding-bottom:10px}.filter-sort svg{width:15px;height:15px}.layout-a .list-scroll{padding-top:4px}
 
 .layout-a .filters{gap:8px}.layout-a .filter{min-width:44px}.layout-a .filter-sort{min-width:44px;min-height:44px}
+
+/* 极简清单：保存位置与任务正文对齐，浅底辅助行承接完整路径复制。 */
+.layout-a .task-save-path{display:flex;align-items:center;gap:6px;min-height:40px;width:100%;padding:6px 8px;margin-top:8px;border-radius:8px;background:rgba(230,239,226,.45);text-align:left;font-size:9px;line-height:16px;color:var(--muted)}
+.layout-a .task-save-path:hover{background:var(--soft)}
+.layout-a .task-save-path>svg{width:12px;height:12px;flex-shrink:0;opacity:.8}
+.layout-a .save-path-prefix{display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0}
+.layout-a .save-path-prefix svg{width:14px;height:14px}
+.layout-a .save-path-value{display:flex;flex:1;min-width:0;color:var(--ink);font-size:9px;overflow:hidden}
+.layout-a .save-path-leading{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layout-a .save-path-tail{flex-shrink:0;white-space:nowrap}
+.layout-a .task-save-path.unset{color:var(--muted);opacity:1;cursor:default}
+.layout-a .task-save-path.unset .save-path-value{color:var(--muted)}
+.layout-a .task-save-path.unset:hover{background:rgba(230,239,226,.45)}

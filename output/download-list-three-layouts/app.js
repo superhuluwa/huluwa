@@ -42,7 +42,7 @@ const originalTasks = [
  {id:'t8',title:'宇宙探索编辑部',episode:'1080P · 高清',source:'magnet',state:'done',progress:100,speed:0,received:'3.8 GB',total:'3.8 GB',path:'/media/电影/宇宙探索编辑部/Journey.to.the.West.mkv'}
 ];
 const specs = [
- {id:'a',num:'01',title:'极简清单',subtitle:'连续列表 · 优先浏览效率',tag:'推荐',caption:'去掉大卡片，用轻分隔线串起任务。标题、进度、速度固定对齐，一眼扫过所有下载。',fit:'日常使用'},
+ {id:'a',num:'01',title:'极简清单',subtitle:'连续列表 · 优先浏览效率',tag:'推荐',caption:'去掉大卡片，用轻分隔线串起任务。标题、进度、速度固定对齐，保存位置独立显示，点击即可复制。',fit:'日常使用'},
  {id:'b',num:'02',title:'状态分组',subtitle:'分组列表 · 优先处理任务',caption:'下载中、异常、等待、已完成各归一组。组内保持连续列表，优先看到需要关注的任务。',fit:'任务较多'},
  {id:'c',num:'03',title:'来源分栏',subtitle:'双栏列表 · 优先切换来源',caption:'左侧固定来源，右侧专注任务列表。三个下载器各自查看，查找与切换更有方向。',fit:'多下载器'}
 ];
@@ -57,13 +57,20 @@ const sourceTag = task => '<span class="source-tag '+task.source+'">'+sources[ta
 const progress = task => '<div class="progress-track '+task.state+'" role="progressbar" aria-label="'+safe(task.title)+'下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+task.progress+'"><i style="--progress:'+task.progress+'%"></i></div>';
 const statusNode = task => '<span class="task-state '+stateClass(task)+'">'+(stateIcon(task)?icon(stateIcon(task)):'')+statusText(task)+'</span>';
 const titleLine = task => '<div class="task-title-line"><button class="title-button" data-action="detail" data-task="'+task.id+'" aria-label="查看'+safe(task.title)+'详细信息"><span class="task-title">'+safe(task.title)+'</span></button><button class="more-button" data-action="menu" data-task="'+task.id+'" aria-label="'+safe(task.title)+'的更多操作">'+icon('more')+'</button></div>';
+function savePathRow(task) {
+ const full=task.path||'',hasPath=full.trim().length>0;
+ const tailLength=/[^\u0000-\u00ff]/.test(full.slice(-14))?10:14;
+ const leading=full.slice(0,Math.max(0,full.length-tailLength)),tail=full.slice(-tailLength);
+ const value=hasPath?'<span class="save-path-leading">'+safe(leading)+'</span><span class="save-path-tail">'+safe(tail)+'</span>':'由下载器管理';
+ return '<button class="task-save-path '+(hasPath?'':'unset')+'" data-action="copy-path" data-task="'+task.id+'" title="'+safe(hasPath?'点击复制：'+full:'由下载器管理')+'" aria-label="'+safe(hasPath?'复制完整保存位置：'+full:'保存位置由下载器管理')+'" '+(hasPath?'':'disabled')+'><span class="save-path-prefix">'+icon('folder')+'<span>保存至</span></span><span class="save-path-value">'+value+'</span>'+(hasPath?icon('copy'):'')+'</button>';
+}
 function row(task, variant, index) {
  const meta=sourceTag(task)+'<span class="meta-divider">·</span><span>'+safe(task.episode)+'</span>';
  const sizes=task.received+' / '+task.total;
  const right=task.state==='active'?'<strong>'+task.progress+'% · '+task.speed.toFixed(1)+' MB/s</strong>':statusNode(task);
  if(variant==='b') return '<article class="group-row" data-task-row="'+task.id+'"><span class="row-index">'+String(index+1).padStart(2,'0')+'</span><div class="task-content">'+titleLine(task)+'<div class="task-meta">'+meta+'</div>'+progress(task)+'<div class="task-footer"><span class="'+stateClass(task)+'">'+(task.state==='error'?safe(task.message):sizes)+'</span>'+(task.state==='active'?'<strong>'+task.progress+'% · '+task.speed.toFixed(1)+' MB/s</strong>':statusNode(task))+'</div></div></article>';
  if(variant==='c') return '<article class="task-row" data-task-row="'+task.id+'"><div class="task-content"><div class="row-heading">'+sourceTag(task)+statusNode(task)+'</div>'+titleLine(task)+'<div class="task-meta">'+safe(task.episode)+'<span class="meta-divider">·</span><span>'+task.total+'</span></div>'+progress(task)+'<div class="task-footer"><span class="'+stateClass(task)+'">'+(task.state==='error'?safe(task.message):task.received+' · '+task.progress+'%')+'</span>'+(task.state==='active'?'<strong>'+task.speed.toFixed(1)+' MB/s</strong>':'<span>'+((task.state==='done')?'已保存至目录':'')+'</span>')+'</div></div></article>';
- return '<article class="task-row" data-task-row="'+task.id+'"><div class="task-icon '+task.source+'">'+icon(sources[task.source].icon)+'</div><div class="task-content">'+titleLine(task)+'<div class="task-meta">'+meta+'</div>'+progress(task)+'<div class="task-footer"><span>'+((task.state==='error')?'<span class="error-text">'+safe(task.message)+'</span>':sizes)+'</span>'+right+'</div></div></article>';
+ return '<article class="task-row" data-task-row="'+task.id+'"><div class="task-icon '+task.source+'">'+icon(sources[task.source].icon)+'</div><div class="task-content">'+titleLine(task)+'<div class="task-meta">'+meta+'</div>'+progress(task)+'<div class="task-footer"><span>'+((task.state==='error')?'<span class="error-text">'+safe(task.message)+'</span>':sizes)+'</span>'+right+'</div>'+savePathRow(task)+'</div></article>';
 }
 const filteredTasks = state => {
  let tasks=state.tasks.filter(t=>(state.source==='all'||t.source===state.source)&&(state.filter==='all'||t.state===state.filter)&&(!state.query||(t.title+' '+t.episode+' '+sources[t.source].name).toLowerCase().includes(state.query.toLowerCase())));

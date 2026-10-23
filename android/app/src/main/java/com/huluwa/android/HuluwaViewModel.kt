@@ -533,8 +533,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             val status = AndroidBuildStatus.from(repository.androidStatus(previous.serverId))
             var tasks = repository.androidTasks()
             if (epoch != generation || mutable.value.androidBuild.serverId != previous.serverId) return@refresh
-            var selectedId = previous.selectedId?.takeIf { id -> tasks.any { it.id == id } }
-                ?: status.activeTask?.id ?: tasks.firstOrNull()?.id
+            // 有新任务执行时立即切换日志，不能沿用已完成任务的游标与完成标记。
+            val selectedId = status.activeTask?.id
+                ?: previous.selectedId?.takeIf { id -> tasks.any { it.id == id } }
+                ?: tasks.firstOrNull()?.id
             var logText = if (selectedId == previous.selectedId) previous.logs else ""
             var cursor = if (selectedId == previous.selectedId) previous.cursor else 0
             var complete = if (selectedId == previous.selectedId) previous.logComplete else false
@@ -582,6 +584,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val task = if (type == "BUILD") repository.androidBuild(serverId) else repository.androidUpdate(serverId)
                 if (epoch != generation) return@launch
+                // 丢弃仍在读取上个任务的轮询，避免覆盖新任务并阻挡下面的即时刷新。
+                refreshJobs.remove("android-build")?.cancel()
                 mutable.update { it.copy(clock = System.currentTimeMillis(), androidBuild = it.androidBuild.copy(
                     submitting = null, status = it.androidBuild.status.copy(activeTask = task),
                     selectedId = task.id, logs = "", cursor = 0, logComplete = false, follow = true,
