@@ -1,7 +1,15 @@
 package com.huluwa.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,12 +20,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.NorthEast
 import androidx.compose.material.icons.outlined.SouthWest
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,10 +48,46 @@ import com.huluwa.android.data.AiSession
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/** 模型信息与真实用量共用一张轻卡片；缺失统计不按零用量展示。 */
+/** 卡片收起后保留独立展开入口，同一会话内记住展开状态。 */
 @Composable internal fun AiConversationUsageCard(
     session: AiSession, modelLabel: String, effortLabel: String, details: () -> Unit,
     modifier: Modifier = Modifier,
+) {
+    var expanded by rememberSaveable(session.id) { mutableStateOf(true) }
+    AnimatedContent(
+        targetState = expanded,
+        modifier = modifier,
+        contentAlignment = Alignment.BottomEnd,
+        transitionSpec = {
+            (fadeIn(tween(180, delayMillis = 60)) +
+                slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 4 }) togetherWith
+                (fadeOut(tween(120)) +
+                    slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it / 4 }) using
+                SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> tween(300, easing = FastOutSlowInEasing) })
+        },
+        label = "模型与用量收展",
+    ) { showing ->
+        if (showing) {
+            AiExpandedUsageCard(session, modelLabel, effortLabel, details, { expanded = false }, Modifier.fillMaxWidth())
+        } else {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, AiColors.Line)) {
+                    IconButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.size(48.dp).semantics { stateDescription = "已收起模型与用量" },
+                    ) {
+                        Icon(Icons.Outlined.KeyboardArrowUp, "展开模型与用量", Modifier.size(22.dp), tint = HuluwaColors.Pine)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 模型信息与真实用量共用一张轻卡片；缺失统计不按零用量展示。 */
+@Composable private fun AiExpandedUsageCard(
+    session: AiSession, modelLabel: String, effortLabel: String, details: () -> Unit,
+    collapse: () -> Unit, modifier: Modifier,
 ) {
     val usage = session.usage
     val contextUsage = usage?.context
@@ -53,20 +102,25 @@ import kotlin.math.roundToInt
     val fontScale = LocalDensity.current.fontScale
     Surface(modifier, color = AiColors.Background, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, AiColors.Line)) {
         Column {
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看模型与用量详情", onClick = details)
-                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                AiAgentLogo(session.provider, Modifier.size(22.dp))
-                Text("${session.providerLabel} · $modelLabel", Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(7.dp)) {
-                    Row(Modifier.padding(horizontal = 8.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("思考 $effortLabel", color = HuluwaColors.Pine,
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "查看模型与用量详情", onClick = details)
+                    .heightIn(min = 48.dp).padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AiAgentLogo(session.provider, Modifier.size(22.dp))
+                    Text("${session.providerLabel} · $modelLabel", Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(7.dp)) {
+                        Text("思考 $effortLabel", Modifier.padding(horizontal = 8.dp, vertical = 5.dp), color = HuluwaColors.Pine,
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, fontWeight = FontWeight.Normal))
-                        Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(12.dp), tint = HuluwaColors.Pine)
                     }
+                }
+                Box(Modifier.width(1.dp).height(18.dp).background(AiColors.Line))
+                IconButton(
+                    onClick = collapse,
+                    modifier = Modifier.size(48.dp).semantics { stateDescription = "已展开模型与用量" },
+                ) {
+                    Icon(Icons.Outlined.KeyboardArrowDown, "收起模型与用量", Modifier.size(20.dp), tint = HuluwaColors.Pine)
                 }
             }
             AiDivider()
