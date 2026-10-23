@@ -8,13 +8,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.DataUsage
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -52,102 +50,46 @@ private fun contextLabel(context: AiContextUsage?): String {
     return context?.usedTokens?.let { "上下文 ${compactTokens(it)}" } ?: "上下文 —"
 }
 
-/** 输入框上方的独立浮卡：模型与思考强度在上，用量在下。 */
-@OptIn(ExperimentalLayoutApi::class)
+/** 输入框上方默认单行展示 Agent、模型与思考强度，点击查看上下文及用量。 */
 @Composable
 internal fun AiUsageCard(
     session: AiSession, modelLabel: String, effortLabel: String, details: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = session.usage?.context
     val total = session.usage?.sessionTotal
-    val percentage = context?.percentage
-    val tint = when {
-        percentage == null -> AiColors.Muted
-        percentage >= 90 -> HuluwaColors.Danger
-        percentage >= 70 -> HuluwaColors.Amber
-        else -> HuluwaColors.Pine
-    }
-    val label = contextLabel(context)
     val totalLabel = if (total?.coverage == "complete") "累计" else "已统计"
-    val description = "模型 $modelLabel，思考强度 $effortLabel，$label，${totalLabel}输入 ${preciseTokens(total?.inputTokens)} token，" +
-        "输出 ${preciseTokens(total?.outputTokens)} token，点击查看对话用量详情"
+    val description = "${session.providerLabel}，模型 $modelLabel，思考强度 $effortLabel，${contextLabel(session.usage?.context)}，" +
+        "${totalLabel}输入 ${preciseTokens(total?.inputTokens)} token，输出 ${preciseTokens(total?.outputTokens)} token，" +
+        "点击查看上下文与用量详情"
     Surface(
         modifier = modifier, color = Color.White, shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, AiColors.Line.copy(alpha = .8f)), shadowElevation = 5.dp,
     ) {
-        BoxWithConstraints(
-            Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看对话用量详情", onClick = details)
+        Row(
+            Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "查看上下文与用量详情", onClick = details)
                 .semantics(mergeDescendants = true) { contentDescription = description }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            val narrow = maxWidth < 300.dp || LocalDensity.current.fontScale > 1.2f
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    AiAgentBadge(session.provider)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Text("模型", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
-                        Text(
-                            modelLabel, style = MaterialTheme.typography.labelLarge, color = HuluwaColors.Ink,
-                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (!narrow) EffortBadge(effortLabel)
-                    Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(16.dp), tint = AiColors.Muted)
-                }
-                if (narrow) EffortBadge(effortLabel)
-                AiDivider()
-                FlowRow(
-                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Surface(color = tint.copy(alpha = .08f), shape = RoundedCornerShape(8.dp)) {
-                        Row(
-                            Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            if (percentage != null) CircularProgressIndicator(
-                                progress = { (percentage / 100).toFloat().coerceIn(0f, 1f) },
-                                modifier = Modifier.size(12.dp), color = tint, trackColor = AiColors.Line, strokeWidth = 2.dp,
-                            ) else Icon(Icons.Outlined.DataUsage, null, Modifier.size(12.dp), tint = tint)
-                            Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
-                        }
-                    }
-                    if (session.usage == null) {
-                        UsageMetric("用量待返回")
-                    } else {
-                        UsageMetric("${totalLabel}输入 ${compactTokens(total?.inputTokens)}")
-                        UsageMetric("输出 ${compactTokens(total?.outputTokens)}")
-                    }
-                }
+            AiAgentLogo(session.provider)
+            Text(
+                session.providerLabel, style = MaterialTheme.typography.labelLarge,
+                color = HuluwaColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false,
+            )
+            Text("·", style = MaterialTheme.typography.labelMedium, color = AiColors.Muted)
+            Text(
+                modelLabel, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                color = HuluwaColors.Ink, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+            )
+            Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(7.dp)) {
+                Text(
+                    "思考 $effortLabel", Modifier.widthIn(max = 112.dp).padding(horizontal = 7.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine,
+                    maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                )
             }
+            Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(14.dp), tint = AiColors.Muted)
         }
-    }
-}
-
-@Composable
-private fun EffortBadge(label: String) {
-    Surface(color = AiColors.SoftGreen, shape = RoundedCornerShape(9.dp)) {
-        Column(
-            Modifier.widthIn(max = 160.dp).padding(horizontal = 9.dp, vertical = 5.dp),
-            verticalArrangement = Arrangement.spacedBy(1.dp),
-        ) {
-            Text("思考强度", style = MaterialTheme.typography.labelSmall, color = AiColors.Muted)
-            Text(label, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun UsageMetric(label: String) {
-    Surface(color = AiColors.Background, shape = RoundedCornerShape(8.dp)) {
-        Text(
-            label, Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelMedium, color = AiColors.Muted,
-        )
     }
 }
 

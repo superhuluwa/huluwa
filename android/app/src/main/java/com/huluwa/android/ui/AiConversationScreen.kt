@@ -56,12 +56,6 @@ import kotlinx.serialization.json.*
     var information by rememberSaveable(session.id) { mutableStateOf(false) }
     var usageInformation by rememberSaveable(session.id) { mutableStateOf(false) }
     var deleting by rememberSaveable(session.id) { mutableStateOf(false) }
-    val status = when {
-        ui.loadingSession -> "正在加载"
-        session.running || session.status == "error" || session.status == "interrupted" -> session.statusLabel
-        ui.connected -> "实时同步"
-        else -> "自动同步"
-    }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = Color.White,
@@ -73,24 +67,10 @@ import kotlinx.serialization.json.*
                     Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         IconButton(vm::closeSession) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
-                        Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                AiReconnectingIndicator(ui.reconnecting, Modifier.padding(start = 8.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                AiStatusDot(
-                                    when {
-                                        session.status == "error" -> HuluwaColors.Danger
-                                        ui.connected || session.running -> HuluwaColors.Pine
-                                        else -> AiColors.Muted
-                                    }
-                                )
-                                Text("${session.providerLabel} · ${session.modelLabel} · $status", style = MaterialTheme.typography.labelMedium,
-                                    color = AiColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                        Text(
+                            session.title, Modifier.weight(1f).padding(start = 4.dp),
+                            style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作", Modifier.size(20.dp), tint = AiColors.Muted) }
                     }
                     AiDivider()
