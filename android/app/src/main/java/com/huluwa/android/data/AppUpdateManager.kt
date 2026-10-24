@@ -184,8 +184,9 @@ class AppUpdateManager(private val context: Context, private val api: ApiClient)
                 throw error
             }
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+            // 覆盖安装会结束当前 App 进程，安装器必须使用独立任务栈。
             Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
 

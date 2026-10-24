@@ -762,7 +762,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun canInstallAppUpdate() = appUpdates.canInstallPackages()
     fun appUpdateInstallationError(message: String) = appUpdates.installationError(message)
     suspend fun appUpdateInstallerIntent() = appUpdates.installerIntent()
-    fun refreshAppUpdateAfterInstall() { appUpdates.refreshInstalledVersion(); checkAppUpdate() }
 
     private fun merge(old: List<ChatMessage>, incoming: List<ChatMessage>) = (old + incoming).associateBy { it.id }.values.sortedWith(compareBy<ChatMessage> { if (it.id < 0) Long.MAX_VALUE else it.id }.thenBy { it.createdAt })
     fun refreshChat() {

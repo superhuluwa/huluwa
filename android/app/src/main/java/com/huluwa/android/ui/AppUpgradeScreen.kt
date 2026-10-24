@@ -32,9 +32,6 @@ import java.time.format.DateTimeFormatter
     val reconnecting = rememberReconnecting(vm)
     val context = LocalContext.current
     var continueInstallation by rememberSaveable { mutableStateOf(false) }
-    val installer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        vm.refreshAppUpdateAfterInstall()
-    }
     val installPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (vm.canInstallAppUpdate()) continueInstallation = true
         else vm.appUpdateInstallationError("尚未允许安装应用。授权后点击“继续安装”即可。")
@@ -51,7 +48,8 @@ import java.time.format.DateTimeFormatter
     }
     LaunchedEffect(continueInstallation) {
         if (continueInstallation) {
-            try { installer.launch(vm.appUpdateInstallerIntent()) }
+            // 自更新后旧进程不会收到安装结果，版本状态由回到前台时统一刷新。
+            try { context.startActivity(vm.appUpdateInstallerIntent()) }
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { vm.appUpdateInstallationError(error.userMessage()) }
             finally { continueInstallation = false }

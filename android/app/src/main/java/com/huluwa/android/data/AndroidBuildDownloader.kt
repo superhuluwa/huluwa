@@ -107,8 +107,9 @@ class AndroidBuildDownloader(private val context: Context, private val api: ApiC
     fun installIntent(): Intent? {
         val file = pendingFile?.takeIf { it.isFile } ?: return null
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+        // 构建包也可能覆盖葫芦娃自身，避免安装器依附即将结束的 App 任务栈。
         return Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     fun canInstallPackages(): Boolean = context.packageManager.canRequestPackageInstalls()
