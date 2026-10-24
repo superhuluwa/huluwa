@@ -71,7 +71,6 @@ import kotlinx.serialization.json.*
                             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TitleLoadingIndicator(ui.loadingSession)
                             TitleReconnectBadge(ui.reconnecting)
                         }
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "对话操作", Modifier.size(20.dp), tint = AiColors.Muted) }

@@ -209,7 +209,7 @@ data class AiHeaderActionsState(
 /** AI 首页标题栏右侧的刷新与更多菜单。 */
 @Composable internal fun AiHeaderActions(actions: AiHeaderActionsState) {
     if (!actions.visible) return
-    // 加载与重连由 PageHeader 紧挨标题展示，刷新按钮始终保留图标。
+    // 刷新保持图标，断线时由 PageHeader 在标题旁显示重连提示。
     IconButton(actions.onRefresh, enabled = actions.enabled && !actions.loading) {
         Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)
     }

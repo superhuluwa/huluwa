@@ -108,17 +108,10 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                             // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
                             val activeAiHeader = aiHeader?.takeIf { it.visible }
-                            val loading = when (ui.tab) {
-                                MainTab.Functions, MainTab.System -> !ui.sessions.loaded || ui.sessions.loading
-                                MainTab.Downloads -> !ui.downloads.loaded || ui.downloads.loading
-                                MainTab.Mine -> ui.mine.loading
-                                MainTab.Ai -> activeAiHeader?.loading == true
-                            }
                             key(ui.tab) {
                                 PageHeader(if (ui.tab == MainTab.Ai) "AI 工作台" else ui.tab.title, homeBackground,
                                     onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
-                                    reconnecting = if (ui.tab == MainTab.Ai) activeAiHeader?.reconnecting == true else reconnecting,
-                                    loading = loading || (ui.tab != MainTab.Ai && ui.busy != null)) {
+                                    reconnecting = if (ui.tab == MainTab.Ai) activeAiHeader?.reconnecting == true else reconnecting) {
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
                                     if (ui.tab == MainTab.Mine) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                         HeaderAction(Icons.Outlined.Refresh, "刷新服务状态", vm::refreshMine, enabled = !ui.mine.loading)

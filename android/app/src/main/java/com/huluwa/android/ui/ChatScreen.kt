@@ -58,9 +58,8 @@ import kotlinx.coroutines.flow.first
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // 标题按剩余宽度省略，确保右侧的加载菊花与重连徽标始终可见。
+                            // 标题按剩余宽度省略，确保右侧的重连徽标始终可见。
                             Text(session.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            TitleLoadingIndicator(chat.loading || chat.loadingEarlier)
                             TitleReconnectBadge(reconnecting)
                         }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)

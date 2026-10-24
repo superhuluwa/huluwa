@@ -323,6 +323,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             ManagementService.Subscriptions -> refreshSubscriptions(silent)
         }
     }
+    // 刷新通过任务表防止重复请求；已有数据时静默更新，不触发加载态或禁用页面操作。
     private fun refresh(key: String, block: suspend () -> Unit) {
         if (!session.loggedIn || refreshJobs[key]?.isActive == true) return
         refreshJobs[key] = viewModelScope.launch { block() }
@@ -345,7 +346,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshServer(silent: Boolean = false) = refresh("mine-server") {
         val epoch = generation
-        mutable.update { it.copy(mine = it.mine.copy(server = it.mine.server.copy(loading = !silent || !it.mine.server.loaded))) }
+        if (!silent || !mutable.value.mine.server.loaded) mutable.update { it.copy(mine = it.mine.copy(server = it.mine.server.copy(loading = !it.mine.server.loaded))) }
         try {
             val data = repository.serverMetrics()
             if (!data.available) throw ApiException(503, data.message.ifBlank { "资源指标暂不可用" })
@@ -362,7 +363,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshFrpSummary() = refresh("mine-frp") {
         val epoch = generation
-        mutable.update { it.copy(mine = it.mine.copy(frp = it.mine.frp.copy(loading = true))) }
+        mutable.update { it.copy(mine = it.mine.copy(frp = it.mine.frp.copy(loading = !it.mine.frp.loaded))) }
         try {
             val data = repository.frpSummary()
             if (epoch == generation) mutable.update { it.copy(mine = it.mine.copy(frp = LoadState(
@@ -379,7 +380,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshDockerSummary() = refresh("mine-docker") {
         val epoch = generation
-        mutable.update { it.copy(mine = it.mine.copy(docker = it.mine.docker.copy(loading = true))) }
+        mutable.update { it.copy(mine = it.mine.copy(docker = it.mine.docker.copy(loading = !it.mine.docker.loaded))) }
         try {
             val data = repository.dockerSummary()
             if (!data.available) throw ApiException(503, data.message.ifBlank { "Docker 无法连接" })
@@ -395,7 +396,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshSessions(silent: Boolean = false) = refresh("sessions") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(sessions = it.sessions.copy(loading = true, error = null)) }
+        if (!silent) mutable.update { it.copy(sessions = it.sessions.copy(loading = !it.sessions.loaded)) }
         try { val data = repository.sessions(); if (epoch == generation) mutable.update { it.copy(sessions = LoadState(data, loaded = true)) } }
         catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(sessions = it.sessions.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
@@ -403,7 +404,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     /** 巡检记录：列表 + 会话摘要共用同一份缓存（limit 200，与网页端一致） */
     fun refreshCheckLogs(silent: Boolean = false) = refresh("check-logs") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(checkLogs = it.checkLogs.copy(loading = true, error = null)) }
+        if (!silent) mutable.update { it.copy(checkLogs = it.checkLogs.copy(loading = !it.checkLogs.loaded)) }
         try {
             val rows = repository.checkLogs()
             if (epoch == generation) mutable.update { it.copy(checkLogs = LoadState(rows, loaded = true)) }
@@ -421,7 +422,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     /** 剧集管理：扫描共享下载目录（后端只接受本次扫描返回的短期 ID 做删除） */
     fun refreshLibrary(silent: Boolean = false) = refresh("library") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(library = it.library.copy(scan = it.library.scan.copy(loading = true, error = null))) }
+        if (!silent) mutable.update { it.copy(library = it.library.copy(scan = it.library.scan.copy(loading = !it.library.scan.loaded))) }
         try {
             val scan = repository.libraryScan()
             if (epoch == generation) mutable.update { it.copy(library = it.library.copy(scan = LoadState(scan, loaded = true))) }
@@ -457,7 +458,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshDownloads(silent: Boolean = false) = refresh("downloads") {        val epoch = generation
-        if (!silent) mutable.update { it.copy(downloads = it.downloads.copy(loading = true, error = null)) }
+        if (!silent) mutable.update { it.copy(downloads = it.downloads.copy(loading = !it.downloads.loaded)) }
         try {
             val result = repository.downloads(!silent)
             if (epoch == generation) mutable.update { old -> old.copy(downloads = LoadState((result.items + old.downloads.data.filter { it.source.name in result.failedSources }).sortedByDescending { it.createdAt }, error = result.warnings.joinToString("\n").ifBlank { null }, loaded = true)) }
@@ -466,7 +467,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshSubscriptions(silent: Boolean = false) = refresh("subscriptions") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(subscriptions = it.subscriptions.copy(loading = true, error = null)) }
+        if (!silent) mutable.update { it.copy(subscriptions = it.subscriptions.copy(loading = !it.subscriptions.loaded)) }
         try {
             val result = repository.subscriptions()
             if (epoch == generation) mutable.update { old -> old.copy(subscriptions = LoadState((result.items + old.subscriptions.data.filter { it.source.name in result.failedSources }).sortedByDescending { it.createdAt }, error = result.warnings.joinToString("\n").ifBlank { null }, loaded = true)) }
@@ -475,7 +476,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshFrp(silent: Boolean = false) = refresh("frp") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(tunnels = it.tunnels.copy(loading = true)) }
+        if (!silent) mutable.update { it.copy(tunnels = it.tunnels.copy(loading = !it.tunnels.loaded)) }
         try {
             val (tunnels, runtime) = repository.frp()
             val now = System.currentTimeMillis()
@@ -495,7 +496,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun refreshDocker(silent: Boolean = false) = refresh("docker") {
         val epoch = generation
-        if (!silent) mutable.update { it.copy(containers = it.containers.copy(loading = true)) }
+        if (!silent) mutable.update { it.copy(containers = it.containers.copy(loading = !it.containers.loaded)) }
         try {
             val (containers, overview) = repository.docker()
             if (!overview.online) throw ApiException(503, overview.message.ifBlank { "Docker 无法连接" })
@@ -518,7 +519,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val section = mutable.value.dockerSection; if (section == DockerSection.Containers) return
         refresh("resources:$section") {
             val epoch = generation
-            if (!silent) mutable.update { it.copy(resources = it.resources + (section to (it.resources[section] ?: LoadState(emptyList())).copy(loading = true, error = null))) }
+            if (!silent) mutable.update {
+                val state = it.resources[section] ?: LoadState(emptyList())
+                it.copy(resources = it.resources + (section to state.copy(loading = !state.loaded)))
+            }
             try { val result = repository.dockerResources(section); if (epoch == generation) mutable.update { it.copy(resources = it.resources + (section to LoadState(result, loaded = true))) } }
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(resources = it.resources + (section to (it.resources[section] ?: LoadState(emptyList())).copy(loading = false, error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } }
@@ -529,7 +533,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshAndroidBuild(silent: Boolean = false) = refresh("android-build") {
         val epoch = generation
         val previous = mutable.value.androidBuild
-        if (!silent) mutable.update { it.copy(androidBuild = it.androidBuild.copy(tasks = it.androidBuild.tasks.copy(loading = true))) }
+        if (!silent) mutable.update { it.copy(androidBuild = it.androidBuild.copy(tasks = it.androidBuild.tasks.copy(loading = !it.androidBuild.tasks.loaded))) }
         try {
             val status = AndroidBuildStatus.from(repository.androidStatus(previous.serverId))
             var tasks = repository.androidTasks()
@@ -832,11 +836,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { if (current == sheetGeneration) { mutable.update { it.copy(sheet = sheet.copy(data = LoadState(JsonObject(emptyMap()), error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } } }
     }
-    /** 弹框标题上的「重新抓取」：保留当前数据继续显示，只在原地换成加载态并重新拉一遍 */
+    /** 弹框标题上的「重新抓取」：保留当前数据，后台静默更新。 */
     fun reloadFilmResources(card: FilmCard) {
         val sheet = mutable.value.sheet as? AppSheet.Films ?: return
-        if (sheet.card.key() != card.key()) return
-        mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = true, error = null))) }
+        if (sheet.card.key() != card.key() || sheetJob?.isActive == true) return
+        mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = !sheet.data.loaded))) }
         val current = sheetGeneration
         sheetJob?.cancel()
         sheetJob = viewModelScope.launch { try {

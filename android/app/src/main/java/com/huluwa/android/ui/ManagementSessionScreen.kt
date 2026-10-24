@@ -42,10 +42,8 @@ import com.huluwa.android.data.formatBytes
                     SessionIcon(session.kind, Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // 标题按剩余宽度省略，确保右侧的加载菊花与重连徽标始终可见。
+                            // 标题按剩余宽度省略，确保右侧的重连徽标始终可见。
                             Text(service.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            // 加载与后台操作统一由标题右侧的菊花承载，不再占用内容区顶部一条进度带。
-                            TitleLoadingIndicator(loading || ui.busy != null)
                             TitleReconnectBadge(reconnecting)
                         }
                         Text(service.subtitle, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,

@@ -85,10 +85,8 @@ import java.time.format.DateTimeFormatter
                     RoundIcon(Icons.Outlined.SystemUpdate, modifier = Modifier.size(38.dp))
                     Column(Modifier.weight(1f).padding(start = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // 标题按剩余宽度省略，确保右侧的加载菊花与重连徽标始终可见。
+                            // 标题按剩余宽度省略，确保右侧的重连徽标始终可见。
                             Text("在线升级", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium)
-                            // 检查更新时的加载状态由标题右侧的菊花承载，刷新按钮保持常显。
-                            TitleLoadingIndicator(upgrade.checking)
                             TitleReconnectBadge(reconnecting)
                         }
                         Text("从你的服务器获取最新版本", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)

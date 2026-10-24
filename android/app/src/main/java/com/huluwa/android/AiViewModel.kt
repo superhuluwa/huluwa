@@ -36,7 +36,7 @@ data class AiUiState(
     val homeLoaded: Boolean = false,
     val unviewedIds: Set<String> = emptySet(),
 ) {
-    /** 刷新动画独立于首次加载限制，已有数据时页面保持可操作。 */
+    /** 仅首次取数限制操作，后续刷新保留已有内容并保持页面可操作。 */
     val initialLoading get() = loading && !homeLoaded
     val launchProject get() = projects.find { it.path == projectPath }
     /** 只列出当前项目启用的 Agent 对应供应商。 */
@@ -219,7 +219,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         if (!store.loggedIn || refreshJob?.isActive == true || mutable.value.deletingAll) return
         val epoch = generation
         refreshJob = viewModelScope.launch {
-            mutable.update { it.copy(loading = true) }
+            mutable.update { it.copy(loading = !it.homeLoaded) }
             var retries = 0
             try {
                 while (isActive && epoch == generation) {

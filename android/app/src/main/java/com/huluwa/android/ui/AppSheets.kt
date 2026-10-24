@@ -50,17 +50,10 @@ import com.huluwa.android.data.isServerUnreachable
                     is AppSheet.CreateResource -> if (sheet.section == com.huluwa.android.data.DockerSection.Images) "拉取镜像" else "新增${sheet.section.title}"
                     else -> "操作"
                 }
-                val loading = when (sheet) {
-                    is AppSheet.Settings -> sheet.data.loading
-                    is AppSheet.Text -> sheet.data.loading
-                    is AppSheet.ContainerDetail -> sheet.data.loading
-                    else -> false
-                }
-                // 弹层加载与重连同样紧挨标题展示。
+                // 弹层标题只显示重连提示。
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    TitleLoadingIndicator(loading || ui.busy != null)
                     TitleReconnectBadge(rememberReconnecting(vm))
                 }
                 IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭弹层") }
