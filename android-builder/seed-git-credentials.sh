@@ -29,7 +29,7 @@ os.replace(path,root/'git-credentials.json')
 '''
 subprocess.run(['docker', 'run', '--rm', '-i', '--network', 'none', '--user', '0:0',
                 '--entrypoint', 'python3', '--mount', 'type=volume,source=huluwa-android-credentials,target=/credentials',
-                'huluwa-android-builder:latest', '-c', script],
+                os.environ.get('HULUWA_ANDROID_BUILDER_IMAGE', 'huluwa-android-builder:latest'), '-c', script],
                input=json.dumps({'host': 'gitee.com', 'username': credential['username'], 'password': credential['password']}),
                text=True, check=True)
 print('已将 Gitee 已保存凭据导入构建凭据卷，凭据未写入源码或日志。')

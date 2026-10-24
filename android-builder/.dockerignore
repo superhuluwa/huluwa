@@ -3,3 +3,5 @@
 !worker.py
 !android.init.gradle
 !git-askpass.py
+!process_tree.py
+!agent.py

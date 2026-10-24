@@ -6,7 +6,7 @@ docker volume create --label com.docker.compose.project=huluwa --label com.docke
 docker run --rm --user 0:0 --network none --entrypoint python3 \
   --mount "type=bind,source=${ANDROID_SOURCE},target=/seed,readonly" \
   --mount type=volume,source=huluwa-android-signing,target=/signing \
-  huluwa-android-builder:latest -c '
+  "${HULUWA_ANDROID_BUILDER_IMAGE:-huluwa-android-builder:latest}" -c '
 from pathlib import Path
 import os, re, shutil
 root = Path("/signing")

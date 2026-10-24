@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -122,10 +123,13 @@ def run(config_path):
     process = subprocess.Popen([sys.executable, str(Path(__file__).with_name('worker.py'))], env=env,
                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
     bridge = Bridge(config)
-    print('Windows 构建节点已启动，正在连接主服务。', flush=True)
+    stopping = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stopping.set())
+    print('葫芦娃构建节点已启动，正在连接主服务。', flush=True)
     last_error = None
     try:
-        while process.poll() is None:
+        while not stopping.is_set() and process.poll() is None:
             try:
                 bridge.sync()
                 if last_error:
@@ -136,8 +140,9 @@ def run(config_path):
                 if last_error != type(error).__name__:
                     print(f'同步暂时失败（{type(error).__name__}），每 2 秒自动重试。', flush=True)
                 last_error = type(error).__name__
-            time.sleep(2)
-        raise RuntimeError(f'构建进程已退出：{process.returncode}')
+            stopping.wait(2)
+        if not stopping.is_set():
+            raise RuntimeError(f'构建进程已退出：{process.returncode}')
     finally:
         if process.poll() is None:
             process.send_signal(signal.CTRL_BREAK_EVENT if os.name == 'nt' else signal.SIGTERM)

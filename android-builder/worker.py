@@ -391,7 +391,7 @@ def heartbeat():
             'heartbeat': time.time(), 'currentTask': CURRENT,
             'repository': REPOSITORY, 'branch': BRANCH,
             'signingReady': (SIGNING / 'keystore.properties').is_file(),
-            'platform': 'windows' if os.name == 'nt' else 'linux',
+            'platform': os.environ.get('HULUWA_ANDROID_PLATFORM', 'windows' if os.name == 'nt' else 'linux'),
         })
         STOP.wait(2)
 
@@ -433,7 +433,7 @@ def main():
         subprocess.run(['git', '-C', str(REPO), 'worktree', 'prune'], check=False)
     thread = threading.Thread(target=heartbeat, daemon=True)
     thread.start()
-    print('葫芦娃 Android 构建服务已启动，等待网页任务。', flush=True)
+    print('葫芦娃 Android 构建服务已启动，等待构建任务。', flush=True)
     while not STOP.is_set():
         directories = sorted((p for p in TASKS.iterdir() if p.is_dir() and p.name.isdigit()), key=lambda p: int(p.name))
         for directory in directories:

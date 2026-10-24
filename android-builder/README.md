@@ -1,5 +1,7 @@
 # 安卓构建服务
 
+当前 Debian Docker 打包节点的部署和迁移见 [Debian Docker 打包服务](README.debian.md)。以下 Windows 安装说明保留供旧环境参考。
+
 与 `android/` 同级的独立构建服务。网页左侧“安卓 App”提供更新代码、编译 Release APK、取消任务、增量日志和历史 APK 下载。
 
 ## Windows 本机节点与多服务器选择
