@@ -185,13 +185,16 @@ class Job:
         version_code = re.search(r'versionCode\s*=\s*(\d+)', gradle)
         version_name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
         subject = self.run(['git', '-C', str(REPO), 'show', '-s', '--format=%s', commit], capture=True).strip()
-        self.meta.update({
+        source = {
             'commit': commit, 'commitSubject': subject,
             'versionCode': int(version_code.group(1)) if version_code else 1,
             'versionName': version_name.group(1) if version_name else '1.0.0',
-        })
+        }
+        self.meta.update({key: source[key] for key in ['commit', 'commitSubject']})
+        if self.request['type'] == 'UPDATE':
+            self.meta.update({key: source[key] for key in ['versionCode', 'versionName']})
         self.check()
-        atomic_json(DATA / 'source.json', {**self.meta, 'branch': BRANCH, 'updatedAt': now()})
+        atomic_json(DATA / 'source.json', {**source, 'branch': BRANCH, 'updatedAt': now()})
         log(self.directory, f'源码更新完成：{commit[:12]} {subject}\n')
 
     def prepare_gradle(self, android):
@@ -227,10 +230,10 @@ class Job:
         wrapper.write_text(text, encoding='utf-8')
 
     def build(self):
-        commit = self.request['commit']
-        if not re.fullmatch(r'[0-9a-f]{40}', commit):
-            raise RuntimeError('源码提交号无效，请先更新代码。')
-        self.meta.update({k: self.request[k] for k in ['commit', 'commitSubject', 'versionCode', 'versionName']})
+        # Keep the centrally allocated version while fetching the latest source.
+        self.meta.update({key: self.request[key] for key in ['versionCode', 'versionName']})
+        self.update()
+        commit = self.meta['commit']
         self.stage('PREPARING', f'准备源码 {commit[:12]}，版本代码 {self.request["versionCode"]}……')
         if shutil.disk_usage(WORK).free < 3 * 1024 ** 3:
             raise RuntimeError('构建目录可用空间不足 3GB。')

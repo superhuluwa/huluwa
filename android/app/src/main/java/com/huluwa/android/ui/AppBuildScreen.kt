@@ -109,7 +109,6 @@ import kotlinx.coroutines.launch
             !status.enabled -> "构建服务未启用，请先配置构建节点"
             !status.workerOnline -> "节点离线 · 已生成的安装包仍可下载"
             active != null || build.submitting != null -> ""
-            !status.hasSource -> "请先更新代码，再编译安装包"
             !status.signingReady -> "请先配置 Release 签名"
             else -> ""
         }
@@ -212,23 +211,13 @@ import kotlinx.coroutines.launch
 }
 
 @Composable private fun BuildActions(build: AndroidBuildState, vm: HuluwaViewModel, project: AndroidBuildProject) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedButton({ vm.submitAndroidBuild("UPDATE", project) }, Modifier.weight(1f).heightIn(min = 48.dp),
-            enabled = build.status.canUpdate && build.submitting == null, shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)) {
-            if (build.submitting == "UPDATE") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Outlined.CloudDownload, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(7.dp))
-            Text("更新代码", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Button({ vm.submitAndroidBuild("BUILD", project) }, Modifier.weight(1f).heightIn(min = 48.dp),
-            enabled = build.status.canBuild && build.submitting == null, shape = RoundedCornerShape(14.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)) {
-            if (build.submitting == "BUILD") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-            else Icon(Icons.Outlined.Build, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(7.dp))
-            Text("编译 APK", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+    Button({ vm.submitAndroidBuild("BUILD", project) }, Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        enabled = build.status.canBuild && build.submitting == null, shape = RoundedCornerShape(14.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)) {
+        if (build.submitting == "BUILD") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+        else Icon(Icons.Outlined.Build, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(7.dp))
+        Text("编译 APK", maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

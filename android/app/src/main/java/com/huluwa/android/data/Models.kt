@@ -362,10 +362,8 @@ data class AndroidBuildStatus(
     val servers: List<AndroidBuildServer> = emptyList(),
     val serverId: String = "local",
 ) {
-    /** 只有完整的 40 位提交号才允许发起编译。 */
-    val hasSource get() = Regex("[0-9a-f]{40}").matches(source.commit)
-    val canUpdate get() = enabled && workerOnline && activeTask == null
-    val canBuild get() = canUpdate && hasSource && signingReady
+    /** 编译任务会先更新源码，首次构建也可直接提交。 */
+    val canBuild get() = enabled && workerOnline && activeTask == null && signingReady
     val canDownload get() = latestApk?.downloadable == true
     companion object {
         fun from(raw: JsonObject) = AndroidBuildStatus(

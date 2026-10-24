@@ -146,9 +146,6 @@ public class AndroidBuildService {
         }
         Map<String, Object> source = readJson(serverDirectory(serverId).resolve("source.json"));
         if ("BUILD".equals(type)) {
-            if (!String.valueOf(source.get("commit")).matches("[0-9a-f]{40}")) {
-                throw new BusinessException("请先更新安卓代码");
-            }
             if (!Boolean.TRUE.equals(worker.get("signingReady"))) {
                 throw new BusinessException("尚未配置 Release 签名，请先恢复现有签名文件");
             }
@@ -176,12 +173,10 @@ public class AndroidBuildService {
                         + "ON CONFLICT(cfg_key) DO UPDATE SET cfg_value=excluded.cfg_value,updated_at=excluded.updated_at",
                         String.valueOf(versionCode), created.toString());
             }
-            return jdbc.queryForObject("INSERT INTO android_build_task(type,status,source_commit,commit_subject,version_code,version_name,requested_by,created_at,deadline) "
-                            + "VALUES(?,'QUEUED',?,?,?,?,?,?,?) RETURNING id", Long.class,
-                    type, "BUILD".equals(type) ? source.get("commit") : null,
-                    "BUILD".equals(type) ? source.get("commitSubject") : null, versionCode,
-                    versionName,
-                    username, created.toString(), deadline);
+            // The worker records the actual commit after updating the selected node's source.
+            return jdbc.queryForObject("INSERT INTO android_build_task(type,status,version_code,version_name,requested_by,created_at,deadline) "
+                            + "VALUES(?,'QUEUED',?,?,?,?,?) RETURNING id", Long.class,
+                    type, versionCode, versionName, username, created.toString(), deadline);
         });
         if (id == null) throw new BusinessException(500, "创建任务失败");
         jdbc.update("UPDATE android_build_task SET server_id=? WHERE id=?", serverId, id);

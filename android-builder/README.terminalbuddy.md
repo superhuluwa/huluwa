@@ -4,7 +4,7 @@ TerminalBuddy 安卓源码来自 `https://gitee.com/updateme/terminal-buddy.git`
 
 ## 管理入口
 
-新版葫芦娃安卓 App 的「系统会话 → TerminalBuddy App 打包」提供更新源码、编译签名 Release APK、增量日志、取消、下载日志与下载安装包，界面复用「App 构建管理」。两款 App 分别保留节点选择、下载状态、任务历史、签名与版本计数。TerminalBuddy 的 APK 不参与葫芦娃在线升级。
+新版葫芦娃安卓 App 的「系统会话 → TerminalBuddy App 打包」提供编译签名 Release APK、增量日志、取消、下载日志与下载安装包，界面复用「App 构建管理」。两个入口均只保留一个撑满宽度的「编译 APK」按钮，提交后在所选节点先更新代码，再编译最新提交；更新失败立即停止本次任务，不继续编译旧源码。两款 App 分别保留节点选择、下载状态、任务历史、签名与版本计数。TerminalBuddy 的 APK 不参与葫芦娃在线升级。
 
 后台接口为 `/api/terminalbuddy/android`，路径与原 `/api/android` 构建接口一致。管理和下载沿用葫芦娃登录认证，节点轮询与上传使用本节点密钥；短时下载票据绑定具体项目与任务。主服务将 TerminalBuddy 数据保存到 `/app/data/terminalbuddy-build.db`，产物和日志保存到共享构建卷的 `terminalbuddy/` 子目录。两款 App 共用一个任务执行入口，同一时间只执行一个任务。
 
