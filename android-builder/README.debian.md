@@ -2,6 +2,14 @@
 
 葫芦娃 Android App 的「App 构建管理」通过远程节点连接 Debian Docker 打包服务。主服务继续统一保存版本号、构建历史、日志和 APK；构建容器主动连接主服务，不开放端口，也不挂载 Docker socket。容器采用 Debian 12（bookworm）、JDK 21、SDK 36 和 Build Tools 35/36，支持 x86_64。
 
+## 当前部署
+
+打包服务部署在 **192.168.3.83**，宿主机为 Debian 13、Ryzen 7 7840HS、16 个可见 CPU、16GB 内存；容器内运行 Debian 12。葫芦娃主服务仍在 `http://192.168.3.77:8000`，远程节点主动连接此地址，不能使用远端自己的 `host.docker.internal` 代替主服务地址。
+
+部署目录为 `/opt/huluwa-android-builder`，Compose 文件为 `android-builder/compose.debian.yaml`，配置保存在部署目录的 `.env` 和 `data/debian-builder/config.json`。启动脚本显式加载部署目录的 `.env`，手动使用 Compose 时也应传入 `--env-file .env`，避免退回通用资源默认值。App 中的节点名称为「Debian Docker 打包（192.168.3.83）」，节点 ID、版本计数、任务历史、签名与下载地址沿用原服务。
+
+原 `192.168.3.77` 上的同名远程打包容器停止并关闭自动重启，保留容器与数据用于回退，旧密钥撤销。原工作目录通过 `data/debian-builder/migrated-to` 标记迁移目标，启动脚本据此阻止再次启动旧节点。默认 Linux 共享卷构建节点继续保留。
+
 ## 部署
 
 Debian 主机需要 Docker Engine、Docker Compose 插件和 Python 3.10+。先准备葫芦娃主服务分配的节点 ID、密钥和原 Release 签名。已有 Windows 节点迁移时应保留节点 ID 与任务历史，撤销旧密钥，并将节点名称改为「Debian Docker 打包」；不要让 Windows 与 Debian 同时使用同一节点密钥。
@@ -19,7 +27,7 @@ HULUWA_ANDROID_BUILDER_IMAGE=huluwa-android-builder:debian bash android-builder/
 # docker volume create huluwa-android-credentials
 python3 android-builder/configure-debian.py
 # 按提示输入主服务地址、节点 ID、密钥；密钥不回显。
-docker compose -f android-builder/compose.debian.yaml up -d --no-build
+bash 启动Debian打包服务.sh
 ```
 
 主服务同在本机且已发布 8000 端口时，地址可填 `http://host.docker.internal:8000`；其他主机填写可达的主服务地址，公网连接使用 HTTPS。主服务不能只绑定 `127.0.0.1`，否则容器无法通过宿主机网关连接。
@@ -41,7 +49,7 @@ docker compose -f android-builder/compose.debian.yaml logs -f --tail=100
 docker compose -f android-builder/compose.debian.yaml restart
 # 更新构建服务代码并重建容器，不触发 APK 编译。
 docker compose -f android-builder/compose.debian.yaml build
-docker compose -f android-builder/compose.debian.yaml up -d --no-build
+bash 启动Debian打包服务.sh
 # 停止服务，保留全部卷。
 docker compose -f android-builder/compose.debian.yaml down
 ```
@@ -60,21 +68,21 @@ docker compose -f android-builder/compose.debian.yaml down
 
 Debian 节点默认使用 4 核 CPU、5GB 容器内存、4 个 Gradle 工作线程和 3GB JVM 堆，并采用 Parallel GC 提高编译吞吐量。编译线程和 JVM 参数由 worker 的环境变量配置，不受待打包源码版本影响；未配置这些变量的旧节点继续使用原先的 2 个工作线程和 2GB 堆。
 
-| 环境变量 | Debian 默认值 |
-| --- | --- |
-| `HULUWA_ANDROID_CPUS` | `4` |
-| `HULUWA_ANDROID_MEMORY` | `5g` |
-| `HULUWA_ANDROID_GRADLE_WORKERS` | `4` |
-| `HULUWA_ANDROID_GRADLE_JVM_ARGS` | `-Xmx3072m -XX:+UseParallelGC -Dfile.encoding=UTF-8` |
+| 环境变量 | Compose 通用默认值 | 当前 192.168.3.83 配置 |
+| --- | --- | --- |
+| `HULUWA_ANDROID_CPUS` | `4` | `16` |
+| `HULUWA_ANDROID_MEMORY` | `5g` | `12g` |
+| `HULUWA_ANDROID_GRADLE_WORKERS` | `4` | `8` |
+| `HULUWA_ANDROID_GRADLE_JVM_ARGS` | `-Xmx3072m -XX:+UseParallelGC -Dfile.encoding=UTF-8` | `-Xmx6144m -XX:+UseParallelGC -Dfile.encoding=UTF-8` |
 
-CPU 限额与 Gradle 工作线程数应一起调整，JVM 堆需为容器内的非堆内存、其他构建进程和宿主机其他服务留出空间。上述默认值用于当前 8 核、8GB 主机；可通过部署时的环境变量或仓库根目录 `.env` 覆盖，修改后等待当前任务结束，再重新创建容器。
+CPU 限额与 Gradle 工作线程数应一起调整，JVM 堆需为容器内的非堆内存、其他构建进程和宿主机其他服务留出空间。通用默认值面向 8 核、8GB 级别主机。当前 16 CPU、16GB 服务器通过部署目录 `.env` 覆盖资源配置，容器最多使用 16 个 CPU，Gradle 同时执行最多 8 个工作任务，JVM 可使用 6GB 堆。修改后等待当前任务结束，再重新创建容器。
 
 ```bash
 docker compose -f android-builder/compose.debian.yaml build
-docker compose -f android-builder/compose.debian.yaml up -d --no-build
+bash 启动Debian打包服务.sh
 ```
 
-构建继续使用已有 Git、Gradle 发行包、依赖和任务缓存卷，更新容器不会重新下载全部依赖。新节点第一次构建需要准备缓存，耗时会更长。保留 Release 的 R8 压缩和签名流程。
+本次从 192.168.3.77 迁移时同步了原 Git、Gradle 发行包、依赖和任务缓存卷，并沿用缓存目录，避免重新准备完整缓存。构建继续使用已有缓存卷，更新容器不会重新下载全部依赖。新节点第一次构建需要准备缓存，耗时会更长。保留 Release 的 R8 压缩和签名流程。
 
 直接部署在同一台 Debian 宿主机上可以减少少量容器开销，但现有源码和缓存已经位于 Docker 持久卷中，主要编译开销仍来自 CPU、JVM 和 R8。在相同硬件与资源配额下，仅取消 Docker 通常不会解决数倍的速度差异。
 
