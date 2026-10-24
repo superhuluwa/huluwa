@@ -1,5 +1,7 @@
 # 安卓构建服务
 
+TerminalBuddy 原生安卓 App 的独立 Docker 打包与葫芦娃系统会话入口见 [TerminalBuddy 打包服务](README.terminalbuddy.md)。
+
 当前 Debian Docker 打包节点的部署和迁移见 [Debian Docker 打包服务](README.debian.md)。以下 Windows 安装说明保留供旧环境参考。
 
 与 `android/` 同级的独立构建服务。网页左侧“安卓 App”提供更新代码、编译 Release APK、取消任务、增量日志和历史 APK 下载。

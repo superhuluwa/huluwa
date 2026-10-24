@@ -25,6 +25,8 @@ SIGNING = Path(os.environ.get('HULUWA_ANDROID_SIGNING', '/signing'))
 CREDENTIALS = Path(os.environ.get('HULUWA_ANDROID_CREDENTIALS', '/credentials'))
 BUILDER = Path(__file__).resolve().parent
 NODE_ID = os.environ.get('HULUWA_ANDROID_NODE_ID', 'local')
+PACKAGE_NAME = os.environ.get('HULUWA_ANDROID_PACKAGE', 'com.huluwa.android')
+ARTIFACT_PREFIX = os.environ.get('HULUWA_ANDROID_ARTIFACT_PREFIX', 'huluwa')
 STOP = threading.Event()
 CURRENT = None
 SECRET_VALUES = []
@@ -294,13 +296,13 @@ class Job:
                 raise RuntimeError('APK 签名与配置的 Release 证书不一致。')
             badging = self.run([android_tool('aapt'), 'dump', 'badging', str(apk)], capture=True)
             package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
-            if (not package or package.group(1) != 'com.huluwa.android'
+            if (not package or package.group(1) != PACKAGE_NAME
                     or int(package.group(2)) != self.request['versionCode']
                     or package.group(3) != self.request['versionName']):
                 raise RuntimeError('APK 包名、版本号或版本代码不符合本次自动分配的构建参数。')
             self.stage('ARCHIVING', '归档已签名 APK……')
             version = re.sub(r'[^A-Za-z0-9._-]', '_', package.group(3))[:60]
-            filename = f'huluwa-{version}-{self.request["versionCode"]}-{commit[:8]}.apk'
+            filename = f'{ARTIFACT_PREFIX}-{version}-{self.request["versionCode"]}-{commit[:8]}.apk'
             temporary = self.directory / (filename + '.tmp')
             shutil.copyfile(apk, temporary)
             self.check()

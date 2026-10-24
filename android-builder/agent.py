@@ -19,7 +19,7 @@ import worker
 class Bridge:
     def __init__(self, config):
         self.config = config
-        self.base = config['serverUrl'].rstrip('/') + '/api/android/agents/' + config['nodeId']
+        self.base = config['serverUrl'].rstrip('/') + config.get('apiPath', '/api/android').rstrip('/') + '/agents/' + config['nodeId']
         self.data = Path(config['dataDirectory'])
         self.pending = []
         self.offsets = {}
@@ -115,6 +115,8 @@ def run(config_path):
         'HULUWA_ANDROID_BRANCH': config.get('branch', 'master'), 'PYTHONUNBUFFERED': '1', 'PYTHONUTF8': '1',
         'JAVA_HOME': config['javaHome'], 'ANDROID_HOME': config['androidHome'],
         'ANDROID_SDK_ROOT': config['androidHome'],
+        'HULUWA_ANDROID_PACKAGE': config.get('packageName', 'com.huluwa.android'),
+        'HULUWA_ANDROID_ARTIFACT_PREFIX': config.get('artifactPrefix', 'huluwa'),
     })
     env['PATH'] = str(Path(config['javaHome']) / 'bin') + os.pathsep + env['PATH']
     if config.get('gradleHome'):

@@ -3,6 +3,7 @@ package com.huluwa.console.web;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.security.AuthInterceptor;
 import com.huluwa.console.service.AndroidBuildService;
+import com.huluwa.console.service.AndroidBuildCoordinator;
 import com.huluwa.console.service.AndroidDownloadService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
@@ -26,10 +27,12 @@ import java.util.Map;
 public class AndroidBuildController {
     private final AndroidBuildService builds;
     private final AndroidDownloadService downloads;
+    private final AndroidBuildCoordinator coordinator;
 
-    public AndroidBuildController(AndroidBuildService builds, AndroidDownloadService downloads) {
+    public AndroidBuildController(AndroidBuildService builds, AndroidDownloadService downloads, AndroidBuildCoordinator coordinator) {
         this.builds = builds;
         this.downloads = downloads;
+        this.coordinator = coordinator;
     }
 
     @GetMapping("/status")
@@ -72,12 +75,12 @@ public class AndroidBuildController {
 
     @PostMapping("/update")
     public ApiResult<Map<String, Object>> update(HttpServletRequest request, @RequestParam(defaultValue = "local") String serverId) {
-        return ApiResult.ok(builds.submit("UPDATE", username(request), serverId));
+        return ApiResult.ok(coordinator.submit(builds, "UPDATE", username(request), serverId));
     }
 
     @PostMapping("/build")
     public ApiResult<Map<String, Object>> build(HttpServletRequest request, @RequestParam(defaultValue = "local") String serverId) {
-        return ApiResult.ok(builds.submit("BUILD", username(request), serverId));
+        return ApiResult.ok(coordinator.submit(builds, "BUILD", username(request), serverId));
     }
 
     @PostMapping("/tasks/{id}/cancel")

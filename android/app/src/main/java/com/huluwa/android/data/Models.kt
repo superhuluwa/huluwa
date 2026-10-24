@@ -35,10 +35,16 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
     Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
 }
+enum class AndroidBuildProject(val id: String, val title: String, val apiPath: List<String>) {
+    Huluwa("huluwa", "葫芦娃", listOf("android")),
+    TerminalBuddy("terminalbuddy", "TerminalBuddy", listOf("terminalbuddy", "android"));
+    fun path(vararg tail: String): Array<String> = (apiPath + tail).toTypedArray()
+}
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
     Frp("local-frp-management", "frp", "Frp 管理", "内网穿透与隧道管理"),
     Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
     AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
+    TerminalBuddyBuild("local-terminalbuddy-build", "terminalbuddy-build", "TerminalBuddy App 打包", "更新源码 · 编译安装包 · 执行日志"),
     CheckLogs("local-check-logs", "check-logs", "巡检记录", "订阅巡检结果与新增明细"),
     Library("local-library", "library", "剧集管理", "扫描下载目录 · 管理磁盘空间"),
     Subscriptions("local-subscriptions", "subscriptions", "我的订阅", "电影港与电影天堂订阅 · 追更状态与资源列表"),
@@ -354,6 +360,7 @@ data class AndroidBuildStatus(
     val branch: String = "master", val source: AndroidSource = AndroidSource(),
     val activeTask: AndroidBuildTask? = null, val latestApk: AndroidBuildTask? = null,
     val servers: List<AndroidBuildServer> = emptyList(),
+    val serverId: String = "local",
 ) {
     /** 只有完整的 40 位提交号才允许发起编译。 */
     val hasSource get() = Regex("[0-9a-f]{40}").matches(source.commit)
@@ -367,6 +374,7 @@ data class AndroidBuildStatus(
             (raw["activeTask"] as? JsonObject)?.let(AndroidBuildTask::from),
             (raw["latestApk"] as? JsonObject)?.let(AndroidBuildTask::from),
             (raw["servers"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let(AndroidBuildServer::from) } ?: emptyList(),
+            raw.text("serverId", fallback = "local"),
         )
     }
 }

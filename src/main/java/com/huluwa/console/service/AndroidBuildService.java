@@ -41,13 +41,28 @@ public class AndroidBuildService {
     private final TransactionTemplate transactions;
     private final ObjectMapper json;
     private final AndroidBuildProperties config;
+    private final String packageName;
+    private final String artifactPrefix;
+    private final long versionFloor;
+    private final boolean localWorker;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AndroidBuildService(JdbcTemplate jdbc, TransactionTemplate transactions,
                                ObjectMapper json, AndroidBuildProperties config) {
+        this(jdbc, transactions, json, config, "com.huluwa.android", "huluwa", 1009, true);
+    }
+
+    public AndroidBuildService(JdbcTemplate jdbc, TransactionTemplate transactions, ObjectMapper json,
+                               AndroidBuildProperties config, String packageName, String artifactPrefix,
+                               long versionFloor, boolean localWorker) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.json = json;
         this.config = config;
+        this.packageName = packageName;
+        this.artifactPrefix = artifactPrefix;
+        this.versionFloor = versionFloor;
+        this.localWorker = localWorker;
     }
 
     public synchronized Map<String, Object> status() {
@@ -90,7 +105,7 @@ public class AndroidBuildService {
                 release.put("taskId", id);
                 release.put("versionName", task.get("versionName"));
                 release.put("versionCode", task.get("versionCode"));
-                release.put("packageName", "com.huluwa.android");
+                release.put("packageName", packageName);
                 release.put("apkSize", task.get("apkSize"));
                 release.put("sha256", digest);
                 release.put("signatureSha256", signer);
@@ -148,8 +163,8 @@ public class AndroidBuildService {
                         (rs, row) -> rs.getString(1));
                 long previous = values.isEmpty() ? 0 : Long.parseLong(values.getFirst());
                 Long recorded = jdbc.queryForObject("SELECT MAX(version_code) FROM android_build_task WHERE type='BUILD'", Long.class);
-                // Start this version scheme at 1010; never move behind an allocated build.
-                long floor = Math.max(1009L, Math.max(previous, recorded == null ? 0 : recorded));
+                // Keep each project above its configured floor and all allocated builds.
+                long floor = Math.max(versionFloor, Math.max(previous, recorded == null ? 0 : recorded));
                 long next = Math.max(floor, number(source.get("versionCode"), 1)) + 1;
                 if (next > 2_100_000_000L) throw new BusinessException("安卓版本代码已达到上限");
                 versionCode = (int) next;
@@ -371,7 +386,7 @@ public class AndroidBuildService {
 
     public synchronized List<Map<String, Object>> servers() {
         var result = new java.util.ArrayList<Map<String, Object>>();
-        result.add(new LinkedHashMap<>(Map.of("id", "local", "name", "默认服务器（Linux 容器）")));
+        if (localWorker) result.add(new LinkedHashMap<>(Map.of("id", "local", "name", "默认服务器（Linux 容器）")));
         result.addAll(jdbc.query("SELECT id,name FROM android_build_server ORDER BY created_at", (rs, row) ->
                 new LinkedHashMap<>(Map.<String, Object>of("id", rs.getString(1), "name", rs.getString(2)))));
         for (var server : result) {
@@ -455,7 +470,7 @@ public class AndroidBuildService {
                     if (!TERMINAL.contains(String.valueOf(result.get("status")))) throw new BusinessException("任务结果无效");
                     if ("SUCCESS".equals(result.get("status")) && "BUILD".equals(task.get("type"))) {
                         String filename = String.valueOf(result.get("artifactName"));
-                        if (!filename.matches("huluwa-[A-Za-z0-9._-]+\\.apk")) throw new BusinessException("APK 文件名无效");
+                        if (!filename.matches(java.util.regex.Pattern.quote(artifactPrefix) + "-[A-Za-z0-9._-]+\\.apk")) throw new BusinessException("APK 文件名无效");
                         Path apk = directory.resolve(filename);
                         if (!Files.isRegularFile(apk) || Files.size(apk) != number(result.get("apkSize"), -1)) throw new BusinessException("APK 尚未完整回传");
                         String digest;
@@ -487,7 +502,7 @@ public class AndroidBuildService {
     public synchronized void uploadAgent(String serverId, String token, long id, String name, java.io.InputStream input) throws IOException {
         authenticateAgent(serverId, token);
         requireAgentTask(serverId, id);
-        if (!name.matches("huluwa-[A-Za-z0-9._-]+\\.apk") && !"mapping.txt".equals(name)) throw new BusinessException("文件名无效");
+        if (!name.matches(java.util.regex.Pattern.quote(artifactPrefix) + "-[A-Za-z0-9._-]+\\.apk") && !"mapping.txt".equals(name)) throw new BusinessException("文件名无效");
         Path target = taskDirectory(id).resolve(name);
         Path temporary = target.resolveSibling(name + ".upload");
         try {

@@ -6,10 +6,12 @@ import android.content.Context
 class AndroidBuildPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("huluwa_android_build", Context.MODE_PRIVATE)
 
-    fun selectedServer(server: String): String =
-        preferences.getString("server:$server", "local").orEmpty().ifBlank { "local" }
+    private fun key(server: String, project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) "server:$server" else "server:$server:${project.id}"
 
-    fun selectServer(server: String, id: String) {
-        preferences.edit().putString("server:$server", id).apply()
+    fun selectedServer(server: String, project: AndroidBuildProject = AndroidBuildProject.Huluwa): String =
+        preferences.getString(key(server, project), "local").orEmpty().ifBlank { "local" }
+
+    fun selectServer(server: String, id: String, project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
+        preferences.edit().putString(key(server, project), id).apply()
     }
 }

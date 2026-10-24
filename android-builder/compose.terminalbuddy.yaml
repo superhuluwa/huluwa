@@ -1,0 +1,55 @@
+name: terminalbuddy-android-builder
+services:
+  terminalbuddy-android-builder:
+    image: terminalbuddy-android-builder:latest
+    container_name: terminalbuddy-android-builder
+    build:
+      context: .
+      dockerfile: Dockerfile.terminalbuddy
+    entrypoint: ["python3", "/opt/builder/agent.py", "--config", "/run/secrets/android-builder-config"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    user: "10001:10001"
+    cpus: "${HULUWA_ANDROID_CPUS:-16}"
+    mem_limit: ${HULUWA_ANDROID_MEMORY:-12g}
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,time; c=json.load(open('/run/secrets/android-builder-config')); s=json.load(open(c['dataDirectory']+'/worker.json')); assert time.time()-s['heartbeat'] < 20"]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    environment:
+      HULUWA_ANDROID_PLATFORM: debian
+      HULUWA_ANDROID_GRADLE_WORKERS: ${HULUWA_ANDROID_GRADLE_WORKERS:-8}
+      HULUWA_ANDROID_GRADLE_JVM_ARGS: "${HULUWA_ANDROID_GRADLE_JVM_ARGS:--Xmx6144m -XX:+UseParallelGC -Dfile.encoding=UTF-8}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - android-builder-config
+    volumes:
+      - debian-build-data:/build-data
+      - debian-workspace:/workspace
+      - android-signing:/signing:ro
+      - android-credentials:/credentials:ro
+
+secrets:
+  android-builder-config:
+    file: ${TERMINALBUDDY_BUILD_AGENT_CONFIG:-../data/terminalbuddy-builder/config.json}
+
+volumes:
+  debian-build-data:
+    name: terminalbuddy-android-build-data
+  debian-workspace:
+    name: terminalbuddy-android-workspace
+  android-signing:
+    external: true
+    name: terminalbuddy-android-signing
+  android-credentials:
+    external: true
+    name: huluwa-android-credentials

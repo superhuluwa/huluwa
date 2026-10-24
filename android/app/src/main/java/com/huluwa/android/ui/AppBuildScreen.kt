@@ -37,39 +37,39 @@ import kotlinx.coroutines.launch
  * 单屏构建工作台：固定展示节点、版本和操作，日志使用剩余空间独立滚动。
  * 横屏时左右分栏；完整源码、签名与错误信息通过详情弹层查看。
  */
-@Composable fun AppBuildScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
-    val build = ui.androidBuild
+@Composable fun AppBuildScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState, project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
+    val build = ui.build(project)
     val context = LocalContext.current
-    var continueInstallation by rememberSaveable { mutableStateOf(false) }
+    var continueInstallation by rememberSaveable(project) { mutableStateOf(false) }
     // 安装授权页返回后继续安装；授权失败则把原因显示在下载卡片里。
     val installPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (vm.canInstallAndroidBuild()) continueInstallation = true
-        else vm.androidBuildInstallError("尚未允许安装应用。授权后点击「安装」即可。")
+        if (vm.canInstallAndroidBuild(project)) continueInstallation = true
+        else vm.androidBuildInstallError("尚未允许安装应用。授权后点击「安装」即可。", project)
     }
-    LaunchedEffect(continueInstallation) {
+    LaunchedEffect(project, continueInstallation) {
         if (!continueInstallation) return@LaunchedEffect
         try {
-            vm.androidBuildInstallerIntent()?.let(context::startActivity)
-                ?: vm.androidBuildInstallError("安装包文件已不存在，请重新下载")
+            vm.androidBuildInstallerIntent(project)?.let(context::startActivity)
+                ?: vm.androidBuildInstallError("安装包文件已不存在，请重新下载", project)
         } catch (error: CancellationException) { throw error }
-        catch (error: Throwable) { vm.androidBuildInstallError(error.userMessage()) }
+        catch (error: Throwable) { vm.androidBuildInstallError(error.userMessage(), project) }
         finally { continueInstallation = false }
     }
     fun install() {
-        if (vm.canInstallAndroidBuild()) continueInstallation = true
+        if (vm.canInstallAndroidBuild(project)) continueInstallation = true
         else runCatching {
             installPermission.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
-        }.onFailure { vm.androidBuildInstallError("无法打开安装授权页面，请在系统设置中允许葫芦娃安装应用") }
+        }.onFailure { vm.androidBuildInstallError("无法打开安装授权页面，请在系统设置中允许葫芦娃安装应用", project) }
     }
     // 构建页可见时的轮询：先发布首屏请求，再按任务状态决定节奏；
     // 有任务执行或日志未拉完时每秒刷新，空闲时改为 5 秒。
-    LaunchedEffect(Unit) {
-        vm.refreshAndroidBuild()
+    LaunchedEffect(project) {
+        vm.refreshAndroidBuild(project = project)
         while (true) {
             kotlinx.coroutines.delay(1000)
-            val current = vm.state.value.androidBuild
-            vm.refreshAndroidBuild(silent = true)
-            if (current.download.active) vm.pollAndroidDownload()
+            val current = vm.state.value.build(project)
+            vm.refreshAndroidBuild(silent = true, project = project)
+            if (current.download.active) vm.pollAndroidDownload(project)
             if (current.status.activeTask == null && current.logComplete && !current.download.active) {
                 kotlinx.coroutines.delay(4000)
             }
@@ -80,28 +80,28 @@ import kotlinx.coroutines.launch
         val compact = maxHeight < 520.dp || fontScale > 1.2f
         if (maxWidth >= 480.dp && maxHeight < 520.dp) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BuildControls(build, ui.clock, ui.busy != null, vm, compact, Modifier.weight(1f))
-                BuildOutput(build, ui.clock, vm, snackbar, ::install, Modifier.weight(1f).fillMaxHeight())
+                BuildControls(build, ui.clock, ui.busy != null, vm, project, compact, Modifier.weight(1f))
+                BuildOutput(build, ui.clock, vm, project, snackbar, ::install, Modifier.weight(1f).fillMaxHeight())
             }
         } else {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                BuildControls(build, ui.clock, ui.busy != null, vm, compact)
-                BuildOutput(build, ui.clock, vm, snackbar, ::install, Modifier.weight(1f).fillMaxWidth())
+                BuildControls(build, ui.clock, ui.busy != null, vm, project, compact)
+                BuildOutput(build, ui.clock, vm, project, snackbar, ::install, Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
 }
 
 @Composable private fun BuildControls(
-    build: AndroidBuildState, clock: Long, busy: Boolean, vm: HuluwaViewModel,
+    build: AndroidBuildState, clock: Long, busy: Boolean, vm: HuluwaViewModel, project: AndroidBuildProject,
     compact: Boolean, modifier: Modifier = Modifier,
 ) {
     val status = build.status
     val active = status.activeTask
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        BuildServerSelector(build, vm)
-        BuildOverview(build, compact, vm)
-        BuildActions(build, vm)
+        BuildServerSelector(build, vm, project)
+        BuildOverview(build, compact, vm, project)
+        BuildActions(build, vm, project)
         val notice = when {
             build.connectionError -> "连接中断，正在重连 · 服务端任务将继续执行"
             !build.tasks.error.isNullOrBlank() -> build.tasks.error.orEmpty()
@@ -132,7 +132,7 @@ import kotlinx.coroutines.launch
                     Text("#${active.id} · ${active.elapsedLabel(clock)}", style = MaterialTheme.typography.labelSmall,
                         color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                TextButton({ vm.cancelAndroidTask(active) }, enabled = active.status != "CANCELLING" && !busy) {
+                TextButton({ vm.cancelAndroidTask(active, project) }, enabled = active.status != "CANCELLING" && !busy) {
                     Text(if (active.status == "CANCELLING") "正在取消" else "取消任务",
                         color = if (active.status == "CANCELLING" || busy) HuluwaColors.Muted else HuluwaColors.Danger,
                         maxLines = 1)
@@ -142,7 +142,7 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun BuildServerSelector(build: AndroidBuildState, vm: HuluwaViewModel) {
+@Composable private fun BuildServerSelector(build: AndroidBuildState, vm: HuluwaViewModel, project: AndroidBuildProject) {
     var expanded by remember { mutableStateOf(false) }
     val status = build.status
     val server = status.servers.firstOrNull { it.id == build.serverId }
@@ -166,13 +166,13 @@ import kotlinx.coroutines.launch
             status.servers.forEach { node ->
                 DropdownMenuItem(text = { Text("${node.name} · ${if (node.online) "在线" else "离线"}") },
                     leadingIcon = { if (node.id == build.serverId) Icon(Icons.Outlined.Check, null) },
-                    onClick = { expanded = false; if (node.id != build.serverId) vm.selectAndroidServer(node.id) })
+                    onClick = { expanded = false; if (node.id != build.serverId) vm.selectAndroidServer(node.id, project) })
             }
         }
     }
 }
 
-@Composable private fun BuildOverview(build: AndroidBuildState, compact: Boolean, vm: HuluwaViewModel) {
+@Composable private fun BuildOverview(build: AndroidBuildState, compact: Boolean, vm: HuluwaViewModel, project: AndroidBuildProject) {
     val status = build.status
     val apk = status.latestApk
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White,
@@ -203,7 +203,7 @@ import kotlinx.coroutines.launch
                     style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconButton({ apk?.let { vm.downloadAndroidArtifact(it) } },
+            IconButton({ apk?.let { vm.downloadAndroidArtifact(it, project = project) } },
                 enabled = status.canDownload && !build.download.active) {
                 Icon(Icons.Outlined.Download, "下载最新 APK")
             }
@@ -211,9 +211,9 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun BuildActions(build: AndroidBuildState, vm: HuluwaViewModel) {
+@Composable private fun BuildActions(build: AndroidBuildState, vm: HuluwaViewModel, project: AndroidBuildProject) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedButton({ vm.submitAndroidBuild("UPDATE") }, Modifier.weight(1f).heightIn(min = 48.dp),
+        OutlinedButton({ vm.submitAndroidBuild("UPDATE", project) }, Modifier.weight(1f).heightIn(min = 48.dp),
             enabled = build.status.canUpdate && build.submitting == null, shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)) {
             if (build.submitting == "UPDATE") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -221,7 +221,7 @@ import kotlinx.coroutines.launch
             Spacer(Modifier.width(7.dp))
             Text("更新代码", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Button({ vm.submitAndroidBuild("BUILD") }, Modifier.weight(1f).heightIn(min = 48.dp),
+        Button({ vm.submitAndroidBuild("BUILD", project) }, Modifier.weight(1f).heightIn(min = 48.dp),
             enabled = build.status.canBuild && build.submitting == null, shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)) {
             if (build.submitting == "BUILD") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
@@ -232,7 +232,7 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun DownloadStrip(download: AndroidDownload, vm: HuluwaViewModel, install: () -> Unit) {
+@Composable private fun DownloadStrip(download: AndroidDownload, vm: HuluwaViewModel, project: AndroidBuildProject, install: () -> Unit) {
     val failed = download.phase == UpgradePhase.Failed
     Surface(Modifier.fillMaxWidth(), color = if (failed) HuluwaColors.Amber.copy(alpha = .08f) else HuluwaColors.SoftGreen,
         shape = RoundedCornerShape(12.dp)) {
@@ -263,7 +263,7 @@ import kotlinx.coroutines.launch
                 if (download.phase == UpgradePhase.Ready && !download.logFile) TextButton(install) {
                     Text("安装", maxLines = 1)
                 }
-                IconButton(vm::cancelAndroidDownload) {
+                IconButton({ vm.cancelAndroidDownload(project) }) {
                     Icon(Icons.Outlined.Close, if (download.active) "取消下载" else "清除下载状态", Modifier.size(18.dp),
                         tint = HuluwaColors.Muted)
                 }
@@ -274,7 +274,7 @@ import kotlinx.coroutines.launch
 }
 
 @Composable private fun BuildOutput(
-    build: AndroidBuildState, clock: Long, vm: HuluwaViewModel, snackbar: SnackbarHostState,
+    build: AndroidBuildState, clock: Long, vm: HuluwaViewModel, project: AndroidBuildProject, snackbar: SnackbarHostState,
     install: () -> Unit, modifier: Modifier = Modifier,
 ) {
     val task = build.selectedTask
@@ -306,7 +306,7 @@ import kotlinx.coroutines.launch
                     DropdownMenu(menuExpanded, { menuExpanded = false }) {
                         DropdownMenuItem(text = { Text(if (build.follow) "暂停自动滚动" else "开启自动滚动") },
                             leadingIcon = { Icon(if (build.follow) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null) },
-                            onClick = { menuExpanded = false; vm.toggleAndroidFollow() })
+                            onClick = { menuExpanded = false; vm.toggleAndroidFollow(project) })
                         DropdownMenuItem(text = { Text("复制日志") }, enabled = build.logs.isNotBlank(),
                             leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
                             onClick = {
@@ -318,12 +318,12 @@ import kotlinx.coroutines.launch
                         DropdownMenuItem(text = { Text("下载完整日志") },
                             enabled = task != null && build.logs.isNotBlank() && !build.download.active,
                             leadingIcon = { Icon(Icons.Outlined.Download, null) },
-                            onClick = { menuExpanded = false; task?.let { vm.downloadAndroidArtifact(it, logFile = true) } })
+                            onClick = { menuExpanded = false; task?.let { vm.downloadAndroidArtifact(it, logFile = true, project = project) } })
                     }
                 }
             }
             if (build.download.phase != UpgradePhase.Idle) {
-                DownloadStrip(build.download, vm, install)
+                DownloadStrip(build.download, vm, project, install)
                 Spacer(Modifier.height(8.dp))
             }
             task?.error?.takeIf { it.isNotBlank() }?.let { error ->

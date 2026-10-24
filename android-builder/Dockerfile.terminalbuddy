@@ -1,0 +1,7 @@
+FROM huluwa-android-builder:debian
+USER 0:0
+COPY agent.py worker.py process_tree.py android.init.gradle git-askpass.py /opt/builder/
+RUN sed -i 's/\r$//' /opt/builder/*.py && chmod 755 /opt/builder/git-askpass.py
+ENV HULUWA_ANDROID_PACKAGE=com.terminalbuddy.android \
+    HULUWA_ANDROID_ARTIFACT_PREFIX=terminalbuddy
+USER 10001:10001

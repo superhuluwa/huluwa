@@ -42,12 +42,18 @@ data class AppState(
     val containers: LoadState<List<DockerContainer>> = LoadState(emptyList()), val overview: DockerOverview = DockerOverview(),
     val dockerSection: DockerSection = DockerSection.Containers, val resources: Map<DockerSection, LoadState<List<DockerResource>>> = emptyMap(),
     val realtime: Boolean = false, val sheet: AppSheet? = null, val busy: String? = null, val actionError: String? = null,
+    val terminalBuddyBuild: AndroidBuildState = AndroidBuildState(),
     val androidBuild: AndroidBuildState = AndroidBuildState(), val clock: Long = System.currentTimeMillis(),
     val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
     val library: LibraryState = LibraryState(),
     val browserVisible: Boolean = false,
     val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
-)
+) {
+    fun build(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) androidBuild else terminalBuddyBuild
+    fun updateBuild(project: AndroidBuildProject, transform: (AndroidBuildState) -> AndroidBuildState): AppState =
+        if (project == AndroidBuildProject.Huluwa) copy(androidBuild = transform(androidBuild))
+        else copy(terminalBuddyBuild = transform(terminalBuddyBuild))
+}
 
 /** 剧集管理：扫描结果 + 当前展开的剧集分组（UI 层可自行维护更细的状态） */
 data class LibraryState(
@@ -60,12 +66,15 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val session = repository.api.store
     private val sessionListCache = (application as HuluwaApplication).sessionListCache
     private val appUpdates = (application as HuluwaApplication).appUpdates
+    private val terminalBuddyBuildDownloads = (application as HuluwaApplication).terminalBuddyBuildDownloads
+    private fun buildDownloader(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) buildDownloads else terminalBuddyBuildDownloads
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
     private val buildPreferences = AndroidBuildPreferences(application)
     private val mutable = MutableStateFlow(initialState())
     private fun initialState(error: String? = null) = AppState(
         auth = AuthState(session.server, session.username, session.loggedIn, error = error),
         androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
+        terminalBuddyBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.TerminalBuddy)),
     )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
         val cached = value.cachedLocalSessions.associateBy { it.id }
@@ -92,6 +101,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     else -> "${value.overview.running}/${value.overview.total} 个容器运行中 · ${value.overview.images} 个镜像"
                 }
                 ManagementService.AppBuild -> androidBuildPreview(value.androidBuild)
+                ManagementService.TerminalBuddyBuild -> androidBuildPreview(value.terminalBuddyBuild)
                 ManagementService.CheckLogs -> when {
                     value.checkLogs.error != null -> "巡检记录加载失败，点击重试"
                     !value.checkLogs.loaded -> if (value.checkLogs.loading) "正在同步巡检记录…" else "电影港与电影天堂的订阅巡检历史"
@@ -133,6 +143,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         ManagementService.Frp -> value.tunnels.loaded && value.tunnels.error == null
         ManagementService.Docker -> value.containers.loaded && value.containers.error == null
         ManagementService.AppBuild -> value.androidBuild.tasks.loaded && !value.androidBuild.connectionError
+        ManagementService.TerminalBuddyBuild -> value.terminalBuddyBuild.tasks.loaded && !value.terminalBuddyBuild.connectionError
         ManagementService.CheckLogs -> value.checkLogs.loaded && value.checkLogs.error == null
         ManagementService.Library -> value.library.scan.loaded && value.library.scan.error == null
         ManagementService.Subscriptions -> value.subscriptions.loaded
@@ -141,10 +152,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun upgradePreviewReady(upgrade: AppUpgradeState) = (upgrade.checked && upgrade.checkError == null)
         || upgrade.download.active || upgrade.download.phase == UpgradePhase.Ready
 
-    val state = combine(mutable, appUpdates.state, buildDownloads.state) { value, upgrade, download ->
-        withAppSessions(value.copy(androidBuild = value.androidBuild.copy(download = download)), upgrade)
+    val state = combine(mutable, appUpdates.state, buildDownloads.state, terminalBuddyBuildDownloads.state) { value, upgrade, download, terminalDownload ->
+        withAppSessions(value.copy(androidBuild = value.androidBuild.copy(download = download),
+            terminalBuddyBuild = value.terminalBuddyBuild.copy(download = terminalDownload)), upgrade)
     }.stateIn(viewModelScope, SharingStarted.Eagerly,
-        withAppSessions(mutable.value.copy(androidBuild = mutable.value.androidBuild.copy(download = buildDownloads.state.value)), appUpdates.state.value))
+        withAppSessions(mutable.value.copy(androidBuild = mutable.value.androidBuild.copy(download = buildDownloads.state.value),
+            terminalBuddyBuild = mutable.value.terminalBuddyBuild.copy(download = terminalBuddyBuildDownloads.state.value)), appUpdates.state.value))
 
     /**
      * 服务器是否可达：由 ApiClient 在每次请求后更新（成功即在线，连接失败即离线）。
@@ -293,7 +306,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun logout(message: String? = null) {
         generation++; stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
-        appUpdates.reset(); buildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
+        appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
         mutable.value = initialState(error = message)
         if (message != null) notify(message)
@@ -330,7 +343,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (pollingJob?.isActive != true) pollingJob = viewModelScope.launch {
             while (isActive && session.loggedIn) {
                 refreshCurrent(true); refreshSessions(true); refreshChat(); checkAppUpdate()
-                try { buildDownloads.poll() } catch (error: CancellationException) { throw error } catch (_: Throwable) {}
+                try { buildDownloads.poll(); terminalBuddyBuildDownloads.poll() } catch (error: CancellationException) { throw error } catch (_: Throwable) {}
                 if (mutable.value.chat.processing && System.currentTimeMillis() - processingStarted > 180_000) mutable.update { it.copy(chat = it.chat.copy(processing = false)) }
                 delay(if (mutable.value.realtime) 15_000 else 8_000)
             }
@@ -362,6 +375,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     refreshDocker(silent)
                     // 构建会话摘要与 Frp / Docker 一样在前台自动同步。
                     refreshAndroidBuild(silent)
+                    refreshAndroidBuild(silent, AndroidBuildProject.TerminalBuddy)
                     // 巡检与剧集摘要同样在会话列表常驻刷新（安卓新增的两条系统会话）。
                     refreshCheckLogs(silent)
                     refreshLibrary(silent)
@@ -383,6 +397,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 if (mutable.value.dockerSection != DockerSection.Containers) refreshResources(silent)
             }
             ManagementService.AppBuild -> refreshAndroidBuild(silent)
+            ManagementService.TerminalBuddyBuild -> refreshAndroidBuild(silent, AndroidBuildProject.TerminalBuddy)
             ManagementService.CheckLogs -> refreshCheckLogs(silent)
             ManagementService.Library -> refreshLibrary(silent)
             ManagementService.Subscriptions -> refreshSubscriptions(silent)
@@ -595,97 +610,95 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** 构建管理轮询：状态 + 任务历史 + 选中任务的增量日志，一次刷新全部拉齐。 */
-    fun refreshAndroidBuild(silent: Boolean = false) = refresh("android-build") {
+    fun refreshAndroidBuild(silent: Boolean = false, project: AndroidBuildProject = AndroidBuildProject.Huluwa) = refresh("android-build:${project.id}") {
         val epoch = generation
-        val previous = mutable.value.androidBuild
-        if (!silent) mutable.update { it.copy(androidBuild = it.androidBuild.copy(tasks = it.androidBuild.tasks.copy(loading = !it.androidBuild.tasks.loaded))) }
+        val previous = mutable.value.build(project)
+        if (!silent) mutable.update { it.updateBuild(project) { current -> current.copy(tasks = current.tasks.copy(loading = !current.tasks.loaded)) } }
         try {
-            val status = AndroidBuildStatus.from(repository.androidStatus(previous.serverId))
-            var tasks = repository.androidTasks()
-            if (epoch != generation || mutable.value.androidBuild.serverId != previous.serverId) return@refresh
-            // 有新任务执行时立即切换日志，不能沿用已完成任务的游标与完成标记。
+            val status = AndroidBuildStatus.from(repository.androidStatus(previous.serverId, project))
+            var tasks = repository.androidTasks(project = project)
+            if (epoch != generation || mutable.value.build(project).serverId != previous.serverId) return@refresh
             val selectedId = status.activeTask?.id
                 ?: previous.selectedId?.takeIf { id -> tasks.any { it.id == id } }
                 ?: tasks.firstOrNull()?.id
             var logText = if (selectedId == previous.selectedId) previous.logs else ""
             var cursor = if (selectedId == previous.selectedId) previous.cursor else 0
             var complete = if (selectedId == previous.selectedId) previous.logComplete else false
-            // 日志按字节游标增量拉取；任务结束后不再请求，避免无谓轮询。
             if (selectedId != null && !complete) {
-                val logs = repository.androidLogs(selectedId, cursor)
-                if (epoch != generation || mutable.value.androidBuild.serverId != previous.serverId) return@refresh
+                val logs = repository.androidLogs(selectedId, cursor, project)
+                if (epoch != generation || mutable.value.build(project).serverId != previous.serverId) return@refresh
                 logText = (if (logs.reset) "" else logText) + logs.text
                 if (logText.length > 200_000) logText = logText.takeLast(200_000)
                 cursor = logs.cursor
                 complete = !logs.hasMore && logs.task?.active != true
-                // 日志接口会返回最新的任务行，先合并进列表，再让选中态指向它。
                 logs.task?.let { task -> tasks = listOf(task) + tasks.filter { it.id != task.id } }
             }
-            mutable.update {
-                it.copy(clock = System.currentTimeMillis(), androidBuild = it.androidBuild.copy(
-                    status = status, tasks = LoadState(tasks, loaded = true), connectionError = false,
-                    selectedId = selectedId, logs = logText, cursor = cursor, logComplete = complete,
-                ))
-            }
+            buildPreferences.selectServer(session.server, status.serverId, project)
+            mutable.update { it.copy(clock = System.currentTimeMillis()).updateBuild(project) { current -> current.copy(
+                serverId = status.serverId, status = status, tasks = LoadState(tasks, loaded = true), connectionError = false,
+                selectedId = selectedId, logs = logText, cursor = cursor, logComplete = complete,
+            ) } }
         } catch (error: CancellationException) { throw error }
         catch (error: Throwable) {
-            if (epoch == generation && mutable.value.androidBuild.serverId == previous.serverId) {
-                mutable.update { it.copy(androidBuild = it.androidBuild.copy(
-                    tasks = it.androidBuild.tasks.copy(loading = false, error = error.userMessage(), loaded = true),
-                    connectionError = true)) }
+            if (epoch == generation && mutable.value.build(project).serverId == previous.serverId) {
+                mutable.update { it.updateBuild(project) { current -> current.copy(
+                    tasks = current.tasks.copy(loading = false, error = error.userMessage(), loaded = true), connectionError = true) } }
                 if (error is ApiException && error.code == 401) handleError(error)
             }
         }
     }
-    fun toggleAndroidFollow() = mutable.update { it.copy(androidBuild = it.androidBuild.copy(follow = !it.androidBuild.follow)) }
-    fun selectAndroidServer(id: String) {
-        buildPreferences.selectServer(session.server, id)
-        mutable.update { it.copy(androidBuild = it.androidBuild.copy(serverId = id,
-            status = it.androidBuild.status.copy(workerOnline = false, source = AndroidSource()),
-            selectedId = null, logs = "", cursor = 0, logComplete = false)) }
-        refreshAndroidBuild()
+    fun toggleAndroidFollow(project: AndroidBuildProject = AndroidBuildProject.Huluwa) =
+        mutable.update { it.updateBuild(project) { current -> current.copy(follow = !current.follow) } }
+    fun selectAndroidServer(id: String, project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
+        refreshJobs.remove("android-build:${project.id}")?.cancel()
+        buildPreferences.selectServer(session.server, id, project)
+        mutable.update { it.updateBuild(project) { current -> current.copy(serverId = id,
+            status = current.status.copy(workerOnline = false, source = AndroidSource()),
+            selectedId = null, logs = "", cursor = 0, logComplete = false) } }
+        refreshAndroidBuild(project = project)
     }
-    fun submitAndroidBuild(type: String) {
-        if (mutable.value.androidBuild.submitting != null) return
+    fun submitAndroidBuild(type: String, project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
+        if (mutable.value.build(project).submitting != null) return
         val epoch = generation
-        val serverId = mutable.value.androidBuild.serverId
-        mutable.update { it.copy(androidBuild = it.androidBuild.copy(submitting = type)) }
+        val serverId = mutable.value.build(project).serverId
+        mutable.update { it.updateBuild(project) { current -> current.copy(submitting = type) } }
         viewModelScope.launch {
             try {
-                val task = if (type == "BUILD") repository.androidBuild(serverId) else repository.androidUpdate(serverId)
+                val task = if (type == "BUILD") repository.androidBuild(serverId, project) else repository.androidUpdate(serverId, project)
                 if (epoch != generation) return@launch
-                // 丢弃仍在读取上个任务的轮询，避免覆盖新任务并阻挡下面的即时刷新。
-                refreshJobs.remove("android-build")?.cancel()
-                mutable.update { it.copy(clock = System.currentTimeMillis(), androidBuild = it.androidBuild.copy(
-                    submitting = null, status = it.androidBuild.status.copy(activeTask = task),
+                refreshJobs.remove("android-build:${project.id}")?.cancel()
+                mutable.update { it.copy(clock = System.currentTimeMillis()).updateBuild(project) { current -> current.copy(
+                    submitting = null, status = current.status.copy(activeTask = task),
                     selectedId = task.id, logs = "", cursor = 0, logComplete = false, follow = true,
-                    tasks = LoadState(listOf(task) + it.androidBuild.tasks.data.filter { item -> item.id != task.id }, loaded = true),
-                )) }
-                notify(if (type == "BUILD") "已提交 APK 编译任务" else "已提交代码更新任务")
-                refreshAndroidBuild()
+                    tasks = LoadState(listOf(task) + current.tasks.data.filter { item -> item.id != task.id }, loaded = true),
+                ) } }
+                notify(if (type == "BUILD") "已提交 ${project.title} APK 编译任务" else "已提交 ${project.title}代码更新任务")
+                refreshAndroidBuild(project = project)
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
-                if (epoch == generation) { mutable.update { it.copy(androidBuild = it.androidBuild.copy(submitting = null)) }; handleError(error) }
+                if (epoch == generation) {
+                    mutable.update { it.updateBuild(project) { current -> current.copy(submitting = null) } }
+                    handleError(error)
+                }
             }
         }
     }
-    fun cancelAndroidTask(task: AndroidBuildTask) = confirm("取消构建任务",
-        "确定取消「${task.typeLabel} #${task.id}」？构建服务会停止当前进程，未完成的产物会被清理。", "取消任务") {
-        perform("android-cancel", "已发送取消请求", after = { refreshAndroidBuild() }) { repository.androidCancel(task.id) }
+    fun cancelAndroidTask(task: AndroidBuildTask, project: AndroidBuildProject = AndroidBuildProject.Huluwa) = confirm("取消构建任务",
+        "确定取消「${project.title} · ${task.typeLabel} #${task.id}」？构建服务会停止当前进程，未完成的产物会被清理。", "取消任务") {
+        perform("android-cancel:${project.id}", "已发送取消请求", after = { refreshAndroidBuild(project = project) }) { repository.androidCancel(task.id, project) }
     }
-    fun downloadAndroidArtifact(task: AndroidBuildTask, logFile: Boolean = false) {
+    fun downloadAndroidArtifact(task: AndroidBuildTask, logFile: Boolean = false, project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
         viewModelScope.launch {
-            try { buildDownloads.download(task, logFile) }
+            try { buildDownloader(project).download(task, logFile) }
             catch (error: CancellationException) { throw error }
             catch (error: Throwable) { handleError(error) }
         }
     }
-    fun cancelAndroidDownload() { viewModelScope.launch { buildDownloads.cancel() } }
-    /** 构建页面可见时驱动下载进度；没有进行中的下载会直接返回。 */
-    fun pollAndroidDownload() { viewModelScope.launch { buildDownloads.poll() } }
-    fun androidBuildInstallerIntent() = buildDownloads.installIntent()
-    fun canInstallAndroidBuild() = buildDownloads.canInstallPackages()
-    fun androidBuildInstallError(message: String) = buildDownloads.installationError(message)
+    fun cancelAndroidDownload(project: AndroidBuildProject = AndroidBuildProject.Huluwa) { viewModelScope.launch { buildDownloader(project).cancel() } }
+    fun pollAndroidDownload(project: AndroidBuildProject = AndroidBuildProject.Huluwa) { viewModelScope.launch { buildDownloader(project).poll() } }
+    fun androidBuildInstallerIntent(project: AndroidBuildProject = AndroidBuildProject.Huluwa) = buildDownloader(project).installIntent()
+    fun canInstallAndroidBuild(project: AndroidBuildProject = AndroidBuildProject.Huluwa) = buildDownloader(project).canInstallPackages()
+    fun androidBuildInstallError(message: String, project: AndroidBuildProject = AndroidBuildProject.Huluwa) = buildDownloader(project).installationError(message)
 
     private var chatGeneration = 0
     private var localId = -1L

@@ -13,18 +13,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
+import com.huluwa.android.data.AndroidBuildProject
 import com.huluwa.android.data.ManagementService
 import com.huluwa.android.data.formatBytes
 
 @Composable fun ManagementSessionScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val session = ui.chat.session ?: return
     val service = session.managementService ?: return
+    val buildProject = if (service == ManagementService.TerminalBuddyBuild) AndroidBuildProject.TerminalBuddy else AndroidBuildProject.Huluwa
     val reconnecting = rememberReconnecting(vm)
     var frpMenu by remember { mutableStateOf(false) }
     val loading = when (service) {
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
-        ManagementService.AppBuild -> ui.androidBuild.tasks.loading
+        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> ui.build(buildProject).tasks.loading
         ManagementService.CheckLogs -> ui.checkLogs.loading
         ManagementService.Library -> ui.library.scan.loading
         ManagementService.Subscriptions -> ui.subscriptions.loading
@@ -77,8 +79,8 @@ import com.huluwa.android.data.formatBytes
                             }
                             "连接状态：$connection\n服务端版本：${overview.version.ifBlank { "未知" }}\n${current.containers.error ?: overview.message}"
                         } }) { Icon(Icons.Outlined.Dns, "Docker 主机信息") }
-                        ManagementService.AppBuild -> IconButton({ vm.loadText("构建详情") {
-                            val build = vm.state.value.androidBuild
+                        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> IconButton({ vm.loadText("构建详情") {
+                            val build = vm.state.value.build(buildProject)
                             val status = build.status
                             val server = status.servers.firstOrNull { it.id == build.serverId }
                             buildString {
@@ -125,7 +127,7 @@ import com.huluwa.android.data.formatBytes
                 when (service) {
                     ManagementService.Frp -> FrpScreen(ui, vm)
                     ManagementService.Docker -> DockerScreen(ui, vm)
-                    ManagementService.AppBuild -> AppBuildScreen(ui, vm, snackbar)
+                    ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> AppBuildScreen(ui, vm, snackbar, buildProject)
                     ManagementService.CheckLogs -> CheckLogsScreen(ui, vm)
                     ManagementService.Library -> LibraryScreen(ui, vm)
                     ManagementService.Subscriptions -> SubscriptionsScreen(ui, vm)

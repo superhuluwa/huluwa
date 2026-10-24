@@ -73,6 +73,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "frp" -> Icons.Outlined.AccountTree
     "docker" -> Icons.Outlined.DirectionsBoat
     "android-build" -> Icons.Outlined.Android
+    "terminalbuddy-build" -> Icons.Outlined.Terminal
     "check-logs" -> Icons.AutoMirrored.Outlined.ListAlt
     "library" -> Icons.Outlined.VideoLibrary
     "subscriptions" -> Icons.Outlined.BookmarkBorder

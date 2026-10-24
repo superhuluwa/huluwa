@@ -21,7 +21,7 @@ import java.io.File
  * 构建产物下载：服务端只下发短时下载票据，这里交给系统 DownloadManager 拉取。
  * 下载在 App 退到后台后仍会继续，完成后可通过 FileProvider 交给系统安装器。
  */
-class AndroidBuildDownloader(private val context: Context, private val api: ApiClient) {
+class AndroidBuildDownloader(private val context: Context, private val api: ApiClient, private val project: AndroidBuildProject = AndroidBuildProject.Huluwa) {
     private val downloads = context.getSystemService(DownloadManager::class.java)
     private val operations = Mutex()
     private val mutable = MutableStateFlow(AndroidDownload())
@@ -35,19 +35,19 @@ class AndroidBuildDownloader(private val context: Context, private val api: ApiC
             val current = mutable.value
             if (current.active) return@withLock
             removeDownload()
-            val ticket = api.post("android", "tasks", task.id.toString(), "download-ticket",
+            val ticket = api.post(*project.path("tasks", task.id.toString(), "download-ticket"),
                 body = jsonBody { put("logFile", logFile) }).asObject()
             val path = ticket.text("path")
             require(path.startsWith("/api/public/android-downloads/")) { "下载地址无效，请刷新页面后重试" }
             val filename = ticket.text("filename").ifBlank {
-                if (logFile) "android-task-${task.id}.log" else "huluwa-${task.versionName}-${task.id}.apk"
+                if (logFile) "android-task-${task.id}.log" else "${project.id}-${task.versionName}-${task.id}.apk"
             }
-            val directory = if (logFile) "logs" else "builds"
+            val directory = (if (logFile) "logs" else "builds") + "/${project.id}"
             val target = File(buildRoot(), "$directory/$filename")
             check(target.parentFile?.isDirectory == true || target.parentFile?.mkdirs() == true) { "无法创建下载目录，请检查手机存储空间" }
             if (target.exists()) check(target.delete()) { "无法清理旧文件，请稍后重试" }
             val request = DownloadManager.Request(Uri.parse(ServerAddress.publicUrl(api.store.server, path).toString()))
-                .setTitle(if (logFile) "葫芦娃构建日志" else "葫芦娃构建安装包")
+                .setTitle(if (logFile) "${project.title}构建日志" else "${project.title}构建安装包")
                 .setDescription("${task.typeLabel} #${task.id} · ${filename}")
                 .setMimeType(if (logFile) "text/plain" else "application/vnd.android.package-archive")
                 .setAllowedOverMetered(true).setAllowedOverRoaming(false)

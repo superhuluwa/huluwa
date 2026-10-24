@@ -1,0 +1,16 @@
+# Update Java while preserving the currently deployed archived web assets.
+FROM huluwa-console:latest AS archived-runtime
+FROM maven:3.9.9-eclipse-temurin-21 AS backend-build
+WORKDIR /workspace
+COPY pom.xml ./
+COPY src/ ./src/
+COPY --from=archived-runtime /app/app.jar /tmp/archived-app.jar
+RUN mkdir -p /tmp/archived \
+    && cd /tmp/archived \
+    && jar xf /tmp/archived-app.jar BOOT-INF/classes/static \
+    && rm -rf /workspace/src/main/resources/static \
+    && if [ -d BOOT-INF/classes/static ]; then cp -a BOOT-INF/classes/static /workspace/src/main/resources/static; fi
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn -B -ntp -Dmaven.test.skip=true package
+FROM archived-runtime
+COPY --from=backend-build /workspace/target/huluwa-console.jar /app/app.jar

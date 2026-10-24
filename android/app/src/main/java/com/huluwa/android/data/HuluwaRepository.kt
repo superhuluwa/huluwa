@@ -242,13 +242,17 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             jsonBody { put("ids", JsonArray(ids.map(::JsonPrimitive))) }).asObject())
     }
 
-    // ---- 安卓 App 构建管理（对应网页端「安卓 App」页面） ----
-    suspend fun androidStatus(serverId: String = "local"): JsonObject = api.get("android", "status", query = mapOf("serverId" to serverId)).asObject()
-    suspend fun androidTasks(limit: Int = 30): List<AndroidBuildTask> =
-        api.get("android", "tasks", query = mapOf("limit" to limit.toString())).asArray().map { AndroidBuildTask.from(it.asObject()) }
-    suspend fun androidUpdate(serverId: String = "local"): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "update", query = mapOf("serverId" to serverId)).asObject())
-    suspend fun androidBuild(serverId: String = "local"): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "build", query = mapOf("serverId" to serverId)).asObject())
-    suspend fun androidCancel(id: Long): AndroidBuildTask = AndroidBuildTask.from(api.post("android", "tasks", id.toString(), "cancel").asObject())
-    suspend fun androidLogs(id: Long, cursor: Long): AndroidLogChunk =
-        AndroidLogChunk.from(api.get("android", "tasks", id.toString(), "logs", query = mapOf("cursor" to cursor.toString())).asObject())
+    // Both app projects share the build protocol and use isolated backend mailboxes.
+    suspend fun androidStatus(serverId: String = "local", project: AndroidBuildProject = AndroidBuildProject.Huluwa): JsonObject =
+        api.get(*project.path("status"), query = mapOf("serverId" to serverId)).asObject()
+    suspend fun androidTasks(limit: Int = 30, project: AndroidBuildProject = AndroidBuildProject.Huluwa): List<AndroidBuildTask> =
+        api.get(*project.path("tasks"), query = mapOf("limit" to limit.toString())).asArray().map { AndroidBuildTask.from(it.asObject()) }
+    suspend fun androidUpdate(serverId: String = "local", project: AndroidBuildProject = AndroidBuildProject.Huluwa): AndroidBuildTask =
+        AndroidBuildTask.from(api.post(*project.path("update"), query = mapOf("serverId" to serverId)).asObject())
+    suspend fun androidBuild(serverId: String = "local", project: AndroidBuildProject = AndroidBuildProject.Huluwa): AndroidBuildTask =
+        AndroidBuildTask.from(api.post(*project.path("build"), query = mapOf("serverId" to serverId)).asObject())
+    suspend fun androidCancel(id: Long, project: AndroidBuildProject = AndroidBuildProject.Huluwa): AndroidBuildTask =
+        AndroidBuildTask.from(api.post(*project.path("tasks", id.toString(), "cancel")).asObject())
+    suspend fun androidLogs(id: Long, cursor: Long, project: AndroidBuildProject = AndroidBuildProject.Huluwa): AndroidLogChunk =
+        AndroidLogChunk.from(api.get(*project.path("tasks", id.toString(), "logs"), query = mapOf("cursor" to cursor.toString())).asObject())
 }

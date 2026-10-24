@@ -110,7 +110,7 @@ private object SessionsColors {
         val background = when (session.kind) {
             "upgrade" -> Color(0xFFE4EDE8)
             "docker" -> Color(0xFFE4EBF4)
-            "android-build" -> Color(0xFFE4F0E7)
+            "android-build", "terminalbuddy-build" -> Color(0xFFE4F0E7)
             "check-logs" -> Color(0xFFEDF1E5)
             "library" -> Color(0xFFE8EFE9)
             "subscriptions" -> Color(0xFFF0EBF6)
@@ -119,7 +119,7 @@ private object SessionsColors {
         val tone = when (session.kind) {
             "upgrade" -> Color(0xFF5F8D77)
             "docker" -> Color(0xFF6A87B2)
-            "android-build" -> Color(0xFF4E8C68)
+            "android-build", "terminalbuddy-build" -> Color(0xFF4E8C68)
             "check-logs" -> Color(0xFF6E8A4E)
             "library" -> Color(0xFF4E7C6A)
             "subscriptions" -> Color(0xFF7E6AA0)
