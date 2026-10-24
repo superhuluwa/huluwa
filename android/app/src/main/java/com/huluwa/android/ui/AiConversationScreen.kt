@@ -166,7 +166,8 @@ import kotlinx.serialization.json.*
                     // 流式内容使用实际布局位置，逐字显示与底部跟随负责平滑过渡。
                     items(entries, key = { it.id }) { entry ->
                         when (entry) {
-                            is AiConversationEntry.Message -> AiMessageBubble(entry.message, session.providerLabel)
+                            is AiConversationEntry.Message -> AiMessageBubble(entry.message, session.providerLabel,
+                                sending = ui.sending && entry.message.id.startsWith("local-"))
                             is AiConversationEntry.Tools -> AiToolGroup(entry.messages, Modifier) { scroll.following = false }
                         }
                     }
@@ -221,7 +222,7 @@ import kotlinx.serialization.json.*
     }
 }
 
-/** 发送后仍可编辑下一条消息，输入框左侧独立显示请求发送进度。 */
+/** 发送后仍可编辑下一条消息，发送进度随待确认的消息展示。 */
 @Composable private fun AiComposer(ui: AiUiState, session: AiSession, send: () -> Unit, stop: () -> Unit, draft: (String) -> Unit) {
     val actionEnabled = if (session.running) !ui.working else ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession
     Surface(color = Color.White) {
@@ -230,12 +231,6 @@ import kotlinx.serialization.json.*
                 Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(), color = AiColors.Background,
                     border = BorderStroke(1.dp, AiColors.Line), shape = RoundedCornerShape(14.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                        if (ui.sending) {
-                            Box(Modifier.width(36.dp).height(48.dp).semantics { contentDescription = "消息发送中" },
-                                contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(Modifier.size(18.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
-                            }
-                        }
                         BasicTextField(value = ui.draft, onValueChange = draft,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp)
                                 .semantics { contentDescription = "消息输入框" },
@@ -267,7 +262,9 @@ import kotlinx.serialization.json.*
 private val AiAvatarSize = 28.dp
 
 /** 用户消息为右侧小气泡；助手正文与思考状态共用左侧头像。 */
-@Composable private fun AiMessageBubble(message: AiAnimatedMessage, provider: String, modifier: Modifier = Modifier) {
+@Composable private fun AiMessageBubble(
+    message: AiAnimatedMessage, provider: String, modifier: Modifier = Modifier, sending: Boolean = false,
+) {
     val mine = message.role == "user"
     val entrance by animateFloatAsState(if (message.entered) 1f else 0f,
         animationSpec = tween(if (mine) 280 else 160, easing = FastOutSlowInEasing), label = "ai-message-entrance")
@@ -277,8 +274,14 @@ private val AiAvatarSize = 28.dp
         translationY = if (mine) (1f - entrance) * 10.dp.toPx() else 0f
     }
     if (mine) {
-        Box(animated, contentAlignment = Alignment.CenterEnd) {
-            Surface(Modifier.padding(start = 28.dp).widthIn(max = 600.dp).animateContentSize(tween(160, easing = LinearOutSlowInEasing)),
+        Row(animated, horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            // 保留气泡左侧的状态位置，确认后隐藏菊花，避免挤动气泡正文。
+            Box(Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+                if (sending) CircularProgressIndicator(
+                    Modifier.size(16.dp).semantics { contentDescription = "消息发送中" },
+                    color = HuluwaColors.Pine, strokeWidth = 2.dp)
+            }
+            Surface(Modifier.weight(1f, fill = false).widthIn(max = 600.dp).animateContentSize(tween(160, easing = LinearOutSlowInEasing)),
                 color = AiColors.SoftGreen, shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomEnd = 3.dp, bottomStart = 12.dp)) {
                 SelectionContainer {
                     Text(message.text, Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
