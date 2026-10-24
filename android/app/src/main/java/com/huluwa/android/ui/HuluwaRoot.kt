@@ -58,7 +58,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
-    // AI 首页把自己的刷新 / 菜单操作交给统一标题栏；不在 AI 标签页时保持不可见。
+    // AI 首页把更多菜单交给统一标题栏；不在 AI 标签页时保持不可见。
     var aiHeader by remember { mutableStateOf<AiHeaderActionsState?>(null) }
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
@@ -116,7 +116,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                                     if (ui.tab == MainTab.Mine) {
                                         HeaderAction(Icons.Outlined.Settings, "连接与账户", { vm.showSheet(AppSheet.Account) })
                                     }
-                                    // AI 首页的刷新与「服务连接 / 退出」菜单同样收在标题栏右侧。
+                                    // AI 首页的「账号切换 / 服务连接 / 退出」菜单收在标题栏右侧。
                                     if (ui.tab == MainTab.Ai) aiHeader?.let { AiHeaderActions(it) }
                                 }
                             }
@@ -156,7 +156,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                     destination == RootPage.ServerStatus ->
                         holder.SaveableStateProvider("server-status") { ServerStatusScreen(ui, vm, snackbar) }
                     destination == RootPage.AiConversation ->
-                        holder.SaveableStateProvider("ai-session:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
+                        holder.SaveableStateProvider("ai-session:${pageAiUi.activeAccountId}:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }

@@ -21,7 +21,7 @@ data class AiLaunchModel(val provider: AiProvider, val model: AiModel) {
 
 /**
  * AI 页面状态。登录、项目 / Agent / 模型选择和当前会话各自独立，
- * 首页刷新不会覆盖正在进行的对话；关闭 App 后重新打开回到选择首页。
+ * 首页同步不会覆盖正在进行的对话；关闭 App 后重新打开回到选择首页。
  */
 data class AiUiState(
     val server: String = "", val username: String = "admin", val authenticated: Boolean = false,
@@ -35,6 +35,8 @@ data class AiUiState(
     val connectionRevision: Long = 0,
     val homeLoaded: Boolean = false,
     val unviewedIds: Set<String> = emptySet(),
+    val accounts: List<AiAccount> = emptyList(), val activeAccountId: String? = null,
+    val switchingAccountId: String? = null,
 ) {
     /** 仅首次取数限制操作，后续刷新保留已有内容并保持页面可操作。 */
     val initialLoading get() = loading && !homeLoaded
@@ -60,7 +62,7 @@ data class AiUiState(
         }
     val selectedModelLabel get() = selectedModelOption?.title ?: selected?.modelLabel.orEmpty()
     val selectedEffortLabel get() = selectedModelOption?.effortLabel?.takeIf(String::isNotBlank) ?: "跟随服务端"
-    val canCreate get() = launchProject != null && launchProvider != null && launchModel != null && !initialLoading && !working
+    val canCreate get() = launchProject != null && launchProvider != null && launchModel != null && !initialLoading && !working && !authenticating
 }
 
 class AiViewModel(application: Application) : AndroidViewModel(application) {
@@ -72,6 +74,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
             projectPath = repository.selectedProject,
             providerId = repository.selectedProvider,
             modelId = repository.selectedModel,
+            accounts = repository.accounts.accounts, activeAccountId = repository.accounts.activeId,
         )
     )
     val state = mutable.asStateFlow()
@@ -120,7 +123,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
             if (network != defaultNetwork) return
             defaultNetwork = null
             defaultNetworkValidated = false
-            if (!visible || !store.loggedIn) return
+            if (!visible || !store.loggedIn || mutable.value.authenticating) return
             cancelConnectionJobs()
             mutable.update { it.copy(reconnecting = true, error = null) }
         }
@@ -139,7 +142,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 网络恢复后取消旧连接和退避等待，立即建立实时连接并补拉完整会话。 */
     private fun reconnectNow() {
-        if (!visible || !store.loggedIn) return
+        if (!visible || !store.loggedIn || mutable.value.authenticating) return
         cancelConnectionJobs()
         mutable.update { it.copy(reconnecting = true, error = null) }
         if (mutable.value.selected == null) {
@@ -155,7 +158,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     /** 只有 AI 标签页可见时才保持连接，后台不占配额。 */
     fun setVisible(active: Boolean) {
         visible = active
-        if (active && store.loggedIn) {
+        if (active && store.loggedIn && !mutable.value.authenticating) {
             if (mutable.value.selected == null) refresh()
             else if (pending == null) startRealtime(reconnecting = true)
         } else {
@@ -165,41 +168,94 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun login(server: String, username: String, password: String) {
-        if (authJob?.isActive == true) return
+    fun login(server: String, username: String, password: String) = authenticate {
+        require(username.isNotBlank()) { "请输入 AI 服务账号" }
+        require(password.isNotEmpty()) { "请输入 AI 服务密码" }
+        repository.login(server, username.trim(), password)
+    }
+
+    fun switchAccount(id: String) {
+        if (id == repository.accounts.activeId) return
+        authenticate(id) { repository.savedConnection(id) }
+    }
+
+    private fun authenticate(accountId: String? = null, connect: suspend () -> AiConnection) {
+        if (authJob?.isActive == true || mutable.value.working) return
         authJob = viewModelScope.launch {
-            mutable.update { it.copy(authenticating = true, error = null) }
+            mutable.update { it.copy(authenticating = true, switchingAccountId = accountId, error = null) }
+            // 验证目标账号期间暂停原账号同步，避免旧连接的 401 中断新登录。
+            cancelConnectionJobs()
             try {
-                require(username.isNotBlank()) { "请输入 AI 服务账号" }
-                require(password.isNotEmpty()) { "请输入 AI 服务密码" }
-                withContext(Dispatchers.IO) { repository.login(server, username.trim(), password) }
-                generation++
-                stopRealtime(); refreshJob?.cancel(); refreshJob = null; selectJob?.cancel(); cancelSend(); actionJob?.cancel()
-                drafts.clear(); requests.clear(); pending = null
-                viewedRevisions.clear(); viewedBaselineReady = false
-                mutable.value = AiUiState(
-                    store.server, store.username, true,
-                    projectPath = repository.selectedProject,
-                    providerId = repository.selectedProvider,
-                    modelId = repository.selectedModel,
-                    connectionRevision = System.currentTimeMillis(),
-                )
+                val connection = withContext(Dispatchers.IO) { connect() }
+                // 激活与旧请求取消在同一个主线程片段完成，旧响应不能写入新账号状态。
+                repository.activate(connection)
+                resetConnection()
+                mutable.value = connectionState()
                 refresh()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                mutable.update { it.copy(authenticating = false, error = e.userMessage()) }
+                if (accountId != null && e is ApiException && e.code == 401) repository.accounts.invalidate(accountId)
+                mutable.update {
+                    it.copy(authenticating = false, switchingAccountId = null, accounts = repository.accounts.accounts,
+                        error = if (accountId != null && e is ApiException && e.code == 401) "该账号登录已过期，请重新登录" else e.userMessage())
+                }
+                resumeConnection()
             }
         }
     }
 
-    fun logout() {
+    fun cancelAuthentication() {
+        val inProgress = mutable.value.authenticating
+        authJob?.cancel(); authJob = null
+        mutable.update { it.copy(authenticating = false, switchingAccountId = null, error = null) }
+        if (inProgress) resumeConnection()
+    }
+
+    private fun resumeConnection() {
+        if (!visible || !store.loggedIn || mutable.value.authenticating) return
+        if (mutable.value.selected == null) {
+            if (mutable.value.homeLoaded) startHomePolling() else refresh()
+        } else if (pending == null) startRealtime(reconnecting = true)
+    }
+
+    /** 清空当前连接的内存状态和在途任务，各账号的磁盘数据仍按身份隔离。 */
+    private fun resetConnection() {
         generation++
-        stopRealtime(); authJob?.cancel(); refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); actionJob?.cancel()
-        repository.sessionCache.clear()
-        store.clear(); repository.lastSession = ""; drafts.clear(); requests.clear(); pending = null
+        stopRealtime(); refreshJob?.cancel(); refreshJob = null; selectJob?.cancel(); cancelSend(); actionJob?.cancel()
+        repository.sessionCache.invalidate()
+        drafts.clear(); requests.clear(); pending = null
         viewedRevisions.clear(); viewedBaselineReady = false
-        mutable.value = AiUiState(store.server, store.username)
+    }
+
+    private fun connectionState() = AiUiState(
+        store.server, store.username, store.loggedIn,
+        projectPath = repository.selectedProject,
+        providerId = repository.selectedProvider,
+        modelId = repository.selectedModel,
+        accounts = repository.accounts.accounts, activeAccountId = repository.accounts.activeId,
+        connectionRevision = mutable.value.connectionRevision + 1,
+    )
+
+    fun logout() {
+        authJob?.cancel(); authJob = null
+        repository.logout()
+        resetConnection()
+        mutable.value = connectionState()
+    }
+
+    fun removeAccount(id: String) {
+        if (mutable.value.authenticating) return
+        try {
+            val current = repository.accounts.activeId == id
+            repository.removeAccount(id)
+            if (current) {
+                resetConnection()
+                mutable.value = connectionState()
+            } else mutable.update { it.copy(accounts = repository.accounts.accounts, error = null) }
+        } catch (e: Throwable) {
+            mutable.update { it.copy(error = e.userMessage()) }
+        }
     }
 
     private fun failure(error: Throwable) {
@@ -222,7 +278,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 首页连接失败时持续退避重试，已有内容和有效选择保持可用。 */
     fun refresh() {
-        if (!store.loggedIn || refreshJob?.isActive == true || mutable.value.deletingAll) return
+        if (!store.loggedIn || mutable.value.authenticating || refreshJob?.isActive == true || mutable.value.deletingAll) return
         val epoch = generation
         refreshJob = viewModelScope.launch {
             mutable.update { it.copy(loading = !it.homeLoaded) }
@@ -271,7 +327,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 首页静默同步摘要标题与运行状态；进入对话或退到后台时由 stopRealtime 停止。 */
     private fun startHomePolling() {
-        if (!visible || !store.loggedIn || mutable.value.selected != null || pollingJob?.isActive == true) return
+        if (!visible || !store.loggedIn || mutable.value.authenticating || mutable.value.selected != null || pollingJob?.isActive == true) return
         val epoch = generation
         pollingJob = viewModelScope.launch {
             var retries = 0
@@ -695,7 +751,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startRealtime(reconnecting: Boolean = false) {
         val id = mutable.value.selected?.id ?: return
-        if (!visible || !store.loggedIn || streamJob?.isActive == true) return
+        if (!visible || !store.loggedIn || mutable.value.authenticating || streamJob?.isActive == true) return
         val epoch = generation
         if (reconnecting) mutable.update { it.copy(reconnecting = true) }
         streamJob = viewModelScope.launch {

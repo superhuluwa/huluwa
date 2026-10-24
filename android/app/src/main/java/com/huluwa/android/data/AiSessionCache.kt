@@ -99,14 +99,23 @@ class AiSessionCache(context: Context, private val store: SessionStore) {
         }
     }
 
-    /** 立即让旧账号的在途读写失效，数据库清理在同一后台队列中完成。 */
-    @Synchronized fun clear() {
+    /** 切换账号时使旧读写失效，保留各账号独立的磁盘缓存。 */
+    @Synchronized fun invalidate() {
         version++
         memory.clear(); pending.clear(); removed.clear()
         flushJob?.cancel(); flushJob = null
+        writer.launch { written.clear() }
+    }
+
+    /** 删除或退出账号时只清理该账号，其他账号的缓存继续保留。 */
+    @Synchronized fun removeAccount(server: String, username: String) {
+        if (store.server == server && store.username == username) invalidate()
+        memory.keys.removeAll { it.server == server && it.username == username }
+        pending.keys.removeAll { it.server == server && it.username == username }
+        removed.removeAll { it.server == server && it.username == username }
         writer.launch {
-            written.clear()
-            runCatching { database.writableDatabase.delete("ai_sessions", null, null) }
+            written.keys.removeAll { it.server == server && it.username == username }
+            runCatching { database.writableDatabase.delete("ai_sessions", "server = ? AND username = ?", arrayOf(server, username)) }
         }
     }
 

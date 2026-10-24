@@ -50,26 +50,56 @@ internal object AiColors {
 
 /** 首页交给根布局标题栏使用的操作；visible=false 时标题栏不显示任何 AI 操作。 */
 data class AiHeaderActionsState(
-    val visible: Boolean, val loading: Boolean, val enabled: Boolean, val reconnecting: Boolean,
-    val onRefresh: () -> Unit, val onConnection: () -> Unit, val onLogout: () -> Unit,
+    val visible: Boolean, val enabled: Boolean, val reconnecting: Boolean,
+    val onAccounts: () -> Unit, val onConnection: () -> Unit, val onLogout: () -> Unit,
 )
+
+private enum class AiPage { Home, Accounts, Connection }
 
 /** 松柏极简首页：紧凑配置区和连续的两行会话列表。 */
 @Composable fun AiScreen(ui: AiUiState, vm: AiViewModel, onHeaderActions: (AiHeaderActionsState) -> Unit) {
-    var connection by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf(AiPage.Home) }
+    var loginAccountId by rememberSaveable { mutableStateOf<String?>(null) }
+    var addingAccount by rememberSaveable { mutableStateOf(false) }
+    var connectionFromAccounts by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<AiSession?>(null) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     val deletableCount = ui.sessions.count { !it.running }
-    BackHandler(connection) { connection = false }
-    LaunchedEffect(ui.authenticated, ui.connectionRevision) { if (ui.authenticated) connection = false }
+    val openConnection: (String?, Boolean, Boolean) -> Unit = { id, adding, fromAccounts ->
+        loginAccountId = id
+        addingAccount = adding
+        connectionFromAccounts = fromAccounts
+        page = AiPage.Connection
+        vm.clearError()
+    }
+    val back: () -> Unit = {
+        vm.cancelAuthentication()
+        page = if (page == AiPage.Connection && connectionFromAccounts) AiPage.Accounts else AiPage.Home
+    }
+    BackHandler(page != AiPage.Home || ui.authenticating) { back() }
+    LaunchedEffect(ui.connectionRevision) { if (ui.authenticated) page = AiPage.Home }
     val header = AiHeaderActionsState(
-        visible = ui.authenticated && !connection, loading = ui.loading, enabled = !ui.deletingAll,
+        visible = ui.authenticated && page == AiPage.Home, enabled = !ui.working && !ui.authenticating,
         reconnecting = ui.reconnecting,
-        onRefresh = vm::refresh, onConnection = { connection = true; vm.clearError() }, onLogout = vm::logout,
+        onAccounts = { page = AiPage.Accounts; vm.clearError() },
+        onConnection = { openConnection(ui.activeAccountId, false, false) }, onLogout = vm::logout,
     )
     SideEffect { onHeaderActions(header) }
-    if (!ui.authenticated || connection) {
-        AiConnection(ui, vm::login, if (ui.authenticated) ({ connection = false }) else null)
+    if (page == AiPage.Connection || (!ui.authenticated && ui.accounts.isEmpty() && page != AiPage.Accounts)) {
+        val account = ui.accounts.find { it.id == loginAccountId }
+        AiConnection(ui, vm::login, if (page == AiPage.Connection) back else null,
+            initialServer = account?.server ?: ui.server,
+            initialUsername = account?.username ?: if (addingAccount) "" else ui.username,
+            title = if (addingAccount) "添加账号" else if (account?.loggedIn == false) "重新登录" else "服务连接",
+            adding = addingAccount)
+        return
+    }
+    if (page == AiPage.Accounts || !ui.authenticated) {
+        AiAccountsScreen(ui, if (ui.authenticated) back else null,
+            add = { openConnection(null, true, true) },
+            select = { account ->
+                if (account.loggedIn) vm.switchAccount(account.id) else openConnection(account.id, false, true)
+            }, remove = vm::removeAccount, clearError = vm::clearError)
         return
     }
     Column(Modifier.fillMaxSize()) {
@@ -124,9 +154,9 @@ data class AiHeaderActionsState(
                         }
                         val hint = when {
                             ui.initialLoading -> "正在同步项目和模型…"
-                            ui.projects.isEmpty() -> "服务端还没有登记项目，请添加后刷新。"
+                            ui.projects.isEmpty() -> "服务端还没有登记项目，请添加后重新进入 AI 工作台。"
                             ui.availableAgents.isEmpty() -> "该项目尚未启用 Claude Code 或 Codex，请在服务端配置。"
-                            ui.availableModels.isEmpty() -> "该 Agent 暂无可用模型，请在服务端配置后刷新。"
+                            ui.availableModels.isEmpty() -> "该 Agent 暂无可用模型，请配置后重新进入 AI 工作台。"
                             else -> null
                         }
                         hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AiColors.Muted) }
@@ -206,19 +236,20 @@ data class AiHeaderActionsState(
     }
 }
 
-/** AI 首页标题栏右侧的刷新与更多菜单。 */
+/** AI 首页标题栏右侧的更多菜单。 */
 @Composable internal fun AiHeaderActions(actions: AiHeaderActionsState) {
     if (!actions.visible) return
-    // 刷新保持图标，断线时由 PageHeader 在标题旁显示重连提示。
-    IconButton(actions.onRefresh, enabled = actions.enabled && !actions.loading) {
-        Icon(Icons.Outlined.Refresh, "刷新项目和模型", Modifier.size(20.dp), tint = HuluwaColors.Pine)
-    }
     var menu by remember { mutableStateOf(false) }
     Box {
-        IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "服务连接操作", Modifier.size(20.dp), tint = HuluwaColors.Pine) }
+        IconButton({ menu = true }, enabled = actions.enabled) {
+            Icon(Icons.Outlined.MoreHoriz, "更多", Modifier.size(20.dp), tint = HuluwaColors.Pine)
+        }
         DropdownMenu(menu, { menu = false }) {
-            DropdownMenuItem(text = { Text("服务连接") }, onClick = { menu = false; actions.onConnection() })
-            DropdownMenuItem(text = { Text("退出 AI 服务") }, onClick = { menu = false; actions.onLogout() })
+            DropdownMenuItem(text = { Text("账号切换") }, enabled = actions.enabled,
+                leadingIcon = { Icon(Icons.Outlined.ManageAccounts, null) },
+                onClick = { menu = false; actions.onAccounts() })
+            DropdownMenuItem(text = { Text("服务连接") }, enabled = actions.enabled, onClick = { menu = false; actions.onConnection() })
+            DropdownMenuItem(text = { Text("退出 AI 服务") }, enabled = actions.enabled, onClick = { menu = false; actions.onLogout() })
         }
     }
 }
@@ -299,16 +330,19 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
 }
 
 /** 服务连接表单：品牌与登录内容整体居中，小屏和键盘弹出时仍可滚动。 */
-@Composable private fun AiConnection(ui: AiUiState, login: (String, String, String) -> Unit, back: (() -> Unit)?) {
-    var server by rememberSaveable(ui.server) { mutableStateOf(ui.server) }
-    var username by rememberSaveable(ui.username) { mutableStateOf(ui.username) }
+@Composable private fun AiConnection(
+    ui: AiUiState, login: (String, String, String) -> Unit, back: (() -> Unit)?,
+    initialServer: String, initialUsername: String, title: String, adding: Boolean,
+) {
+    var server by rememberSaveable(initialServer, title) { mutableStateOf(initialServer) }
+    var username by rememberSaveable(initialUsername, title) { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         if (back != null) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回 AI 首页", Modifier.size(20.dp), tint = AiColors.Muted) }
-                Text("服务连接", style = MaterialTheme.typography.titleMedium)
+                IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", Modifier.size(20.dp), tint = AiColors.Muted) }
+                Text(title, style = MaterialTheme.typography.titleMedium)
             }
         }
         Column(Modifier.weight(1f).fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 24.dp),
@@ -341,7 +375,7 @@ private data class AiChoice(val id: String, val title: String, val subtitle: Str
                         Button({ login(server, username, password) }, Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             enabled = !ui.authenticating, shape = RoundedCornerShape(10.dp)) {
                             if (ui.authenticating) { CircularProgressIndicator(Modifier.size(16.dp), color = AiColors.Muted, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
-                            Text(if (ui.authenticating) "正在连接…" else "连接并登录")
+                            Text(if (ui.authenticating) "正在连接…" else if (adding) "登录并添加" else "连接并登录")
                         }
                     }
                 }
