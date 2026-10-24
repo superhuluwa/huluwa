@@ -35,6 +35,7 @@ private const val CHAT_PAGE_SIZE = 50
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
+    val cachedLocalSessions: List<Session> = emptyList(), val sessionCacheReady: Boolean = false,
     val upgrade: AppUpgradeState = AppUpgradeState(),
     val downloads: LoadState<List<DownloadTask>> = LoadState(emptyList()), val subscriptions: LoadState<List<Subscription>> = LoadState(emptyList()),
     val tunnels: LoadState<List<Tunnel>> = LoadState(emptyList()), val runtime: FrpRuntime = FrpRuntime(),
@@ -57,6 +58,7 @@ data class LibraryState(
 class HuluwaViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as HuluwaApplication).repository
     private val session = repository.api.store
+    private val sessionListCache = (application as HuluwaApplication).sessionListCache
     private val appUpdates = (application as HuluwaApplication).appUpdates
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
     private val buildPreferences = AndroidBuildPreferences(application)
@@ -66,12 +68,15 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
     )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
+        val cached = value.cachedLocalSessions.associateBy { it.id }
         val upgradeTime = upgrade.latest?.publishedAt.orEmpty().ifBlank {
             if (upgrade.checkedAt > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(upgrade.checkedAt), ZoneId.systemDefault())
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) else ""
         }
-        val upgradeSession = Session(UPGRADE_SESSION_ID, "在线升级", "upgrade", if (upgrade.hasUpdate) 1 else 0,
+        val liveUpgradeSession = Session(UPGRADE_SESSION_ID, "在线升级", "upgrade", if (upgrade.hasUpdate) 1 else 0,
             null, upgrade.sessionPreview, upgradeTime)
+        val upgradeSession = if (upgradePreviewReady(upgrade)) liveUpgradeSession
+            else cached[UPGRADE_SESSION_ID] ?: liveUpgradeSession
         val managementSessions = ManagementService.entries.map { service ->
             val preview = when (service) {
                 ManagementService.Frp -> when {
@@ -112,7 +117,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
-            Session(service.sessionId, service.title, service.kind, 0, null, preview)
+            val ready = managementPreviewReady(value, service)
+            // 先沿用上次展示的摘要，拿到有效服务数据后再替换，避免缓存被加载提示覆盖。
+            if (!ready && cached[service.sessionId] != null) cached.getValue(service.sessionId)
+            else Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
         val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
         val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
@@ -121,6 +129,18 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             compareByDescending<Session> { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
         return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = sortedSessions))
     }
+    private fun managementPreviewReady(value: AppState, service: ManagementService) = when (service) {
+        ManagementService.Frp -> value.tunnels.loaded && value.tunnels.error == null
+        ManagementService.Docker -> value.containers.loaded && value.containers.error == null
+        ManagementService.AppBuild -> value.androidBuild.tasks.loaded && !value.androidBuild.connectionError
+        ManagementService.CheckLogs -> value.checkLogs.loaded && value.checkLogs.error == null
+        ManagementService.Library -> value.library.scan.loaded && value.library.scan.error == null
+        ManagementService.Subscriptions -> value.subscriptions.loaded
+            && (value.subscriptions.error == null || value.subscriptions.data.isNotEmpty())
+    }
+    private fun upgradePreviewReady(upgrade: AppUpgradeState) = (upgrade.checked && upgrade.checkError == null)
+        || upgrade.download.active || upgrade.download.phase == UpgradePhase.Ready
+
     val state = combine(mutable, appUpdates.state, buildDownloads.state) { value, upgrade, download ->
         withAppSessions(value.copy(androidBuild = value.androidBuild.copy(download = download)), upgrade)
     }.stateIn(viewModelScope, SharingStarted.Eagerly,
@@ -153,6 +173,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var pollingJob: Job? = null
     private var upgradeDownloadJob: Job? = null
     private var chatJob: Job? = null
+    private var sessionCacheJob: Job? = null
     private var authJob: Job? = null
     private var mutationJob: Job? = null
     private var sheetJob: Job? = null
@@ -162,6 +183,29 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var processingStarted = 0L
 
     init {
+        restoreSessionList()
+        viewModelScope.launch {
+            // 只观察实际展示的列表；轮询结果未变化时不重复落盘。
+            state.map { ui ->
+                if (!ui.auth.loggedIn || !ui.sessionCacheReady || !ui.sessions.loaded) null
+                else sessionListCache.scope()?.let { scope ->
+                    val cachedIds = ui.cachedLocalSessions.map { it.id }.toSet()
+                    scope to ui.sessions.data.filter { row ->
+                        // 首次同步前的加载提示不落盘，已有摘要则继续保留。
+                        !row.isLocal || row.id in cachedIds || when (val service = row.managementService) {
+                            null -> upgradePreviewReady(ui.upgrade)
+                            else -> managementPreviewReady(ui, service)
+                        }
+                    }
+                }
+            }.distinctUntilChanged().collect { snapshot ->
+                if (snapshot != null) {
+                    val (scope, rows) = snapshot
+                    mutable.update { it.copy(cachedLocalSessions = rows.filter { row -> row.isLocal }) }
+                    withContext(Dispatchers.IO) { sessionListCache.write(scope, rows) }
+                }
+            }
+        }
         // 资源轮询只跟随可见的「我的」或服务器详情；FRP / Docker 摘要采用较慢的周期。
         viewModelScope.launch {
             combine(mutable, foregroundState) { ui, active ->
@@ -196,6 +240,26 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** 冷启动先读磁盘；若网络已先返回，则只补充尚未同步的本地服务摘要。 */
+    private fun restoreSessionList() {
+        sessionCacheJob?.cancel()
+        val scope = sessionListCache.scope() ?: return
+        val epoch = generation
+        sessionCacheJob = viewModelScope.launch {
+            val rows = withContext(Dispatchers.IO) { sessionListCache.read(scope) }
+            if (epoch != generation) return@launch
+            mutable.update {
+                it.copy(
+                    sessions = if (rows != null && it.sessions.updatedAt == 0L) it.sessions.copy(
+                        data = rows.filterNot { row -> row.isLocal }, loading = false, loaded = true,
+                    ) else it.sessions,
+                    cachedLocalSessions = rows.orEmpty().filter { row -> row.isLocal },
+                    sessionCacheReady = true,
+                )
+            }
+        }
+    }
+
     fun notify(text: String) { viewModelScope.launch { notices.send(text) } }
     fun authenticate(server: String, username: String, password: String, confirmation: String) {
         if (authJob?.isActive == true) return
@@ -219,6 +283,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.IO) { session.save(address, result.text("username", fallback = username.trim()), result.text("token")) }
                 repository.api.markReachable()
                 mutable.value = initialState()
+                restoreSessionList()
                 if (foreground) startForegroundWork()
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) { mutable.update { it.copy(auth = it.auth.copy(working = false, error = error.userMessage())) } }
@@ -226,9 +291,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun resetSetup() { mutable.update { it.copy(auth = it.auth.copy(setup = false, error = null)) } }
     fun logout(message: String? = null) {
-        generation++; stopForegroundWork(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
+        generation++; stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
-        appUpdates.reset(); buildDownloads.reset(); session.clear(); repository.clearCaches()
+        appUpdates.reset(); buildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
         mutable.value = initialState(error = message)
         if (message != null) notify(message)
@@ -397,7 +462,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshSessions(silent: Boolean = false) = refresh("sessions") {
         val epoch = generation
         if (!silent) mutable.update { it.copy(sessions = it.sessions.copy(loading = !it.sessions.loaded)) }
-        try { val data = repository.sessions(); if (epoch == generation) mutable.update { it.copy(sessions = LoadState(data, loaded = true)) } }
+        try { val data = repository.sessions(); if (epoch == generation) mutable.update { it.copy(sessions = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis())) } }
         catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(sessions = it.sessions.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
     }
@@ -763,7 +828,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun onFrame(frame: JsonObject) {
         val id = frame.text("sessionId")
         when (frame.text("type")) {
-            "chat.sessions" -> mutable.update { it.copy(sessions = LoadState(frame.rows("sessions").map { row -> Session.from(row.asObject()) }, loaded = true)) }
+            "chat.sessions" -> mutable.update { it.copy(sessions = LoadState(frame.rows("sessions").map { row -> Session.from(row.asObject()) }, loaded = true, updatedAt = System.currentTimeMillis())) }
             "chat.messages" -> {
                 val rows = frame.rows("messages").map { ChatMessage.from(it.asObject()) }
                 if (mutable.value.chat.session?.id == id) {
