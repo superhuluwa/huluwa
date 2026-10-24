@@ -196,6 +196,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     fun logout() {
         generation++
         stopRealtime(); authJob?.cancel(); refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); actionJob?.cancel()
+        repository.sessionCache.clear()
         store.clear(); repository.lastSession = ""; drafts.clear(); requests.clear(); pending = null
         viewedRevisions.clear(); viewedBaselineReady = false
         mutable.value = AiUiState(store.server, store.username)
@@ -349,20 +350,29 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         saveSelection()
     }
 
-    /** 打开二级会话页：先用列表里的摘要占位，再拉完整消息并开始实时同步。 */
+    /** 先显示内存 / SQLite 中的完整会话，网络请求与磁盘恢复并行，随后静默同步。 */
     fun open(id: String) {
         refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); stopRealtime()
         pending = null
         val epoch = ++generation
-        val summary = mutable.value.sessions.find { it.id == id }
+        val cacheScope = repository.sessionCache.scope()
+        val cached = cacheScope?.let { repository.sessionCache.peek(it, id) }
+        val initial = cached ?: mutable.value.sessions.find { it.id == id }
         repository.lastSession = id
         mutable.update {
             it.copy(
-                selected = summary, loading = false, loadingSession = true,
+                selected = initial, loading = false, loadingSession = cached == null,
                 draft = drafts[id].orEmpty(), sending = false, working = false, error = null,
             )
         }
         selectJob = viewModelScope.launch {
+            if (cached == null && cacheScope != null) launch restoreCache@{
+                val stored = repository.sessionCache.read(cacheScope, id) ?: return@restoreCache
+                if (epoch == generation) mutable.update { current ->
+                    // 网络若先返回，则不再用磁盘快照覆盖；读缓存不推进已读版本。
+                    if (current.selected === initial) current.copy(selected = stored, loadingSession = false) else current
+                }
+            }
             try {
                 val session = repository.session(id)
                 if (epoch != generation) return@launch
@@ -617,6 +627,8 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     private fun receive(session: AiSession) {
         val selected = mutable.value.selected ?: return
         if (selected.id != session.id || session.revision < selected.revision) return
+        // 只缓存服务端原始快照，本地尚未确认的消息仍由 outgoing 单独管理。
+        repository.sessionCache.scope()?.let { repository.sessionCache.save(it, session) }
         if (pending?.id == session.id) pending = null
         val message = outgoing?.takeIf { it.sessionId == session.id }
         // 只匹配本次发送后新增的用户消息，历史中相同的正文不能提前确认本次发送。
@@ -674,6 +686,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun forgetSession(id: String) {
+        repository.sessionCache.scope()?.let { repository.sessionCache.remove(it, id) }
         ensureViewedBaseline()
         viewedRevisions.remove(id)
         repository.saveViewedRevisions(viewedRevisions)

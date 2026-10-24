@@ -19,6 +19,7 @@ import kotlin.coroutines.resumeWithException
  */
 class AiRepository(context: Context) {
     val store = SessionStore(context, "terminal_buddy_ai_connection", "terminal_buddy_ai_session_v1")
+    val sessionCache = AiSessionCache(context, store)
     private val preferences = context.getSharedPreferences("terminal_buddy_ai_ui", Context.MODE_PRIVATE)
 
     /** 上一次打开的会话；首页选择项按服务地址分别记住，换服务器不会串用。 */
