@@ -113,8 +113,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                                     onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
                                     reconnecting = if (ui.tab == MainTab.Ai) activeAiHeader?.reconnecting == true else reconnecting) {
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
-                                    if (ui.tab == MainTab.Mine) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                        HeaderAction(Icons.Outlined.Refresh, "刷新服务状态", vm::refreshMine, enabled = !ui.mine.loading)
+                                    if (ui.tab == MainTab.Mine) {
                                         HeaderAction(Icons.Outlined.Settings, "连接与账户", { vm.showSheet(AppSheet.Account) })
                                     }
                                     // AI 首页的刷新与「服务连接 / 退出」菜单同样收在标题栏右侧。

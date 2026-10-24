@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LocalMovies
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Pause
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -196,17 +195,14 @@ private enum class DownloadFilter(val title: String) {
 @Composable internal fun DownloadsHeaderActions(ui: AppState, vm: HuluwaViewModel) {
     var menu by remember { mutableStateOf(false) }
     val busy = ui.busy == null && !ui.downloads.loading
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        HeaderAction(Icons.Outlined.Refresh, "刷新下载", { vm.refreshDownloads() }, enabled = !ui.downloads.loading)
-        Box {
-            HeaderAction(Icons.Outlined.Settings, "下载设置", { menu = true })
-            DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
-                DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
-                DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
-                DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
-                    onClick = { menu = false; vm.clearDownloads(type) }) }
-            }
+    Box {
+        HeaderAction(Icons.Outlined.Settings, "下载设置", { menu = true })
+        DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem(text = { Text("离线下载设置") }, onClick = { menu = false; vm.showSettings("dytt") })
+            DropdownMenuItem(text = { Text("qBittorrent 设置") }, onClick = { menu = false; vm.showSettings("magnet") })
+            DropdownMenuItem(text = { Text("迅雷【Win】设置") }, onClick = { menu = false; vm.showSettings("xunlei-win") })
+            DownloadSource.entries.forEach { type -> DropdownMenuItem(text = { Text("清空${type.title}记录") }, enabled = busy,
+                onClick = { menu = false; vm.clearDownloads(type) }) }
         }
     }
 }
