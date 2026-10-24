@@ -11,8 +11,8 @@ services:
     init: true
     stop_grace_period: 60s
     user: "10001:10001"
-    cpus: "${HULUWA_ANDROID_CPUS:-2}"
-    mem_limit: ${HULUWA_ANDROID_MEMORY:-4g}
+    cpus: "${HULUWA_ANDROID_CPUS:-4}"
+    mem_limit: ${HULUWA_ANDROID_MEMORY:-5g}
     pids_limit: 512
     security_opt:
       - no-new-privileges:true
@@ -26,6 +26,8 @@ services:
       retries: 3
     environment:
       HULUWA_ANDROID_PLATFORM: debian
+      HULUWA_ANDROID_GRADLE_WORKERS: ${HULUWA_ANDROID_GRADLE_WORKERS:-4}
+      HULUWA_ANDROID_GRADLE_JVM_ARGS: "${HULUWA_ANDROID_GRADLE_JVM_ARGS:--Xmx3072m -XX:+UseParallelGC -Dfile.encoding=UTF-8}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:

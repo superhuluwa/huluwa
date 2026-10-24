@@ -56,4 +56,26 @@ docker compose -f android-builder/compose.debian.yaml down
 | `huluwa-android-credentials` | Git 凭据，只读 |
 | `data/debian-builder/config.json` | 主服务地址、节点 ID 与密钥，只读 |
 
-Compose 支持 `HULUWA_ANDROID_CPUS`、`HULUWA_ANDROID_MEMORY` 调整资源，支持 `HULUWA_ANDROID_AGENT_CONFIG` 指定配置文件绝对路径。修改后用相同变量重新创建容器。切换主服务或节点会隔离任务目录，避免任务 ID 碰撞；不要用 `down -v` 清除卷。
+## 编译速度与资源配置
+
+Debian 节点默认使用 4 核 CPU、5GB 容器内存、4 个 Gradle 工作线程和 3GB JVM 堆，并采用 Parallel GC 提高编译吞吐量。编译线程和 JVM 参数由 worker 的环境变量配置，不受待打包源码版本影响；未配置这些变量的旧节点继续使用原先的 2 个工作线程和 2GB 堆。
+
+| 环境变量 | Debian 默认值 |
+| --- | --- |
+| `HULUWA_ANDROID_CPUS` | `4` |
+| `HULUWA_ANDROID_MEMORY` | `5g` |
+| `HULUWA_ANDROID_GRADLE_WORKERS` | `4` |
+| `HULUWA_ANDROID_GRADLE_JVM_ARGS` | `-Xmx3072m -XX:+UseParallelGC -Dfile.encoding=UTF-8` |
+
+CPU 限额与 Gradle 工作线程数应一起调整，JVM 堆需为容器内的非堆内存、其他构建进程和宿主机其他服务留出空间。上述默认值用于当前 8 核、8GB 主机；可通过部署时的环境变量或仓库根目录 `.env` 覆盖，修改后等待当前任务结束，再重新创建容器。
+
+```bash
+docker compose -f android-builder/compose.debian.yaml build
+docker compose -f android-builder/compose.debian.yaml up -d --no-build
+```
+
+构建继续使用已有 Git、Gradle 发行包、依赖和任务缓存卷，更新容器不会重新下载全部依赖。新节点第一次构建需要准备缓存，耗时会更长。保留 Release 的 R8 压缩和签名流程。
+
+直接部署在同一台 Debian 宿主机上可以减少少量容器开销，但现有源码和缓存已经位于 Docker 持久卷中，主要编译开销仍来自 CPU、JVM 和 R8。在相同硬件与资源配额下，仅取消 Docker 通常不会解决数倍的速度差异。
+
+支持 `HULUWA_ANDROID_AGENT_CONFIG` 指定配置文件绝对路径。重新创建容器时保持部署变量一致。切换主服务或节点会隔离任务目录，避免任务 ID 碰撞；不要用 `down -v` 清除卷。

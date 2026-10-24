@@ -262,11 +262,15 @@ class Job:
                 'HULUWA_KEY_PASSWORD': signing['keyPassword'],
                 'LC_ALL': 'C.UTF-8',
             }
-            self.stage('COMPILING', '执行 Gradle Release 编译，首次运行需要下载依赖……')
+            workers = os.environ.get('HULUWA_ANDROID_GRADLE_WORKERS', '2')
+            if not re.fullmatch(r'[1-9][0-9]*', workers):
+                raise RuntimeError('HULUWA_ANDROID_GRADLE_WORKERS 必须为正整数。')
+            jvm_args = os.environ.get('HULUWA_ANDROID_GRADLE_JVM_ARGS', '-Xmx2048m -Dfile.encoding=UTF-8')
+            self.stage('COMPILING', f'执行 Gradle Release 编译（{workers} 个工作线程），首次运行需要下载依赖……')
             (android / 'keystore.properties').unlink(missing_ok=True)
             self.run(([str(android / 'gradlew.bat')] if os.name == 'nt' else ['bash', './gradlew']) + [':app:assembleRelease', '--no-daemon', '--console=plain',
-                      '--stacktrace', '--build-cache', '--max-workers=2',
-                      '-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8',
+                      '--stacktrace', '--build-cache', f'--max-workers={workers}',
+                      f'-Dorg.gradle.jvmargs={jvm_args}',
                       '-Pkotlin.compiler.execution.strategy=in-process',
                       '--init-script', str(BUILDER / 'android.init.gradle')], cwd=android, env=env)
             self.stage('VERIFYING', '读取 APK 信息并校验 Release 签名……')
