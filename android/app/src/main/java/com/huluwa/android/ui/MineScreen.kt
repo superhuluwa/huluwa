@@ -1,6 +1,5 @@
 package com.huluwa.android.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,7 +16,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,20 +34,15 @@ import com.huluwa.android.data.*
         contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 3.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { AccountCard(ui, reconnecting) }
+        item {
+            if (!mine.server.loaded && !mine.server.hasSnapshot()) StatusSkeleton()
+            else ServerSummaryCard(mine.server, reconnecting, vm::openServerStatus)
+        }
         if (reconnecting) item {
             StatusNotice("暂时连不上服务器", "已获取的卡片保留上次数据，连接恢复后自动更新。", HuluwaColors.Danger, vm::refreshMine)
         }
         if (!reconnecting && mine.frp.error == null && mine.frp.data.running && (mine.frp.data.failedTunnels ?: 0) > 0) item {
             StatusNotice("${mine.frp.data.failedTunnels} 条隧道需要关注", "进入 FRP 隧道查看错误信息和运行日志。")
-        }
-        item {
-            SectionTitle("我的服务器") {
-                Text(statusUpdatedAt(mine.server.updatedAt, reconnecting || mine.server.error != null || mine.server.data.stale),
-                    color = HuluwaColors.Muted, style = MaterialTheme.typography.labelSmall)
-            }
-            if (!mine.server.loaded && !mine.server.hasSnapshot()) StatusSkeleton()
-            else ServerSummaryCard(mine.server, reconnecting, vm::openServerStatus)
         }
         item {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -74,22 +67,6 @@ import com.huluwa.android.data.*
         }
         item { Text("葫芦娃 · 家里的服务，随身就好。", Modifier.fillMaxWidth().padding(top = 4.dp),
             color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium) }
-    }
-}
-
-@Composable private fun AccountCard(ui: AppState, reconnecting: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(HuluwaColors.SoftGreen), contentAlignment = Alignment.Center) {
-            Text("葫", color = HuluwaColors.PineDark, fontSize = 24.sp, fontFamily = FontFamily.Serif)
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("你好，${ui.auth.username.ifBlank { "未登录" }}", style = MaterialTheme.typography.titleMedium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(ui.auth.server, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        StatusTag(when { reconnecting -> "同步中断"; ui.realtime -> "实时同步"; else -> "轮询同步" }, ui.realtime && !reconnecting)
     }
 }
 
