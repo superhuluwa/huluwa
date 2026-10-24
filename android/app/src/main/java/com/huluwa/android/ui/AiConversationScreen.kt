@@ -221,7 +221,7 @@ import kotlinx.serialization.json.*
     }
 }
 
-/** 输入框上方统一展示模型与用量轻卡片，输入框保留原有编辑和发送行为。 */
+/** 发送后仍可编辑下一条消息，输入框左侧独立显示请求发送进度。 */
 @Composable private fun AiComposer(ui: AiUiState, session: AiSession, send: () -> Unit, stop: () -> Unit, draft: (String) -> Unit) {
     val actionEnabled = if (session.running) !ui.working else ui.draft.isNotBlank() && !ui.sending && !ui.loadingSession
     Surface(color = Color.White) {
@@ -230,6 +230,12 @@ import kotlinx.serialization.json.*
                 Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(), color = AiColors.Background,
                     border = BorderStroke(1.dp, AiColors.Line), shape = RoundedCornerShape(14.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                        if (ui.sending) {
+                            Box(Modifier.width(36.dp).height(48.dp).semantics { contentDescription = "消息发送中" },
+                                contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(18.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
+                            }
+                        }
                         BasicTextField(value = ui.draft, onValueChange = draft,
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp)
                                 .semantics { contentDescription = "消息输入框" },
@@ -248,8 +254,7 @@ import kotlinx.serialization.json.*
                             .semantics { contentDescription = if (session.running) "中断回复" else if (ui.sending) "正在发送" else "发送消息" }) {
                             Box(Modifier.size(32.dp).background(HuluwaColors.Pine.copy(alpha = if (actionEnabled) 1f else .35f), RoundedCornerShape(10.dp)),
                                 contentAlignment = Alignment.Center) {
-                                if (ui.sending && !session.running) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                else Icon(if (session.running) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, null, Modifier.size(18.dp), tint = Color.White)
+                                Icon(if (session.running) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward, null, Modifier.size(18.dp), tint = Color.White)
                             }
                         }
                     }

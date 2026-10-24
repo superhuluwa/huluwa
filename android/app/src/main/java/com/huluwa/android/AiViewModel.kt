@@ -93,6 +93,11 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
     private val drafts = mutableMapOf<String, String>()
     /** 会话 ID → 待发送文本 + requestId；结果未知时重试复用同一个 requestId。 */
     private val requests = mutableMapOf<String, Pair<String, String>>()
+    private data class OutgoingMessage(
+        val sessionId: String, val message: AiMessage, val draft: String, val previousUserMessageIds: Set<String>,
+    )
+    /** 本地先展示的用户消息，收到服务端确认前不被实时快照覆盖。 */
+    private var outgoing: OutgoingMessage? = null
 
     private val connectivity = requireNotNull(application.getSystemService(ConnectivityManager::class.java))
     private var defaultNetwork = connectivity.activeNetwork
@@ -169,7 +174,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 require(password.isNotEmpty()) { "请输入 AI 服务密码" }
                 withContext(Dispatchers.IO) { repository.login(server, username.trim(), password) }
                 generation++
-                stopRealtime(); refreshJob?.cancel(); refreshJob = null; selectJob?.cancel(); sendJob?.cancel(); actionJob?.cancel()
+                stopRealtime(); refreshJob?.cancel(); refreshJob = null; selectJob?.cancel(); cancelSend(); actionJob?.cancel()
                 drafts.clear(); requests.clear(); pending = null
                 viewedRevisions.clear(); viewedBaselineReady = false
                 mutable.value = AiUiState(
@@ -190,7 +195,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun logout() {
         generation++
-        stopRealtime(); authJob?.cancel(); refreshJob?.cancel(); selectJob?.cancel(); sendJob?.cancel(); actionJob?.cancel()
+        stopRealtime(); authJob?.cancel(); refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); actionJob?.cancel()
         store.clear(); repository.lastSession = ""; drafts.clear(); requests.clear(); pending = null
         viewedRevisions.clear(); viewedBaselineReady = false
         mutable.value = AiUiState(store.server, store.username)
@@ -346,7 +351,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 打开二级会话页：先用列表里的摘要占位，再拉完整消息并开始实时同步。 */
     fun open(id: String) {
-        refreshJob?.cancel(); selectJob?.cancel(); sendJob?.cancel(); sendJob = null; stopRealtime()
+        refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); stopRealtime()
         pending = null
         val epoch = ++generation
         val summary = mutable.value.sessions.find { it.id == id }
@@ -376,7 +381,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeSession() {
         generation++
-        selectJob?.cancel(); sendJob?.cancel(); sendJob = null; stopRealtime(); repository.lastSession = ""
+        selectJob?.cancel(); cancelSend(); stopRealtime(); repository.lastSession = ""
         pending = null
         mutable.update {
             it.copy(selected = null, draft = "", loadingSession = false, sending = false, working = false, error = null)
@@ -391,7 +396,7 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         val provider = ui.launchProvider ?: return
         val model = ui.launchModel ?: return
         if (!ui.canCreate) return
-        refreshJob?.cancel(); selectJob?.cancel(); sendJob?.cancel(); sendJob = null; stopRealtime()
+        refreshJob?.cancel(); selectJob?.cancel(); cancelSend(); stopRealtime()
         val session = AiSession(
             id = "local-${UUID.randomUUID()}",
             title = "新对话",
@@ -422,21 +427,55 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         mutable.update { it.copy(draft = text) }
     }
 
+    /** 退出或切换会话时，尚未确认的消息回到草稿，仍可复用原请求标识重试。 */
+    private fun cancelSend() {
+        sendJob?.cancel()
+        sendJob = null
+        clearOutgoing(restoreDraft = true)
+    }
+
+    private fun clearOutgoing(restoreDraft: Boolean) {
+        val message = outgoing ?: return
+        outgoing = null
+        val restored = drafts[message.sessionId].orEmpty().let { draft ->
+            if (restoreDraft && draft.isEmpty()) message.draft else draft
+        }
+        drafts[message.sessionId] = restored
+        mutable.update { current ->
+            val selected = current.selected
+            if (selected == null || selected.id != message.sessionId) current
+            else current.copy(
+                selected = selected.copy(messages = selected.messages.filterNot { it.id == message.message.id }),
+                draft = restored,
+            )
+        }
+    }
+
     fun send() {
-        val session = mutable.value.selected ?: return
-        val text = mutable.value.draft.trim()
-        if (text.isEmpty() || session.running || sendJob?.isActive == true) return
+        val ui = mutable.value
+        val session = ui.selected ?: return
+        val text = ui.draft.trim()
+        if (text.isEmpty() || session.running || ui.sending || ui.loadingSession || sendJob?.isActive == true) return
         val launch = if (pending?.id == session.id) {
-            val project = mutable.value.launchProject ?: return
-            val provider = mutable.value.launchProvider ?: return
-            val model = mutable.value.launchModel ?: return
+            val project = ui.launchProject ?: return
+            val provider = ui.launchProvider ?: return
+            val model = ui.launchModel ?: return
             Triple(project, provider, model)
         } else null
         val request = requests[session.id]?.takeIf { it.first == text }
             ?: (text to UUID.randomUUID().toString()).also { requests[session.id] = it }
+        val message = OutgoingMessage(
+            session.id, AiMessage("local-${request.second}", "user", text, System.currentTimeMillis()), ui.draft,
+            session.messages.filter { it.role == "user" }.mapTo(mutableSetOf()) { it.id },
+        )
+        outgoing = message
+        drafts[session.id] = ""
+        // 点击即显示并清空输入，不等待创建会话或发送接口返回。
+        mutable.update {
+            it.copy(selected = session.copy(messages = session.messages + message.message), draft = "", sending = true, error = null)
+        }
         val epoch = generation
         sendJob = viewModelScope.launch {
-            mutable.update { it.copy(sending = true, error = null) }
             try {
                 val target = if (launch == null) session else repository.create(
                     launch.first, launch.second, launch.third.id,
@@ -444,9 +483,9 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                     if (pending?.id == session.id) pending = null
                     if (epoch == generation && mutable.value.selected?.id == session.id) {
                         if (visible) markViewed(created.id, created.revision)
-                        mutable.update { current -> current.copy(selected = session.copy(id = created.id)) }
-                        drafts.remove(session.id)
-                        drafts[created.id] = text
+                        outgoing = outgoing?.copy(sessionId = created.id)
+                        mutable.update { current -> current.copy(selected = current.selected?.copy(id = created.id)) }
+                        drafts[created.id] = drafts.remove(session.id).orEmpty()
                         requests.remove(session.id)
                         requests[created.id] = request
                     }
@@ -455,17 +494,18 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
                 // 真实会话 ID 就绪后启动实时订阅和轮询，首次发送也能持续接收回复。
                 startRealtime()
                 val result = repository.send(target.id, text, request.second)
+                if (epoch != generation || mutable.value.selected?.id != target.id) return@launch
                 requests.remove(target.id)
-                // 发送成功才清空；失败保留文本和 requestId，可安全重试。
-                if (mutable.value.draft.trim() == text) {
-                    drafts[target.id] = ""
-                    mutable.update { it.copy(draft = "") }
-                }
+                // 幂等重试可能返回历史消息；成功响应本身即可确认，不能只按新增消息判断。
+                clearOutgoing(restoreDraft = false)
                 receive(result)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                if (epoch == generation) failure(e)
+                if (epoch == generation) {
+                    clearOutgoing(restoreDraft = true)
+                    failure(e)
+                }
             } finally {
                 if (epoch == generation) mutable.update { it.copy(sending = false) }
             }
@@ -578,13 +618,23 @@ class AiViewModel(application: Application) : AndroidViewModel(application) {
         val selected = mutable.value.selected ?: return
         if (selected.id != session.id || session.revision < selected.revision) return
         if (pending?.id == session.id) pending = null
+        val message = outgoing?.takeIf { it.sessionId == session.id }
+        // 只匹配本次发送后新增的用户消息，历史中相同的正文不能提前确认本次发送。
+        val accepted = message != null && session.messages.any {
+            it.role == "user" && it.id !in message.previousUserMessageIds && it.text == message.message.text
+        }
+        if (accepted) {
+            outgoing = null
+            requests.remove(session.id)
+        }
+        val displayed = if (message != null && !accepted) session.copy(messages = session.messages + message.message) else session
         // 只有当前可见会话的有效正文快照才算查看；后台或迟到的响应不能清除提示。
         if (visible) markViewed(session.id, session.revision)
         mutable.update { current ->
             val currentSelected = current.selected
             if (currentSelected == null || currentSelected.id != session.id || session.revision < currentSelected.revision) current
             else current.copy(
-                selected = session, loadingSession = false,
+                selected = displayed, loadingSession = false,
                 sessions = (listOf(session.copy(messages = emptyList())) + current.sessions.filterNot { it.id == session.id })
                     .sortedByDescending { it.updatedAt },
             )
