@@ -19,7 +19,8 @@ sealed interface AppSheet {
     data object NewDownload : AppSheet
     data class TunnelEdit(val tunnel: Tunnel? = null) : AppSheet
     data class Settings(val kind: String, val data: LoadState<JsonObject>) : AppSheet
-    data class Films(val card: FilmCard, val data: LoadState<JsonObject>) : AppSheet
+    /** defaultSeason 非空时使用订阅季号直接下载，省略参数配置。 */
+    data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
     data class Text(val title: String, val data: LoadState<String>, val onSave: ((String) -> Unit)? = null) : AppSheet
     data class ContainerDetail(val container: DockerContainer, val data: LoadState<JsonObject>) : AppSheet
@@ -824,11 +825,12 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         perform("delete:${sub.key}", "订阅已删除", after = { refreshSubscriptions(); refreshDownloads(true) }) { repository.deleteSubscription(sub) }
     }
     fun subscribe(card: FilmCard) = perform("subscribe:${card.source}:${card.id}", "已加入我的订阅", close = false, after = { refreshSubscriptions() }) { repository.subscribe(card) }
-    fun filmResources(card: FilmCard) {
-        showSheet(AppSheet.Films(card, LoadState(JsonObject(emptyMap()), loading = true))); val current = sheetGeneration
-        sheetJob = viewModelScope.launch { try { val result = repository.filmResources(card); if (current == sheetGeneration) mutable.update { it.copy(sheet = AppSheet.Films(card, LoadState(result, loaded = true))) } }
+    fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
+        val sheet = AppSheet.Films(card, LoadState(JsonObject(emptyMap()), loading = true), defaultSeason)
+        showSheet(sheet); val current = sheetGeneration
+        sheetJob = viewModelScope.launch { try { val result = repository.filmResources(card); if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = LoadState(result, loaded = true))) } }
             catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { if (current == sheetGeneration) { mutable.update { it.copy(sheet = AppSheet.Films(card, LoadState(JsonObject(emptyMap()), error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } } }
+            catch (error: Throwable) { if (current == sheetGeneration) { mutable.update { it.copy(sheet = sheet.copy(data = LoadState(JsonObject(emptyMap()), error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } } }
     }
     /** 弹框标题上的「重新抓取」：保留当前数据继续显示，只在原地换成加载态并重新拉一遍 */
     fun reloadFilmResources(card: FilmCard) {
@@ -839,11 +841,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         sheetJob?.cancel()
         sheetJob = viewModelScope.launch { try {
             val result = repository.filmResources(card)
-            if (current == sheetGeneration) mutable.update { it.copy(sheet = AppSheet.Films(card, LoadState(result, loaded = true))) }
+            if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = LoadState(result, loaded = true))) }
         } catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = false, error = error.userMessage(), loaded = true))) } } }
     }
-    fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) = perform("episode", "已加入离线下载", after = { refreshDownloads() }) { repository.enqueueEpisode(card, source, item, season, episode) }
+    fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) = perform("episode", "已加入离线下载", close = mutable.value.sheet !is AppSheet.Films, after = { refreshDownloads() }) { repository.enqueueEpisode(card, source, item, season, episode) }
     fun enqueueMagnet(card: FilmCard, item: JsonObject) = perform("magnet", "下载任务已提交", after = { markMagnetDownloaded(card, item); refreshDownloads() }) { repository.enqueueMagnet(card, item) }
     /** 提交成功后把弹框里的这一行标成「已下载」，与网页端弹框一致，不必等重新抓取 */
     private fun markMagnetDownloaded(card: FilmCard, item: JsonObject) {

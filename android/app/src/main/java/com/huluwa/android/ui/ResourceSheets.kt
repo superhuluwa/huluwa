@@ -76,7 +76,7 @@ import kotlinx.serialization.json.*
                         }
                         Feedback(sheet.data.error, { vm.reloadFilmResources(card) })
                         if (!sheet.data.loaded || sheet.data.error != null) return@Column
-                        if (card.isHls) HlsSourceList(card, sheet.data.data, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        if (card.isHls) HlsSourceList(card, sheet.data.data, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                         else MagnetSourceList(card, sheet.data.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
                     }
                 }
@@ -153,8 +153,9 @@ import kotlinx.serialization.json.*
 
 // ---------------------------------------------------------------- 电影天堂：播放线路
 
-@Composable private fun HlsSourceList(card: FilmCard, data: JsonObject, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+@Composable private fun HlsSourceList(card: FilmCard, data: JsonObject, defaultSeason: Int?, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
     val sources = data.rows("playSources").map { PlaySource.from(it.asObject()) }
+        .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 }
     if (sources.isEmpty()) { EmptyHint("该资源没有解析到可用地址"); return }
     var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
     val current = sources[selected.coerceIn(sources.indices)]
@@ -164,7 +165,7 @@ import kotlinx.serialization.json.*
         .map { it.value }
     Text("点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
         style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-    // 线路分页签：对应网页端 ps-tabs，默认第一条（dyttm3u8 由服务端排在前面）
+    // 安卓端优先排列 dyttm3u8 并默认选中第一条，其余线路保持原有顺序。
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sources.forEachIndexed { index, source ->
             val active = index == selected.coerceIn(sources.indices)
@@ -187,7 +188,10 @@ import kotlinx.serialization.json.*
                 Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TinyButton("复制", Icons.Outlined.ContentCopy, primary = true, enabled = item.url.isNotBlank()) { onCopy(item.url) }
                 if (item.url.startsWith("http")) TinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                    vm.showSheet(AppSheet.Episode(card, current.name, item))
+                    if (defaultSeason != null) {
+                        // 沿用订阅季号并识别资源集号；电影正片等无集号条目默认第 1 集。
+                        vm.enqueueEpisode(card, current.name, item, defaultSeason, episodeNumber(item.title) ?: 1)
+                    } else vm.showSheet(AppSheet.Episode(card, current.name, item))
                 }
             }
             Spacer(Modifier.height(4.dp))

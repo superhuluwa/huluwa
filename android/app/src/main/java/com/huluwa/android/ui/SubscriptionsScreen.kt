@@ -70,7 +70,11 @@ import com.huluwa.android.data.*
                     style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     SubscriptionAction("立即检查", Icons.Outlined.Refresh, enabled && sub.enabled, Modifier.weight(1f)) { vm.checkSubscription(sub) }
-                    SubscriptionAction("资源列表", Icons.Outlined.List, true, Modifier.weight(1f)) { vm.filmResources(sub.asFilmCard()) }
+                    SubscriptionAction("资源列表", Icons.Outlined.List, true, Modifier.weight(1f)) {
+                        val defaultSeason = if (sub.source == SubscriptionSource.Hls)
+                            sub.raw.number("season")?.toInt()?.takeIf { it in 1..999 } ?: 1 else null
+                        vm.filmResources(sub.asFilmCard(), defaultSeason = defaultSeason)
+                    }
                 }
             }
         }
