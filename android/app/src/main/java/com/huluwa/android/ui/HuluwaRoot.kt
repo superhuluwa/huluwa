@@ -123,7 +123,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                         },
                         bottomBar = {
                             NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
-                                MainTab.entries.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
+                                MainTab.entries.filterNot { it == MainTab.Ai }.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
                                     icon = { BadgedBox(badge = {
                                         val unread = when (tab) {
                                             MainTab.Functions -> ui.sessions.data.filterNot { it.isSystemSession }.sumOf { it.unread }
