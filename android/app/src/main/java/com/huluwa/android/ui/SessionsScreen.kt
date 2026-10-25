@@ -1,13 +1,15 @@
 package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,6 +44,7 @@ import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.Session
 import com.huluwa.android.data.isServerUnreachable
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.collect
 
 internal val SessionsBackground = Color(0xFFF9FBF8)
 
@@ -93,7 +96,9 @@ private object SessionsColors {
     }
 }
 
-/** 左滑只展开操作按钮，点击后才切换置顶；每个列表同时只展开一行。 */
+private enum class SessionSwipeAnchor { Closed, Revealed }
+
+/** 在固定的整行容器识别左滑，内容直接跟随拖拽偏移，松手后由原生手势停靠。 */
 @Composable private fun SwipeableSessionListRow(
     session: Session,
     pinned: Boolean,
@@ -107,22 +112,40 @@ private object SessionsColors {
     val actionWidth = 88.dp
     val density = LocalDensity.current
     val actionWidthPx = with(density) { actionWidth.toPx() }
-    val velocityThreshold = with(density) { 600.dp.toPx() }
     val tone = if (session.isSystemSession) SessionsColors.System else SessionsColors.Function
     val actionLabel = if (pinned) "取消置顶" else "置顶"
-    var dragging by remember(session.id) { mutableStateOf(false) }
-    var dragOffset by remember(session.id) { mutableFloatStateOf(0f) }
-    val offset by animateFloatAsState(
-        targetValue = if (dragging) dragOffset else if (revealed) -actionWidthPx else 0f,
-        animationSpec = if (dragging) snap() else tween(180),
-        label = "会话左滑操作",
-    )
-    val dragState = rememberDraggableState { delta ->
-        dragOffset = (dragOffset + delta).coerceIn(-actionWidthPx, 0f)
+    val dragState = remember(session.id, actionWidthPx) {
+        AnchoredDraggableState(
+            initialValue = SessionSwipeAnchor.Closed,
+            anchors = DraggableAnchors {
+                SessionSwipeAnchor.Closed at 0f
+                SessionSwipeAnchor.Revealed at -actionWidthPx
+            },
+        )
+    }
+    val interactionSource = remember(session.id) { MutableInteractionSource() }
+    val dragging by interactionSource.collectIsDraggedAsState()
+    val updateReveal by rememberUpdatedState(onRevealChange)
+
+    LaunchedEffect(dragState, interactionSource) {
+        // 从拖拽开始就收起其他行，完全归位后再清除本行的展开标记。
+        snapshotFlow { dragging || dragState.requireOffset() < -0.5f }
+            .collect { updateReveal(it) }
+    }
+    LaunchedEffect(revealed, dragState) {
+        // 父列表只发出收起请求，展开和松手停靠完全交给原生拖拽，避免争抢位移。
+        if (!revealed) dragState.animateTo(SessionSwipeAnchor.Closed, tween(180))
     }
 
-    Box(modifier.fillMaxWidth().clipToBounds()) {
-        if (offset < -0.5f) {
+    Box(
+        modifier.fillMaxWidth().clipToBounds().anchoredDraggable(
+            state = dragState,
+            orientation = Orientation.Horizontal,
+            reverseDirection = false,
+            interactionSource = interactionSource,
+        ),
+    ) {
+        if (dragState.requireOffset() < -0.5f) {
             Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
                 Column(
                     Modifier.fillMaxHeight().width(actionWidth).background(tone)
@@ -139,30 +162,12 @@ private object SessionsColors {
             session = session,
             pinned = pinned,
             showDivider = showDivider,
-            modifier = Modifier.absoluteOffset { IntOffset(offset.roundToInt(), 0) }
-                .draggable(
-                    state = dragState,
-                    orientation = Orientation.Horizontal,
-                    onDragStarted = {
-                        dragOffset = offset
-                        dragging = true
-                        onRevealChange(true)
-                    },
-                    onDragStopped = { velocity ->
-                        val open = when {
-                            velocity < -velocityThreshold -> true
-                            velocity > velocityThreshold -> false
-                            else -> dragOffset < -actionWidthPx / 2f
-                        }
-                        onRevealChange(open)
-                        dragging = false
-                    },
-                )
+            modifier = Modifier.absoluteOffset { IntOffset(dragState.requireOffset().roundToInt(), 0) }
                 .semantics {
                     if (pinned) stateDescription = "已置顶"
                     customActions = listOf(CustomAccessibilityAction(actionLabel) { onTogglePin(); true })
                 },
-            onClick = { if (revealed || offset < -0.5f) onRevealChange(false) else onClick() },
+            onClick = { if (revealed || dragState.requireOffset() < -0.5f) onRevealChange(false) else onClick() },
         )
     }
 }
