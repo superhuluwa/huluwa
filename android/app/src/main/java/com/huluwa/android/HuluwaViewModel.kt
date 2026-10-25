@@ -35,6 +35,7 @@ private const val CHAT_PAGE_SIZE = 50
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
+    val pinnedSessionIds: List<String> = emptyList(),
     val cachedLocalSessions: List<Session> = emptyList(), val sessionCacheReady: Boolean = false,
     val upgrade: AppUpgradeState = AppUpgradeState(),
     val downloads: LoadState<List<DownloadTask>> = LoadState(emptyList()), val subscriptions: LoadState<List<Subscription>> = LoadState(emptyList()),
@@ -70,9 +71,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun buildDownloader(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) buildDownloads else terminalBuddyBuildDownloads
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
     private val buildPreferences = AndroidBuildPreferences(application)
+    private val sessionListPreferences = SessionListPreferences(application)
     private val mutable = MutableStateFlow(initialState())
     private fun initialState(error: String? = null) = AppState(
         auth = AuthState(session.server, session.username, session.loggedIn, error = error),
+        pinnedSessionIds = if (session.loggedIn) sessionListPreferences.pinnedSessions(session.server, session.username) else emptyList(),
         androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
         terminalBuddyBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.TerminalBuddy)),
     )
@@ -134,9 +137,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
         val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
         val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
-        // 管理会话无消息时间，按最旧处理；保留其他会话按更新时间排序的规则。
+        // 最新置顶的会话排在最前，其余仍按更新时间排序；管理会话无消息时间，按最旧处理。
+        val pinOrder = value.pinnedSessionIds.withIndex().associate { it.value to it.index }
         val sortedSessions = (remoteSessions + managementSessions + upgradeSession).sortedWith(
-            compareByDescending<Session> { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
+            compareBy<Session> { pinOrder[it.id] ?: Int.MAX_VALUE }
+                .thenByDescending { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
         return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = sortedSessions))
     }
     private fun managementPreviewReady(value: AppState, service: ManagementService) = when (service) {
@@ -472,6 +477,15 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 if (error is ApiException && error.code == 401) handleError(error)
             }
         }
+    }
+
+    fun toggleSessionPin(id: String) {
+        val current = mutable.value
+        if (!current.auth.loggedIn || state.value.sessions.data.none { it.id == id }) return
+        val pins = if (id in current.pinnedSessionIds) current.pinnedSessionIds - id
+            else listOf(id) + current.pinnedSessionIds
+        sessionListPreferences.savePinnedSessions(current.auth.server, current.auth.username, pins)
+        mutable.update { it.copy(pinnedSessionIds = pins) }
     }
 
     fun refreshSessions(silent: Boolean = false) = refresh("sessions") {

@@ -1,6 +1,13 @@
 package com.huluwa.android.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -9,23 +16,32 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.Session
 import com.huluwa.android.data.isServerUnreachable
+import kotlin.math.roundToInt
 
 internal val SessionsBackground = Color(0xFFF9FBF8)
 
@@ -41,6 +57,11 @@ private object SessionsColors {
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel, system: Boolean = false) {
     val rows = ui.sessions.data.filter { it.isSystemSession == system }
     val listState = rememberLazyListState()
+    var revealedSessionId by remember(system, ui.auth.server, ui.auth.username) { mutableStateOf<String?>(null) }
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) revealedSessionId = null
+    }
+    BackHandler(revealedSessionId != null) { revealedSessionId = null }
 
     LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState,
         overscrollEffect = rememberBounceOverscroll()) {
@@ -53,14 +74,109 @@ private object SessionsColors {
             EmptyContent(if (system) "暂无系统会话" else "暂无功能会话", "", loading = !ui.sessions.loaded)
         }
         itemsIndexed(rows, key = { _, session -> session.id }) { index, session ->
-            SessionListRow(session, index != rows.lastIndex) { vm.openSession(session) }
+            SwipeableSessionListRow(
+                session = session,
+                pinned = session.id in ui.pinnedSessionIds,
+                showDivider = index != rows.lastIndex,
+                revealed = revealedSessionId == session.id,
+                onRevealChange = { open ->
+                    if (open) revealedSessionId = session.id
+                    else if (revealedSessionId == session.id) revealedSessionId = null
+                },
+                onTogglePin = { revealedSessionId = null; vm.toggleSessionPin(session.id) },
+                onClick = {
+                    if (revealedSessionId != null) revealedSessionId = null else vm.openSession(session)
+                },
+                modifier = Modifier.animateItem(),
+            )
         }
     }
 }
 
-@Composable private fun SessionListRow(session: Session, showDivider: Boolean, onClick: () -> Unit) {
+/** 左滑只展开操作按钮，点击后才切换置顶；每个列表同时只展开一行。 */
+@Composable private fun SwipeableSessionListRow(
+    session: Session,
+    pinned: Boolean,
+    showDivider: Boolean,
+    revealed: Boolean,
+    onRevealChange: (Boolean) -> Unit,
+    onTogglePin: () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val actionWidth = 88.dp
+    val density = LocalDensity.current
+    val actionWidthPx = with(density) { actionWidth.toPx() }
+    val velocityThreshold = with(density) { 600.dp.toPx() }
     val tone = if (session.isSystemSession) SessionsColors.System else SessionsColors.Function
-    Box(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)) {
+    val actionLabel = if (pinned) "取消置顶" else "置顶"
+    var dragging by remember(session.id) { mutableStateOf(false) }
+    var dragOffset by remember(session.id) { mutableFloatStateOf(0f) }
+    val offset by animateFloatAsState(
+        targetValue = if (dragging) dragOffset else if (revealed) -actionWidthPx else 0f,
+        animationSpec = if (dragging) snap() else tween(180),
+        label = "会话左滑操作",
+    )
+    val dragState = rememberDraggableState { delta ->
+        dragOffset = (dragOffset + delta).coerceIn(-actionWidthPx, 0f)
+    }
+
+    Box(modifier.fillMaxWidth().clipToBounds()) {
+        if (offset < -0.5f) {
+            Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
+                Column(
+                    Modifier.fillMaxHeight().width(actionWidth).background(tone)
+                        .clickable(role = Role.Button, onClick = onTogglePin),
+                    verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(Icons.Outlined.PushPin, null, Modifier.size(20.dp), tint = Color.White)
+                    Text(actionLabel, color = Color.White, fontSize = 13.sp)
+                }
+            }
+        }
+        SessionListRow(
+            session = session,
+            pinned = pinned,
+            showDivider = showDivider,
+            modifier = Modifier.absoluteOffset { IntOffset(offset.roundToInt(), 0) }
+                .draggable(
+                    state = dragState,
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = {
+                        dragOffset = offset
+                        dragging = true
+                        onRevealChange(true)
+                    },
+                    onDragStopped = { velocity ->
+                        val open = when {
+                            velocity < -velocityThreshold -> true
+                            velocity > velocityThreshold -> false
+                            else -> dragOffset < -actionWidthPx / 2f
+                        }
+                        onRevealChange(open)
+                        dragging = false
+                    },
+                )
+                .semantics {
+                    if (pinned) stateDescription = "已置顶"
+                    customActions = listOf(CustomAccessibilityAction(actionLabel) { onTogglePin(); true })
+                },
+            onClick = { if (revealed || offset < -0.5f) onRevealChange(false) else onClick() },
+        )
+    }
+}
+
+@Composable private fun SessionListRow(
+    session: Session,
+    pinned: Boolean,
+    showDivider: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val tone = if (session.isSystemSession) SessionsColors.System else SessionsColors.Function
+    val background = if (pinned) tone.copy(alpha = 0.06f).compositeOver(SessionsBackground) else SessionsBackground
+    Box(modifier.fillMaxWidth().background(background).clickable(role = Role.Button, onClick = onClick)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 66.4.dp).padding(horizontal = 21.dp, vertical = 9.2.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -68,10 +184,14 @@ private object SessionsColors {
         ) {
             SessionListIcon(session)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text(
-                    session.title, color = SessionsColors.Ink, fontSize = 15.sp, lineHeight = 23.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        session.title, Modifier.weight(1f, fill = false), color = SessionsColors.Ink,
+                        fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    if (pinned) Icon(Icons.Outlined.PushPin, null, Modifier.size(13.dp), tint = tone)
+                }
                 Text(
                     session.preview, color = SessionsColors.Muted, fontSize = 12.sp, lineHeight = 18.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
