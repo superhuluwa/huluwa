@@ -19,7 +19,7 @@ fun settingsTitle(kind: String) = when (kind) {
     "video" -> "视频解析服务设置"
     "xunlei" -> "迅雷【飞牛】连接设置"
     "xunlei-win" -> "迅雷【Win】连接设置"
-    "movie" -> "电影港下载设置"
+    "movie" -> "$MOVIE_SESSION_TITLE 下载设置"
     else -> "离线下载设置"
 }
 private data class SettingField(val key: String, val label: String, val secret: Boolean = false)

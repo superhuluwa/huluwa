@@ -37,7 +37,7 @@ import com.huluwa.android.data.*
         }
         if (rows.isEmpty()) item {
             EmptyContent(
-                "还没有订阅", "在「功能 → 电影港 / 电影天堂」搜索片名，在结果卡片上订阅即可追更",
+                "还没有订阅", "在「功能 → $MOVIE_SESSION_TITLE / 电影天堂」搜索片名，在结果卡片上订阅即可追更",
                 Icons.Outlined.BookmarkBorder, loading = !state.loaded,
             )
         }

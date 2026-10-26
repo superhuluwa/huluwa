@@ -29,8 +29,7 @@ class SessionListCache(context: Context, private val store: SessionStore) {
             val rows = array.map { element ->
                 val row = element as? JsonObject ?: error("列表缓存条目错误")
                 require(row.text("id").isNotBlank())
-                Session(row.text("id"), row.text("title"), row.text("kind"), row.number("unread")?.toInt() ?: 0,
-                    null, row.text("preview"), row.text("updatedAt"))
+                Session.from(row).copy(previewOverride = row.text("preview"))
             }
             memory[key] = rows
             lastWritten[key] = encode(rows)

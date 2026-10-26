@@ -119,9 +119,11 @@ CREATE TABLE IF NOT EXISTS chat_request (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_request_status ON chat_request (status, user_message_id);
 
--- 内置会话：电影港搜索（幂等，重启不覆盖用户数据）
+-- 内置会话：电影港 ★ 磁力搜索（幂等，重启不覆盖用户数据）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
-VALUES ('movie', '电影港', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));
+VALUES ('movie', '电影港 ★ 磁力', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));
+-- 老库标题同步：仅迁移内置旧名称，保留自定义标题和原会话记录。
+UPDATE chat_session SET title = '电影港 ★ 磁力' WHERE id = 'movie' AND title = '电影港';
 
 -- 内置会话：电影天堂搜索（苹果 CMS 采集接口；在线 m3u8 资源，不参与磁力订阅链路，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)

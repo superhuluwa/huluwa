@@ -44,7 +44,7 @@ import com.huluwa.android.data.*
     OutlinedTextField(magnet, { magnet = it; error = null }, Modifier.fillMaxWidth().heightIn(min = 130.dp), label = { Text("磁力链接") }, placeholder = { Text("magnet:?xt=urn:btih:…") },
         enabled = !busy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), isError = error != null)
     error?.let { Text(it, color = HuluwaColors.Danger) }
-    Text("默认下载器可在“我的订阅 → 电影港 → 下载设置”中选择。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+    Text("默认下载器可在“我的订阅 → $MOVIE_SESSION_TITLE → 下载设置”中选择。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
     Button({ if (!magnet.trim().startsWith("magnet:?", true)) error = "请粘贴有效的磁力链接" else vm.newDownload(title, magnet.trim()) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !busy && magnet.isNotBlank()) { Text("添加下载任务") }
 }
 @Composable fun TunnelEditor(tunnel: Tunnel?, busy: Boolean, vm: HuluwaViewModel) {

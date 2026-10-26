@@ -32,6 +32,8 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
     val compression: Boolean = false, val enabled: Boolean = true,
 )
 
+const val MOVIE_SESSION_TITLE = "电影港 ★ 磁力"
+
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
     Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
 }
@@ -63,8 +65,12 @@ data class Session(
     val isSystemSession: Boolean get() = isLocal
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
-        fun from(raw: JsonObject) = Session(raw.text("id"), raw.text("title"), raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
-            (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
+        fun from(raw: JsonObject): Session {
+            val id = raw.text("id")
+            val title = raw.text("title").let { if (id == "movie" && it == "电影港") MOVIE_SESSION_TITLE else it }
+            return Session(id, title, raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
+                (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
+        }
     }
 }
 data class ParsedImage(val url: String, val livePhotoUrl: String = "")
