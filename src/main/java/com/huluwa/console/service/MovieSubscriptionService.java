@@ -1443,7 +1443,7 @@ public class MovieSubscriptionService {
             sql.append(" AND subscription_id = ?");
             params.add(subscriptionId);
         }
-        sql.append(" ORDER BY id DESC LIMIT 100");
+        sql.append(" ORDER BY CASE WHEN status = 'downloading' THEN 0 ELSE 1 END, id DESC LIMIT 100");
         List<Map<String, Object>> list = new ArrayList<>();
         for (Map<String, Object> row : jdbcTemplate.queryForList(sql.toString(), params.toArray())) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -1468,6 +1468,15 @@ public class MovieSubscriptionService {
             list.add(item);
         }
         return list;
+    }
+
+    /** 单条删除仅隐藏记录，下载器任务、文件与订阅去重历史均保留。 */
+    public Map<String, Object> deleteDownload(long id) {
+        int updated = jdbcTemplate.update("""
+                UPDATE movie_download_task SET hidden_at = COALESCE(hidden_at, ?) WHERE id = ?
+                """, now(), id);
+        if (updated == 0) throw new BusinessException(404, "下载记录不存在");
+        return Map.of("id", id, "message", "下载记录已删除");
     }
 
     /**

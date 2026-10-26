@@ -133,7 +133,8 @@ public class HlsDownloadService implements ApplicationRunner {
                        CASE WHEN s.enabled = 0 THEN 1 ELSE 0 END AS paused
                   FROM hls_download_task t LEFT JOIN hls_subscription s ON s.id = t.subscription_id
                  WHERE t.hidden_at IS NULL
-                 ORDER BY t.id DESC LIMIT 500
+                 ORDER BY CASE WHEN t.status IN ('downloading', 'verifying') THEN 0 ELSE 1 END,
+                          t.id DESC LIMIT 500
                 """);
         ActiveProgress active = activeProgress;
         for (Map<String, Object> task : tasks) {
@@ -297,6 +298,26 @@ public class HlsDownloadService implements ApplicationRunner {
                  WHERE id = ? AND status IN ('pending', 'downloading', 'verifying')
                 """, HlsSupport.now(), id);
         if (updated == 0) throw new BusinessException(400, "任务状态已变化，请刷新后重试");
+        cleanupCancelledTask(id);
+        return publicTask(id);
+    }
+
+    /** 单条删除保留去重历史和归档文件，未完成的任务取消后隐藏，巡检不再恢复显示。 */
+    public synchronized Map<String, Object> deleteDownload(long id) {
+        task(id);
+        String now = HlsSupport.now();
+        // 失败和跳过的记录也转为 cancelled，避免 discover() 再次发现时恢复其可见性。
+        int cancelled = db.update("""
+                UPDATE hls_download_task SET status = 'cancelled', next_attempt_at = NULL,
+                       message = '任务已删除', updated_at = ?
+                 WHERE id = ? AND status NOT IN ('completed', 'cancelled')
+                """, now, id);
+        db.update("UPDATE hls_download_task SET hidden_at = COALESCE(hidden_at, ?) WHERE id = ?", now, id);
+        if (cancelled > 0) cleanupCancelledTask(id);
+        return Map.of("id", id, "message", "下载记录已删除");
+    }
+
+    private void cleanupCancelledTask(long id) {
         boolean running = activeTaskId == id;
         if (running) {
             activeCancelled = true;
@@ -305,7 +326,6 @@ public class HlsDownloadService implements ApplicationRunner {
         // 分片和半成品可立即回收；download.log 仍保留给「日志」查看。
         // 当前尝试可能仍由下载线程持有，等它退出后再清理，避免与正在写入的文件竞争。
         if (!running) cleanup(workspaceOf(id));
-        return publicTask(id);
     }
 
     /**

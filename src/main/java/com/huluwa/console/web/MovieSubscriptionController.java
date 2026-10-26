@@ -184,6 +184,12 @@ public class MovieSubscriptionController {
         return ApiResult.ok(subscriptionService.downloads(id, refresh));
     }
 
+    /** 删除单条磁力下载记录，保留下载器任务与去重历史。 */
+    @DeleteMapping("/downloads/{id}")
+    public ApiResult<Map<String, Object>> deleteDownload(@PathVariable long id) {
+        return ApiResult.ok(subscriptionService.deleteDownload(id));
+    }
+
     /** 清空磁力下载列表的全部记录，保留下载器任务与去重历史 */
     @DeleteMapping("/downloads")
     public ApiResult<Map<String, Object>> clearDownloads() {

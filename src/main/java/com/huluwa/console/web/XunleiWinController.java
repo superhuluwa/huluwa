@@ -4,6 +4,7 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.XunleiWinService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,6 +32,12 @@ public class XunleiWinController {
     @GetMapping("/downloads")
     public ApiResult<List<Map<String, Object>>> downloads() {
         return ApiResult.ok(xunleiWinService.downloads());
+    }
+
+    /** 删除单条迅雷【Win】下载记录，不删除远端任务或文件。 */
+    @DeleteMapping("/downloads/{id}")
+    public ApiResult<Map<String, Object>> deleteDownload(@PathVariable long id) {
+        return ApiResult.ok(xunleiWinService.deleteDownload(id));
     }
 
     /** 清空迅雷【Win】全部下载记录。 */

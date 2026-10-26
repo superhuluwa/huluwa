@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -85,7 +86,9 @@ private enum class DownloadFilter(val title: String) {
             filter.matches(task) && (keyword.isBlank() || task.title.contains(keyword, ignoreCase = true)
                 || task.episode.contains(keyword, ignoreCase = true) || task.source.title.contains(keyword, ignoreCase = true))
         }
-        if (sortByName) matches.sortedWith(Comparator { first, second -> collator.compare(first.title, second.title) }) else matches
+        val sorted = if (sortByName) matches.sortedWith(Comparator { first, second -> collator.compare(first.title, second.title) }) else matches
+        // 两种排序都优先展示正在下载的任务，组内保留名称或创建时间顺序。
+        sorted.sortedByDescending { it.isDownloading() }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
         DownloadSummary(tasks, ui.downloads.loaded && ui.downloads.error == null && !reconnecting)
@@ -185,7 +188,7 @@ private enum class DownloadFilter(val title: String) {
             }
         }
         IconToggleButton(sortByName, { onSort() }, Modifier.size(48.dp)) {
-            Icon(Icons.Outlined.Sort, if (sortByName) "已按名称排序，点击恢复默认排序" else "默认排序，点击按名称排序",
+            Icon(Icons.Outlined.Sort, if (sortByName) "下载中置顶，按名称排序，点击按时间排序" else "下载中置顶，按时间排序，点击按名称排序",
                 Modifier.size(19.dp), tint = if (sortByName) HuluwaColors.Pine else HuluwaColors.Muted)
         }
     }
@@ -195,6 +198,9 @@ private enum class DownloadFilter(val title: String) {
 @Composable internal fun DownloadsHeaderActions(ui: AppState, vm: HuluwaViewModel) {
     var menu by remember { mutableStateOf(false) }
     val busy = ui.busy == null && !ui.downloads.loading
+    TextButton(onClick = { vm.clearAllDownloads() }, enabled = busy && ui.downloads.data.isNotEmpty()) {
+        Text("清空记录")
+    }
     Box {
         HeaderAction(Icons.Outlined.Settings, "下载设置", { menu = true })
         DropdownMenu(menu, { menu = false }) {
@@ -345,6 +351,10 @@ private fun copyDownloadPath(savePath: String, context: Context, vm: HuluwaViewM
                     copyDownloadPath(task.savePath, context, vm)
                 })
             DropdownMenuItem(text = { Text("详细信息") }, onClick = { menu = false; showDownloadDetails(task, vm) })
+            HorizontalDivider(color = HuluwaColors.Line)
+            DropdownMenuItem(text = { Text("删除记录", color = HuluwaColors.Danger) }, enabled = enabled,
+                leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = HuluwaColors.Danger) },
+                onClick = { menu = false; vm.deleteDownload(task) })
         }
     }
 }

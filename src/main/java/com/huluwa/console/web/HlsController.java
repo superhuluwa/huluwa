@@ -67,6 +67,10 @@ public class HlsController {
     /** 清空下载记录：隐藏已完成 / 失败 / 跳过的历史行，进行中的任务保留 */
     @DeleteMapping("/downloads")
     public ApiResult<Map<String, Object>> clearDownloads() { return ApiResult.ok(downloads.clearHistory()); }
+    @DeleteMapping("/downloads/{id}")
+    public ApiResult<Map<String, Object>> deleteDownload(@PathVariable long id) {
+        return ApiResult.ok(downloads.deleteDownload(id));
+    }
     @PostMapping("/downloads")
     public ApiResult<Map<String, Object>> download(@RequestBody HlsRequests.Download body) {
         return ApiResult.ok(downloads.enqueue(body));

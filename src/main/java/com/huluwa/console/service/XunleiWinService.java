@@ -263,8 +263,18 @@ public class XunleiWinService {
                        message, query_error AS queryError, created_at AS createdAt,
                        updated_at AS updatedAt, checked_at AS checkedAt, completed_at AS completedAt
                   FROM xunlei_win_download_task
-                 WHERE hidden_at IS NULL ORDER BY id DESC LIMIT 500
+                 WHERE hidden_at IS NULL
+                 ORDER BY CASE WHEN status = 'downloading' THEN 0 ELSE 1 END, id DESC LIMIT 500
                 """);
+    }
+
+    /** 单条删除保留流水号，防止启动迁移补回记录；远端下载任务和文件不受影响。 */
+    public Map<String, Object> deleteDownload(long id) {
+        int updated = jdbcTemplate.update("""
+                UPDATE xunlei_win_download_task SET hidden_at = COALESCE(hidden_at, ?) WHERE id = ?
+                """, HlsSupport.now(), id);
+        if (updated == 0) throw new BusinessException(404, "下载记录不存在");
+        return Map.of("id", id, "message", "下载记录已删除");
     }
 
     /** 清空全部记录；保留流水号以防止启动迁移再次补入已清空的历史任务。 */

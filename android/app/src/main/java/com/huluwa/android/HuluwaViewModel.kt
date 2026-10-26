@@ -911,8 +911,33 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         perform("cancel:${task.key}", "任务已取消", after = { refreshDownloads() }) { repository.cancel(task) }
     }
     fun retryDownload(task: DownloadTask) = perform("retry:${task.key}", "任务已重新加入队列", close = false, after = { refreshDownloads() }) { repository.retry(task) }
+    fun deleteDownload(task: DownloadTask) {
+        val name = listOf(task.title, task.episode).filter { it.isNotBlank() }.joinToString(" ")
+        val detail = if (task.source == DownloadSource.Hls) {
+            "删除「$name」的下载记录；若任务仍在排队或下载，将一并取消，已下载文件保留。"
+        } else {
+            "删除「$name」的下载记录，下载器中的任务继续运行，已下载文件保留。"
+        }
+        confirm("删除下载记录", detail, "删除记录") {
+            perform("delete-download:${task.key}", "下载记录已删除", after = { reloadDownloadsAfterChange() }) {
+                repository.deleteDownload(task)
+                mutable.update { it.copy(downloads = it.downloads.copy(data = it.downloads.data.filterNot { row -> row.key == task.key })) }
+            }
+        }
+    }
+    fun clearAllDownloads() = confirm("清空全部下载记录",
+        "清空所有来源的下载记录，不受搜索和筛选条件影响。进行中的离线任务和已下载文件保留；磁力及迅雷记录清空后，下载器中的任务继续运行。", "清空记录") {
+        perform("clear-all-downloads", "记录已清空，进行中的离线任务已保留", after = { reloadDownloadsAfterChange() }) {
+            repository.clearAllDownloads()
+        }
+    }
+    private fun reloadDownloadsAfterChange() {
+        // 丢弃操作前开始的同步，防止旧快照把刚删除的记录带回列表。
+        refreshJobs.remove("downloads")?.cancel()
+        refreshDownloads()
+    }
     fun clearDownloads(source: DownloadSource) = confirm("清空下载记录", if (source == DownloadSource.Hls) "清空已结束的离线下载记录，保留进行中的任务和已下载文件。" else "清空${source.title}的记录，下载器中的任务会继续运行。", "清空记录") {
-        perform("clear-downloads", "记录已清空", after = { refreshDownloads() }) { repository.clearDownloads(source) }
+        perform("clear-downloads", "记录已清空", after = { reloadDownloadsAfterChange() }) { repository.clearDownloads(source) }
     }
     fun downloadLog(task: DownloadTask) = loadText("下载日志") { repository.downloadLog(task.id) }
     fun checkSubscription(sub: Subscription) = perform("check:${sub.key}", "", close = false, after = { refreshSubscriptions(); refreshDownloads(true) }) { notify(repository.check(sub)) }

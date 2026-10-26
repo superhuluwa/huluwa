@@ -61,12 +61,31 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     }
     suspend fun retry(task: DownloadTask) { require(task.retryable) { "当前任务不能重试" }; api.post("hls", "downloads", task.id, "retry").requireSuccess() }
     suspend fun cancel(task: DownloadTask) { require(task.cancellable) { "当前任务不能取消" }; api.post("hls", "downloads", task.id, "cancel").requireSuccess() }
+    suspend fun deleteDownload(task: DownloadTask) { when (task.source) {
+        DownloadSource.Hls -> api.delete("hls", "downloads", task.id)
+        DownloadSource.Magnet -> api.delete("chat", "subscriptions", "downloads", task.id)
+        DownloadSource.XunleiWin -> api.delete("xunlei-win", "downloads", task.id)
+    }.requireSuccess() }
     suspend fun downloadLog(id: String) = api.get("hls", "downloads", id, "log").asObject().text("content")
     suspend fun clearDownloads(source: DownloadSource) { when (source) {
         DownloadSource.Hls -> api.delete("hls", "downloads")
         DownloadSource.Magnet -> api.delete("chat", "subscriptions", "downloads")
         DownloadSource.XunleiWin -> api.delete("xunlei-win", "downloads")
     }.requireSuccess() }
+    suspend fun clearAllDownloads(): Unit = coroutineScope {
+        // 各来源独立处理，某个来源失败时仍完成其他来源，并明确返回未清空的来源。
+        val results = DownloadSource.entries.map { source -> async {
+            source to sourceResult { clearDownloads(source) }
+        } }.awaitAll()
+        val errors = results.mapNotNull { it.second.exceptionOrNull() }
+        errors.filterIsInstance<ApiException>().firstOrNull { it.code == 401 }?.let { throw it }
+        if (errors.isNotEmpty()) {
+            val details = results.mapNotNull { (source, result) ->
+                result.exceptionOrNull()?.let { "${source.title}：${it.userMessage()}" }
+            }.joinToString("\n")
+            throw IllegalStateException("清空记录未全部完成：\n$details")
+        }
+    }
     suspend fun downloadMagnet(title: String, magnet: String) = api.post("chat", "subscriptions", "magnets", "download", body = jsonBody {
         put("title", title); put("magnet", magnet)
     }).requireSuccess()
