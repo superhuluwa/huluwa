@@ -63,13 +63,13 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
-    BackHandler(ui.chat.session != null && ui.sheet == null) { vm.closeChat() }
+    BackHandler(ui.chat.session != null && ui.sheet == null && !ui.browserVisible) { vm.closeChat() }
     BackHandler(ui.serverStatusVisible && ui.sheet == null) { vm.closeServerStatus() }
     BackHandler(aiActive && aiUi.authenticated && aiUi.selected != null) { aiVm.closeSession() }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else if (ui.browserVisible) {
-        HiddenBrowserScreen(vm)
+        HiddenBrowserScreen(vm, initialUrl = ui.browserUrl)
     } else {
         val activeSession = ui.chat.session
         val page = when {
@@ -160,7 +160,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }
-                    else -> ChatScreen(pageUi, vm, snackbar)
+                    else -> holder.SaveableStateProvider("session:${pageUi.chat.session?.id}") { ChatScreen(pageUi, vm, snackbar) }
                 }
             }
         }

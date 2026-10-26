@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -187,20 +188,58 @@ import kotlinx.coroutines.flow.first
     }
 }
 @Composable private fun FilmResultCard(card: FilmCard, ui: AppState, vm: HuluwaViewModel) {
-    val subscribed = if (card.isMovieHls) false else if (ui.subscriptions.loaded) ui.subscriptions.data.any { it.enabled && it.raw.let { raw ->
-        if (card.isHls) raw.text("resId") == card.id else raw.text("detailUrl") == card.url
-    } } else card.subscribed
-    Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-        Poster(card.title, card.cover, Modifier.width(65.dp))
-        Column(Modifier.weight(1f)) {
-            Text(card.title, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(5.dp)); Text(listOf(card.year, card.genre, card.origin).filter(String::isNotBlank).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(7.dp)); Tag(card.sourceTitle)
+    val subscribed = if (card.subscriptionSource in ui.subscriptionSourcesLoaded)
+        ui.subscriptions.data.any { it.enabled && card.matchesSubscription(it) } else card.subscribed
+    val followBusy = ui.busy == "film-follow:${card.key()}"
+    val websiteBusy = ui.busy == "film-website:${card.key()}"
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(card.title, Modifier.weight(1f).padding(top = 4.dp), style = MaterialTheme.typography.titleMedium,
+            maxLines = 3, overflow = TextOverflow.Ellipsis)
+        if (!card.isMovieHls) FilmFollowButton(subscribed, followBusy, enabled = ui.busy == null) {
+            vm.setFilmFollowing(card, !subscribed)
         }
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (!card.isMovieHls) TextButton({ vm.subscribe(card) }, enabled = !subscribed && ui.busy == null) { Icon(Icons.Outlined.BookmarkBorder, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(if (subscribed) "已订阅" else "订阅追更") }
-        TextButton({ vm.filmResources(card) }) { Text(if (card.isMovieHls) "在线视频" else "资源列表") }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+        Poster(card.title, card.cover, Modifier.width(65.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val metadata = listOf(card.year, card.genre, card.origin).filter(String::isNotBlank).joinToString(" · ")
+            if (metadata.isNotBlank()) Text(metadata, style = MaterialTheme.typography.bodySmall,
+                color = HuluwaColors.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Tag(card.sourceTitle)
+        }
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        OutlinedButton({ vm.filmResources(card) }, Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, HuluwaColors.Line)) {
+            Icon(Icons.Outlined.FormatListBulleted, null, Modifier.size(17.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("资源列表")
+        }
+        TextButton({ vm.openFilmWebsite(card) }, Modifier.fillMaxWidth().heightIn(min = 44.dp),
+            enabled = ui.busy == null, shape = RoundedCornerShape(12.dp)) {
+            if (websiteBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
+            else Icon(Icons.Outlined.Language, null, Modifier.size(17.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (websiteBusy) "正在打开…" else "网站直达")
+        }
+    }
+}
+
+/** 书签与加减徽标表示开始 / 停止追更，两种来源共用同一个右上角操作。 */
+@Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(onClick, Modifier.widthIn(min = 96.dp).heightIn(min = 44.dp), enabled = enabled,
+        shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
+        border = BorderStroke(1.dp, if (subscribed) HuluwaColors.Pine.copy(alpha = .22f) else HuluwaColors.Line),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (subscribed) HuluwaColors.SoftGreen else HuluwaColors.Paper,
+            contentColor = HuluwaColors.Pine,
+            disabledContainerColor = if (subscribed) HuluwaColors.SoftGreen else HuluwaColors.Paper,
+            disabledContentColor = HuluwaColors.Muted,
+        )) {
+        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 1.5.dp)
+        else Icon(painterResource(if (subscribed) R.drawable.ic_film_follow_remove else R.drawable.ic_film_follow_add),
+            null, Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(if (subscribed) "取消追更" else "追更", style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }

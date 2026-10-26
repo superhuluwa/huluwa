@@ -29,6 +29,11 @@ public class MovieHlsController {
         return ApiResult.ok(movies.detail(url));
     }
 
+    @GetMapping("/website")
+    public ApiResult<Map<String, String>> website(@RequestParam String title, @RequestParam String url) {
+        return ApiResult.ok(Map.of("url", movies.websiteUrl(title, url)));
+    }
+
     @GetMapping("/resolve")
     public ApiResult<Map<String, String>> resolve(@RequestParam String url) {
         return ApiResult.ok(Map.of("url", movies.resolve(url)));

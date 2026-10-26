@@ -50,25 +50,25 @@ import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.BrowserAddress
 
 /**
- * 隐藏的无痕浏览器：在「我的」页连续点击顶部标题 10 次进入，界面上不提供任何入口。
+ * 应用内无痕浏览器：支持隐藏入口与影视卡片的「网站直达」，可传入初始页面。
  *
  * 无痕做法：禁用文件访问与混合内容；进入和退出时清除 Cookie、WebStorage 与磁盘缓存；
  * 关闭页面时销毁 WebView，不留下本次浏览的会话数据。
  */
 @SuppressLint("SetJavaScriptEnabled")
-@Composable fun HiddenBrowserScreen(vm: HuluwaViewModel) {
+@Composable fun HiddenBrowserScreen(vm: HuluwaViewModel, initialUrl: String = "") {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val keyboard = LocalSoftwareKeyboardController.current
-    var address by rememberSaveable { mutableStateOf("") }
+    var address by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     // 保存当前页地址，屏幕旋转重建 WebView 时可以恢复浏览位置。
-    var loadedUrl by rememberSaveable { mutableStateOf("") }
+    var loadedUrl by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     var editing by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<String?>(null) }
     // 网页视频全屏：WebView 不自带全屏能力，需由宿主把网页提供的视频视图挂到窗口上。
     val fullscreenHost = remember(activity) { WebFullscreenHost(activity) }
-    val webView = remember {
+    val webView = remember(initialUrl) {
         clearPrivateData()
         WebView(context).apply {
             settings.javaScriptEnabled = true
@@ -114,15 +114,15 @@ import com.huluwa.android.data.BrowserAddress
                     fullscreenHost.hide(callPage = false)
                 }
             }
-            // 屏幕旋转等重建时恢复当前页；首次进入停留在空白起始页。
+            // 屏幕旋转等重建时恢复当前页；网站直达首次进入即加载影片页面。
             if (loadedUrl.isNotBlank()) loadUrl(loadedUrl)
         }
     }
-    /** 返回统一走网页历史；没有可回退的网页时退回「我的」页面。 */
+    /** 返回统一走网页历史；没有可回退的网页时返回原入口。 */
     fun goBackOrExit() {
         if (webView.canGoBack()) webView.goBack() else vm.closeHiddenBrowser()
     }
-    // 系统返回键：全屏播放时先退出全屏；否则与标题栏返回一致，先网页回退，退无可退再回到「我的」。
+    // 系统返回键：全屏播放时先退出全屏；否则与标题栏返回一致，先网页回退，退无可退再返回原入口。
     BackHandler { if (fullscreenHost.isActive) fullscreenHost.hide(callPage = true) else goBackOrExit() }
     val lifecycle = LocalLifecycleOwner.current
     DisposableEffect(lifecycle, webView) {

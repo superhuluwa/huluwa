@@ -39,6 +39,7 @@ data class AppState(
     val cachedLocalSessions: List<Session> = emptyList(), val sessionCacheReady: Boolean = false,
     val upgrade: AppUpgradeState = AppUpgradeState(),
     val downloads: LoadState<List<DownloadTask>> = LoadState(emptyList()), val subscriptions: LoadState<List<Subscription>> = LoadState(emptyList()),
+    val subscriptionSourcesLoaded: Set<SubscriptionSource> = emptySet(),
     val tunnels: LoadState<List<Tunnel>> = LoadState(emptyList()), val runtime: FrpRuntime = FrpRuntime(),
     val containers: LoadState<List<DockerContainer>> = LoadState(emptyList()), val overview: DockerOverview = DockerOverview(),
     val dockerSection: DockerSection = DockerSection.Containers, val resources: Map<DockerSection, LoadState<List<DockerResource>>> = emptyMap(),
@@ -47,7 +48,7 @@ data class AppState(
     val androidBuild: AndroidBuildState = AndroidBuildState(), val clock: Long = System.currentTimeMillis(),
     val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
     val library: LibraryState = LibraryState(),
-    val browserVisible: Boolean = false,
+    val browserVisible: Boolean = false, val browserUrl: String = "",
     val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
 ) {
     fun build(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) androidBuild else terminalBuddyBuild
@@ -362,8 +363,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false) }; refreshCurrent(false) }
 
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, serverStatusVisible = false) } }
-    fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false) }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", serverStatusVisible = false) } }
+    fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "") }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
         if (current.serverStatusVisible) { refreshServer(silent); return }
@@ -564,7 +565,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (!silent) mutable.update { it.copy(subscriptions = it.subscriptions.copy(loading = !it.subscriptions.loaded)) }
         try {
             val result = repository.subscriptions()
-            if (epoch == generation) mutable.update { old -> old.copy(subscriptions = LoadState((result.items + old.subscriptions.data.filter { it.source.name in result.failedSources }).sortedByDescending { it.createdAt }, error = result.warnings.joinToString("\n").ifBlank { null }, loaded = true)) }
+            if (epoch == generation) mutable.update { old -> old.copy(subscriptions = LoadState((result.items + old.subscriptions.data.filter { it.source.name in result.failedSources }).sortedByDescending { it.createdAt }, error = result.warnings.joinToString("\n").ifBlank { null }, loaded = true),
+                subscriptionSourcesLoaded = old.subscriptionSourcesLoaded + SubscriptionSource.entries.filter { it.name !in result.failedSources }) }
         } catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (epoch == generation) { mutable.update { it.copy(subscriptions = it.subscriptions.copy(loading = false, error = error.userMessage(), loaded = true)) }; if (error is ApiException && error.code == 401) handleError(error) } }
     }
@@ -725,6 +727,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             if (service != null) refreshManagement(service) else checkAppUpdate()
             return
         }
+        if (session.kind == "movie" || session.kind == "dytt") refreshSubscriptions(true)
         chatGeneration++; chatJob?.cancel()
         val current = chatGeneration
         // 先同步切到会话页（保证转场立即开始）；进程内已有这一页时直接同步渲染，第一帧就是完整内容。
@@ -944,7 +947,35 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteSubscription(sub: Subscription) = confirm("删除订阅", if (sub.source == SubscriptionSource.Hls) "删除「${sub.title}」及其追更任务记录，已归档文件保留。" else "删除「${sub.title}」及其磁力基线、下载记录，已下载文件保留。", "删除订阅") {
         perform("delete:${sub.key}", "订阅已删除", after = { refreshSubscriptions(); refreshDownloads(true) }) { repository.deleteSubscription(sub) }
     }
-    fun subscribe(card: FilmCard) = perform("subscribe:${card.source}:${card.id}", "已加入我的订阅", close = false, after = { refreshSubscriptions() }) { repository.subscribe(card) }
+    fun setFilmFollowing(card: FilmCard, following: Boolean) {
+        if (card.isMovieHls) return
+        val epoch = generation
+        perform("film-follow:${card.key()}", if (following) "已开启追更" else "已取消追更", close = false,
+            after = { refreshSubscriptions(); if (!following) refreshDownloads(true) }) {
+            refreshJobs.remove("subscriptions")?.cancel()
+            val rows = repository.setFilmFollowing(card, following)
+            if (epoch == generation) {
+                // 取消操作前开始的刷新，避免旧快照把卡片状态改回去。
+                refreshJobs.remove("subscriptions")?.cancel()
+                mutable.update { old -> old.copy(
+                    subscriptions = old.subscriptions.copy(data = (rows + old.subscriptions.data.filter { it.source != card.subscriptionSource })
+                        .sortedByDescending { it.createdAt }),
+                    subscriptionSourcesLoaded = old.subscriptionSourcesLoaded + card.subscriptionSource,
+                ) }
+            }
+        }
+    }
+    fun openFilmWebsite(card: FilmCard) {
+        val epoch = generation
+        val sessionId = mutable.value.chat.session?.id
+        perform("film-website:${card.key()}", "", close = false) {
+            val url = repository.filmWebsite(card)
+            if (epoch == generation && mutable.value.chat.session?.id == sessionId) {
+                dismissSheet()
+                mutable.update { it.copy(browserVisible = true, browserUrl = url, serverStatusVisible = false) }
+            }
+        }
+    }
     fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
         val sheet = AppSheet.Films(card, LoadState(JsonObject(emptyMap()), loading = true), defaultSeason)
         showSheet(sheet); val current = sheetGeneration

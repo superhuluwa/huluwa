@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
@@ -64,6 +65,27 @@ public class MovieHlsService {
             throw new BusinessException(502, "电影港未返回搜索结果，请稍后重试或粘贴新版详情页链接");
         }
         return new ArrayList<>(results.values());
+    }
+
+    /** 老站与手机站不共用作品编号，按片名匹配唯一手机详情页。 */
+    public String websiteUrl(String title, String value) {
+        if (isDetailUrl(value)) return detailUrl(value);
+        String name = websiteSearchTitle(HlsSupport.required(title, "影片名称"));
+        String key = websiteTitleKey(name);
+        List<MovieSearchService.MovieItem> matches = search(name).stream()
+                .filter(item -> websiteTitleKey(item.title()).equals(key)).toList();
+        if (matches.size() == 1) return matches.getFirst().url();
+        throw new BusinessException(400, matches.isEmpty()
+                ? "没有找到该影片对应的电影港手机页面，可在电影港在线会话中搜索"
+                : "电影港手机站有多个同名影片，请在电影港在线会话中选择对应结果");
+    }
+
+    private static String websiteSearchTitle(String title) {
+        return title.replaceAll("[\\[（(【]\\s*(?:全集|完结|更新(?:至|到)\\s*\\d+\\s*集)\\s*[\\]）)】]", "").trim();
+    }
+
+    private static String websiteTitleKey(String title) {
+        return websiteSearchTitle(title).replaceAll("[\\p{P}\\p{Z}\\s]", "").toLowerCase(Locale.ROOT);
     }
 
     public Map<String, Object> detail(String value) {

@@ -135,6 +135,16 @@ data class FilmCard(
     val isMovieHls get() = source == "movie-hls"
     val isHls get() = source == "dytt" || isMovieHls
     val sourceTitle get() = when { isMovieHls -> MOVIE_HLS_SESSION_TITLE; isHls -> "电影天堂"; else -> "电影港" }
+    val subscriptionSource get() = if (isHls) SubscriptionSource.Hls else SubscriptionSource.Movie
+    fun matchesSubscription(subscription: Subscription): Boolean {
+        if (isMovieHls || subscription.source != subscriptionSource) return false
+        if (!isHls) return subscription.raw.text("detailUrl") == url
+        val defaultApi = "https://dyttzyw.com/api.php/provide/vod/"
+        val expectedApi = apiUrl.ifBlank { defaultApi }.trimEnd('/')
+        val actualApi = subscription.raw.text("apiUrl").ifBlank { defaultApi }.trimEnd('/')
+        return subscription.raw.text("resId") == id && actualApi == expectedApi
+    }
+
     /** 同一部作品在两个来源里的唯一键，用于判断弹框是否还停留在同一张卡片上 */
     fun key(): String = "$source:$id"
     companion object {

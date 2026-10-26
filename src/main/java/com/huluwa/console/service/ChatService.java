@@ -554,7 +554,7 @@ public class ChatService {
         int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
         List<ChatMessage> replies = new ArrayList<>();
         replies.add(append(sessionId, "bot", "text", "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown
-                + " 条：\n点击「在线视频」查看分集，可播放、复制 m3u8 直链或离线下载。", null, null));
+                + " 条：\n点击「资源列表」查看分集，可播放、复制 m3u8 直链或离线下载。", null, null));
         for (int i = 0; i < shown; i++) {
             var item = found.get(i);
             String payload = toJson(movieHlsService.payload(item));

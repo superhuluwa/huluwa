@@ -93,9 +93,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun subscriptions(): MultiSourceResult<Subscription> = coroutineScope {
         val results = SubscriptionSource.entries.map { source -> async {
             source to sourceResult {
-                val data = if (source == SubscriptionSource.Hls) api.get("hls", "subscriptions")
-                    else api.get("chat", "subscriptions", query = mapOf("includeDisabled" to "true"))
-                data.asArray().map { Subscription.from(it.asObject(), source) }
+                subscriptionRows(source)
             }
         } }.awaitAll()
         val errors = results.mapNotNull { it.second.exceptionOrNull() }
@@ -105,6 +103,32 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             results.mapNotNull { (source, result) -> result.exceptionOrNull()?.let { "${source.title}：${it.userMessage()}" } },
             results.filter { it.second.isFailure }.map { it.first.name }.toSet())
     }
+    private suspend fun subscriptionRows(source: SubscriptionSource): List<Subscription> {
+        val data = if (source == SubscriptionSource.Hls) api.get("hls", "subscriptions")
+            else api.get("chat", "subscriptions", query = mapOf("includeDisabled" to "true"))
+        return data.asArray().map { Subscription.from(it.asObject(), source) }
+    }
+
+    /** 返回操作后该来源的完整快照，卡片和「我的订阅」同步使用真实状态。 */
+    suspend fun setFilmFollowing(card: FilmCard, following: Boolean): List<Subscription> {
+        require(!card.isMovieHls) { "该来源暂不支持追更" }
+        val rows = subscriptionRows(card.subscriptionSource)
+        if (following) {
+            val saved = subscribe(card)
+            return rows.filterNot { it.key == saved.key } + saved
+        }
+        return rows.map { subscription ->
+            if (!subscription.enabled || !card.matchesSubscription(subscription)) return@map subscription
+            if (subscription.source == SubscriptionSource.Hls) {
+                api.post("hls", "subscriptions", subscription.id, "enabled", body = jsonBody { put("enabled", false) }).requireSuccess()
+            } else api.post("chat", "subscriptions", subscription.id, "unsubscribe").requireSuccess()
+            subscription.copy(enabled = false, raw = jsonBody {
+                subscription.raw.forEach { (key, value) -> put(key, value) }
+                put("enabled", false)
+            })
+        }
+    }
+
     suspend fun check(sub: Subscription): String {
         val response = if (sub.source == SubscriptionSource.Hls) api.post("hls", "subscriptions", sub.id, "check")
             else api.post("chat", "subscriptions", sub.id, "check")
@@ -114,12 +138,13 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         if (sub.source == SubscriptionSource.Hls) api.delete("hls", "subscriptions", sub.id).requireSuccess()
         else api.delete("chat", "subscriptions", sub.id).requireSuccess()
     }
-    suspend fun subscribe(card: FilmCard) {
-        if (card.isHls) api.post("hls", "subscriptions", "quick", body = jsonBody { put("apiUrl", card.apiUrl); put("resId", card.id) }).requireSuccess()
+    private suspend fun subscribe(card: FilmCard): Subscription {
+        val response = if (card.isHls) api.post("hls", "subscriptions", "quick", body = jsonBody { put("apiUrl", card.apiUrl); put("resId", card.id) }).requireSuccess()
         else api.post("chat", "subscriptions", body = jsonBody {
             put("id", card.id); put("title", card.title); put("year", card.year); put("origin", card.origin)
             put("genre", card.genre); put("cover", card.cover); put("url", card.url)
         }).requireSuccess()
+        return Subscription.from(response.asObject().child("subscription"), card.subscriptionSource)
     }
     /** 电影港在线视频读取分集播放页，其余来源沿用原来的资源接口。 */
     suspend fun filmResources(card: FilmCard): JsonObject = if (card.isMovieHls)
@@ -127,6 +152,13 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     else if (card.isHls) api.get("hls", "detail", query = buildMap {
         put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
     }).asObject() else api.get("chat", "subscriptions", "magnets", "preview", query = mapOf("url" to card.url, "title" to card.title)).asObject()
+    suspend fun filmWebsite(card: FilmCard): String {
+        val url = if (card.isHls && !card.isMovieHls) card.url else api.get("chat", "movie-hls", "website", query = mapOf(
+            "url" to card.url, "title" to card.title,
+        )).asObject().text("url")
+        return BrowserAddress.normalize(url)
+    }
+
     suspend fun movieHlsUrl(item: PlayItem): String = api.get("chat", "movie-hls", "resolve", query = mapOf("url" to item.url))
         .asObject().text("url").also { require(it.startsWith("https://") || it.startsWith("http://")) { "未解析到视频地址" } }
 
