@@ -33,7 +33,7 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 const val MOVIE_SESSION_TITLE = "电影港 ★ 磁力"
-const val MOVIE_HLS_SESSION_TITLE = "电影港 ★ m3u8"
+const val MOVIE_HLS_SESSION_TITLE = "电影港 ★ 在线"
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
     Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
@@ -68,7 +68,13 @@ data class Session(
     companion object {
         fun from(raw: JsonObject): Session {
             val id = raw.text("id")
-            val title = raw.text("title").let { if (id == "movie" && it == "电影港") MOVIE_SESSION_TITLE else it }
+            val title = raw.text("title").let {
+                when {
+                    id == "movie" && it == "电影港" -> MOVIE_SESSION_TITLE
+                    id == "movie-hls" && it == "电影港 ★ m3u8" -> MOVIE_HLS_SESSION_TITLE
+                    else -> it
+                }
+            }
             return Session(id, title, raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
                 (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
         }

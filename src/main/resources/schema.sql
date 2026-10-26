@@ -127,7 +127,8 @@ UPDATE chat_session SET title = '电影港 ★ 磁力' WHERE id = 'movie' AND ti
 
 -- 内置会话：电影港在线视频（新版站分集播放页按需解析 m3u8，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
-VALUES ('movie-hls', '电影港 ★ m3u8', 'movie-hls', datetime('now', 'localtime'), datetime('now', 'localtime'));
+VALUES ('movie-hls', '电影港 ★ 在线', 'movie-hls', datetime('now', 'localtime'), datetime('now', 'localtime'));
+UPDATE chat_session SET title = '电影港 ★ 在线' WHERE id = 'movie-hls' AND title = '电影港 ★ m3u8';
 
 -- 内置会话：电影天堂搜索（苹果 CMS 采集接口；在线 m3u8 资源，不参与磁力订阅链路，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
