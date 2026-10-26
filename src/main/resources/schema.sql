@@ -85,7 +85,7 @@ VALUES (1, datetime('now', 'localtime'));
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | dytt | magnet | video | xunlei | xunlei-win | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | movie-hls | dytt | magnet | video | xunlei | xunlei-win | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -124,6 +124,10 @@ INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('movie', '电影港 ★ 磁力', 'movie', datetime('now', 'localtime'), datetime('now', 'localtime'));
 -- 老库标题同步：仅迁移内置旧名称，保留自定义标题和原会话记录。
 UPDATE chat_session SET title = '电影港 ★ 磁力' WHERE id = 'movie' AND title = '电影港';
+
+-- 内置会话：电影港在线视频（新版站分集播放页按需解析 m3u8，幂等）
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('movie-hls', '电影港 ★ m3u8', 'movie-hls', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- 内置会话：电影天堂搜索（苹果 CMS 采集接口；在线 m3u8 资源，不参与磁力订阅链路，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)

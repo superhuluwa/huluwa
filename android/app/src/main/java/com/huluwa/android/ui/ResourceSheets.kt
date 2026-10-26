@@ -81,7 +81,7 @@ import kotlinx.serialization.json.*
                     }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
-                FilmDialogFooter(!sheet.data.loaded, vm)
+                FilmDialogFooter(!sheet.data.loaded, card.isMovieHls, vm)
             }
         }
     }
@@ -107,9 +107,9 @@ import kotlinx.serialization.json.*
 }
 
 /** 底部：说明文字 + 「关闭」，与网页端弹框 footer 一致 */
-@Composable private fun FilmDialogFooter(loading: Boolean, vm: HuluwaViewModel) {
+@Composable private fun FilmDialogFooter(loading: Boolean, movieHls: Boolean, vm: HuluwaViewModel) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(if (loading) "正在抓取资源…" else "下载结果会推送到对应下载工具会话；同名剧归入同一文件夹",
+        Text(if (loading) "正在抓取资源…" else if (movieHls) "播放和复制时解析直链；离线任务在「下载 → 离线剧集」查看" else "下载结果会推送到对应下载工具会话；同名剧归入同一文件夹",
             Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
         OutlinedButton(vm::dismissSheet, Modifier.height(36.dp), shape = RoundedCornerShape(11.dp), border = BorderStroke(1.dp, HuluwaColors.Line),
             contentPadding = PaddingValues(horizontal = 14.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = HuluwaColors.Pine)) { Text("关闭", style = MaterialTheme.typography.labelLarge) }
@@ -156,14 +156,14 @@ import kotlinx.serialization.json.*
 @Composable private fun HlsSourceList(card: FilmCard, data: JsonObject, defaultSeason: Int?, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
     val sources = data.rows("playSources").map { PlaySource.from(it.asObject()) }
         .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 }
-    if (sources.isEmpty()) { EmptyHint("该资源没有解析到可用地址"); return }
+    if (sources.isEmpty()) { EmptyHint(if (card.isMovieHls) "该作品暂未提供 m3u8 播放列表" else "该资源没有解析到可用地址"); return }
     var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
     val current = sources[selected.coerceIn(sources.indices)]
     // 剧集按集号倒序（新集在前）；识别不出集号的条目按原顺序排在最后，与网页端 sortPlayItems 一致
     val items = current.items.withIndex()
         .sortedWith(compareByDescending<IndexedValue<PlayItem>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
         .map { it.value }
-    Text("点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
+    Text(if (card.isMovieHls) "选择分集即可播放、复制 m3u8 直链或离线下载" else "点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
         style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
     // 安卓端优先排列 dyttm3u8 并默认选中第一条，其余线路保持原有顺序。
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -183,6 +183,24 @@ import kotlinx.serialization.json.*
         }
     }
     items.forEach { item ->
+        if (card.isMovieHls) {
+            ResourceRow {
+                Text(item.title, style = MaterialTheme.typography.bodyMedium, color = HuluwaColors.Ink)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TinyButton("播放", Icons.Outlined.PlayCircleOutline, primary = true, enabled = !busy) {
+                        vm.resolveMovieHls(item, onPlay)
+                    }
+                    TinyButton("复制直链", Icons.Outlined.ContentCopy, primary = false, enabled = !busy) {
+                        vm.resolveMovieHls(item, onCopy)
+                    }
+                    TinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
+                        vm.showSheet(AppSheet.Episode(card, current.name, item))
+                    }
+                }
+            }
+            return@forEach
+        }
         ResourceRow {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -273,7 +291,7 @@ private fun episodeNumber(title: String): Int? {
     var season by rememberSaveable(sheet.card.id, sheet.item.url) { mutableStateOf("1") }
     var episode by rememberSaveable(sheet.card.id, sheet.item.url) { mutableStateOf(
         Regex("(?:第\\s*|S\\d+E|EP?)(\\d+)", RegexOption.IGNORE_CASE).find(sheet.item.title)?.groupValues?.get(1)
-            ?: sheet.item.title.trim().toIntOrNull()?.toString().orEmpty()) }
+            ?: sheet.item.title.trim().toIntOrNull()?.toString() ?: if (sheet.card.isMovieHls) "1" else "") }
     var error by remember { mutableStateOf<String?>(null) }
     LabelValue("剧集", sheet.card.title)
     LabelValue("当前资源", "${sheet.source} · ${sheet.item.title}")

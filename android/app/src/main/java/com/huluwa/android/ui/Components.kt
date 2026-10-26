@@ -65,7 +65,7 @@ import java.time.format.DateTimeFormatter
 
 fun sessionIcon(kind: String): ImageVector = when (kind) {
     "movie" -> Icons.Outlined.LocalMovies
-    "dytt" -> Icons.Outlined.PlayCircleOutline
+    "dytt", "movie-hls" -> Icons.Outlined.PlayCircleOutline
     "magnet" -> Icons.Outlined.CloudDownload
     "video" -> Icons.Outlined.SmartDisplay
     "xunlei", "xunlei-win" -> Icons.Outlined.Bolt
@@ -81,7 +81,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     else -> Icons.AutoMirrored.Outlined.Chat
 }
 fun sessionColor(kind: String): Color = when (kind) {
-    "movie" -> HuluwaColors.Lilac
+    "movie", "movie-hls" -> HuluwaColors.Lilac
     "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber
@@ -92,7 +92,7 @@ fun sessionColor(kind: String): Color = when (kind) {
 
 /** 会话品牌图标与网页版 SessionIcon.vue 保持一致；无品牌图标的会话返回 null。 */
 private fun sessionBrandIcon(kind: String): Int? = when (kind) {
-    "movie" -> R.drawable.session_icon_movie
+    "movie", "movie-hls" -> R.drawable.session_icon_movie
     "dytt" -> R.drawable.session_icon_dytt
     "magnet" -> R.drawable.session_icon_magnet
     "video" -> R.drawable.session_icon_video

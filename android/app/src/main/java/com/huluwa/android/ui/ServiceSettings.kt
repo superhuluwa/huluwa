@@ -39,7 +39,7 @@ private data class SettingField(val key: String, val label: String, val secret: 
             Text("此设置用于新建电影港订阅和手动磁力下载，已有订阅保留各自的下载器。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
             Button({ vm.saveSettings(sheet.kind, jsonBody { put("downloader", tool) }) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !busy) { Text("保存设置") }
         }
-        "dytt" -> HlsSettings(settings, busy, vm)
+        "dytt", "movie-hls" -> HlsSettings(settings, busy, vm)
         else -> {
             val fields = when (sheet.kind) {
                 "magnet" -> listOf(SettingField("url", "服务地址"), SettingField("username", "账号"), SettingField("password", "密码", true), SettingField("savePath", "保存目录（可选）"))

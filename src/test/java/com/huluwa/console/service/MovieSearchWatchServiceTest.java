@@ -48,7 +48,7 @@ class MovieSearchWatchServiceTest {
         push = mock(ChatPushService.class);
         MovieSubscriptionService subscriptions = mock(MovieSubscriptionService.class);
         when(subscriptions.subscribedUrls()).thenReturn(Set.of());
-        chat = new ChatService(jdbc, search, mock(DyttSearchService.class), mock(QBittorrentService.class),
+        chat = new ChatService(jdbc, search, mock(DyttSearchService.class), mock(MovieHlsService.class), mock(QBittorrentService.class),
                 new MessageService(jdbc), subscriptions, mock(VideoParseService.class), mock(XunleiService.class),
                 mock(XunleiWinService.class), mock(ChatRequestService.class), push);
         watches = new MovieSearchWatchService(jdbc, search, chat, push, transactionManager, 30);

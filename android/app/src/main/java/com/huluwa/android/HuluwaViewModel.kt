@@ -965,6 +965,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         } catch (error: CancellationException) { throw error }
         catch (error: Throwable) { if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = false, error = error.userMessage(), loaded = true))) } } }
     }
+    fun resolveMovieHls(item: PlayItem, onResolved: (String) -> Unit) {
+        val current = sheetGeneration
+        perform("movie-hls-resolve", "", close = false) {
+            val url = repository.movieHlsUrl(item)
+            if (current == sheetGeneration) onResolved(url)
+        }
+    }
     fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) = perform("episode", "已加入离线下载", close = mutable.value.sheet !is AppSheet.Films, after = { refreshDownloads() }) { repository.enqueueEpisode(card, source, item, season, episode) }
     fun enqueueMagnet(card: FilmCard, item: JsonObject) = perform("magnet", "下载任务已提交", after = { markMagnetDownloaded(card, item); refreshDownloads() }) { repository.enqueueMagnet(card, item) }
     /** 提交成功后把弹框里的这一行标成「已下载」，与网页端弹框一致，不必等重新抓取 */

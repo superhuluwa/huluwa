@@ -121,13 +121,19 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             put("genre", card.genre); put("cover", card.cover); put("url", card.url)
         }).requireSuccess()
     }
-    /** 资源列表：电影天堂取播放线路，电影港取详情页磁力（与网页端两个弹框使用同一组接口） */
-    suspend fun filmResources(card: FilmCard): JsonObject = if (card.isHls) api.get("hls", "detail", query = buildMap {
+    /** 电影港在线视频读取分集播放页，其余来源沿用原来的资源接口。 */
+    suspend fun filmResources(card: FilmCard): JsonObject = if (card.isMovieHls)
+        api.get("chat", "movie-hls", "detail", query = mapOf("url" to card.url)).asObject()
+    else if (card.isHls) api.get("hls", "detail", query = buildMap {
         put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
     }).asObject() else api.get("chat", "subscriptions", "magnets", "preview", query = mapOf("url" to card.url, "title" to card.title)).asObject()
+    suspend fun movieHlsUrl(item: PlayItem): String = api.get("chat", "movie-hls", "resolve", query = mapOf("url" to item.url))
+        .asObject().text("url").also { require(it.startsWith("https://") || it.startsWith("http://")) { "未解析到视频地址" } }
+
     suspend fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) {
         require(episode > 0 && season > 0) { "季号和集号必须大于零" }
-        api.post("hls", "downloads", body = jsonBody {
+        val path = if (card.isMovieHls) arrayOf("chat", "movie-hls", "downloads") else arrayOf("hls", "downloads")
+        api.post(*path, body = jsonBody {
             put("apiUrl", card.apiUrl); put("resId", card.id); put("title", card.title); put("year", card.year)
             put("season", season); put("episode", episode); put("episodeTitle", item.title); put("url", item.url); put("sourceName", source)
         }).requireSuccess()

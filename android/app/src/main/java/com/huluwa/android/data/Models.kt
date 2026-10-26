@@ -33,6 +33,7 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
 )
 
 const val MOVIE_SESSION_TITLE = "电影港 ★ 磁力"
+const val MOVIE_HLS_SESSION_TITLE = "电影港 ★ m3u8"
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
     Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
@@ -125,7 +126,9 @@ data class FilmCard(
     val year: String, val genre: String, val origin: String, val apiUrl: String,
     val sources: List<PlaySource>, val subscribed: Boolean,
 ) {
-    val isHls get() = source == "dytt"
+    val isMovieHls get() = source == "movie-hls"
+    val isHls get() = source == "dytt" || isMovieHls
+    val sourceTitle get() = when { isMovieHls -> MOVIE_HLS_SESSION_TITLE; isHls -> "电影天堂"; else -> "电影港" }
     /** 同一部作品在两个来源里的唯一键，用于判断弹框是否还停留在同一张卡片上 */
     fun key(): String = "$source:$id"
     companion object {

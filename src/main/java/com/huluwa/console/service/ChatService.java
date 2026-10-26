@@ -48,6 +48,8 @@ public class ChatService {
     public static final String SYSTEM_SESSION = "system";
     /** 电影港会话键（schema 内置） */
     public static final String MOVIE_SESSION = "movie";
+    /** 电影港在线视频会话键（与磁力会话独立） */
+    public static final String MOVIE_HLS_SESSION = "movie-hls";
     /** 电影天堂会话键（schema 内置） */
     public static final String DYTT_SESSION = "dytt";
     /** 磁力下载会话键（schema 内置） */
@@ -97,6 +99,7 @@ public class ChatService {
     private final JdbcTemplate jdbcTemplate;
     private final MovieSearchService movieSearchService;
     private final DyttSearchService dyttSearchService;
+    private final MovieHlsService movieHlsService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
@@ -108,7 +111,7 @@ public class ChatService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
-                       DyttSearchService dyttSearchService,
+                       DyttSearchService dyttSearchService, MovieHlsService movieHlsService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
                        VideoParseService videoParseService, XunleiService xunleiService,
@@ -118,6 +121,7 @@ public class ChatService {
         this.jdbcTemplate = jdbcTemplate;
         this.movieSearchService = movieSearchService;
         this.dyttSearchService = dyttSearchService;
+        this.movieHlsService = movieHlsService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
@@ -374,6 +378,8 @@ public class ChatService {
             if ("movie".equals(kind)) {
                 // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
                 replies.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
+            } else if ("movie-hls".equals(kind)) {
+                replies.addAll(runMovieHlsSearch(sessionId, normalizeKeyword(text)));
             } else if ("dytt".equals(kind)) {
                 // 电影天堂（dyttzyw）搜索：只需要去掉可选的指令前缀，关键字保持原样
                 replies.addAll(runDyttSearch(sessionId, normalizeDyttKeyword(text)));
@@ -537,6 +543,26 @@ public class ChatService {
             sb.append('\n').append("详情：").append(item.url());
         }
         return sb.toString();
+    }
+
+    /** 新版电影港搜索仅返回轻量卡片，分集与直链由资源接口按需抓取。 */
+    private List<ChatMessage> runMovieHlsSearch(String sessionId, String keyword) {
+        List<MovieSearchService.MovieItem> found = movieHlsService.search(keyword);
+        if (found.isEmpty()) {
+            return List.of(append(sessionId, "bot", "error", "未搜索到「" + keyword + "」相关资源，换个片名试试。", null, null));
+        }
+        int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
+        List<ChatMessage> replies = new ArrayList<>();
+        replies.add(append(sessionId, "bot", "text", "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown
+                + " 条：\n点击「在线视频」查看分集，可播放、复制 m3u8 直链或离线下载。", null, null));
+        for (int i = 0; i < shown; i++) {
+            var item = found.get(i);
+            String payload = toJson(movieHlsService.payload(item));
+            replies.add(item.cover() == null || item.cover().isBlank()
+                    ? append(sessionId, "bot", "text", caption(item), null, payload)
+                    : append(sessionId, "bot", "image", item.cover(), caption(item), payload));
+        }
+        return replies;
     }
 
     /** 电影港搜索：对齐参考脚本「摘要一条 + 每条结果一条气泡（封面+配文）」的回复形态 */

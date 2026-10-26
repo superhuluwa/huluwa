@@ -79,7 +79,7 @@ import kotlinx.coroutines.flow.first
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(content, { content = it }, Modifier.weight(1f), maxLines = 4,
-                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; "movie-hls" -> "输入片名或新版详情链接…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
                         textStyle = MaterialTheme.typography.bodyMedium, shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = HuluwaColors.Line, unfocusedContainerColor = HuluwaColors.Paper))
                     FilledIconButton({ val text = content.trim(); if (text.isNotEmpty()) { vm.send(text); content = "" } }, enabled = content.isNotBlank() && !chat.loading,
@@ -187,7 +187,7 @@ import kotlinx.coroutines.flow.first
     }
 }
 @Composable private fun FilmResultCard(card: FilmCard, ui: AppState, vm: HuluwaViewModel) {
-    val subscribed = if (ui.subscriptions.loaded) ui.subscriptions.data.any { it.enabled && it.raw.let { raw ->
+    val subscribed = if (card.isMovieHls) false else if (ui.subscriptions.loaded) ui.subscriptions.data.any { it.enabled && it.raw.let { raw ->
         if (card.isHls) raw.text("resId") == card.id else raw.text("detailUrl") == card.url
     } } else card.subscribed
     Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
@@ -196,11 +196,11 @@ import kotlinx.coroutines.flow.first
             Text(card.title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(5.dp)); Text(listOf(card.year, card.genre, card.origin).filter(String::isNotBlank).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(7.dp)); Tag(if (card.isHls) "电影天堂" else "电影港")
+            Spacer(Modifier.height(7.dp)); Tag(card.sourceTitle)
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        TextButton({ vm.subscribe(card) }, enabled = !subscribed && ui.busy == null) { Icon(Icons.Outlined.BookmarkBorder, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(if (subscribed) "已订阅" else "订阅追更") }
-        TextButton({ vm.filmResources(card) }) { Text("资源列表") }
+        if (!card.isMovieHls) TextButton({ vm.subscribe(card) }, enabled = !subscribed && ui.busy == null) { Icon(Icons.Outlined.BookmarkBorder, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(if (subscribed) "已订阅" else "订阅追更") }
+        TextButton({ vm.filmResources(card) }) { Text(if (card.isMovieHls) "在线视频" else "资源列表") }
     }
 }
