@@ -83,6 +83,19 @@ final class HlsDownloadProgress {
         return decimal(value) * Math.pow(1024, power);
     }
 
+    synchronized void acceptBytes(long received, long total, long startedAt) {
+        double elapsed = Math.max(0.001, (System.nanoTime() - startedAt) / 1_000_000_000d);
+        tracks.put("direct", new Track(total > 0 ? Math.min(100, received * 100d / total) : 0,
+                received / elapsed, System.nanoTime()));
+        phase = "downloading";
+    }
+
+    synchronized void markMerging() {
+        Track direct = tracks.get("direct");
+        if (direct != null) tracks.put("direct", new Track(100, 0, System.nanoTime()));
+        phase = "merging";
+    }
+
     synchronized Snapshot snapshot() {
         if (tracks.isEmpty()) return new Snapshot(null, "", phase);
         double percent = tracks.values().stream().mapToDouble(Track::percent).average().orElse(0);

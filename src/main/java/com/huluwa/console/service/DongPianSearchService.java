@@ -48,18 +48,19 @@ import java.util.regex.Pattern;
  * 结果以小写十六进制放入 {@code x-ai-movie-signature}，并同时带上
  * {@code x-ai-movie-timestamp} 与 {@code x-ai-movie-nonce}。
  *
- * <p><b>用到的三个接口</b>：
+ * <p><b>用到的四个接口</b>：
  * <ol>
  *   <li>{@code GET /v1/browse/catalog?q=片名&limit=N} —— 搜索，返回作品卡片；</li>
  *   <li>{@code GET /v1/catalog/{作品ID}} —— 作品详情，返回海报 / 年份 / 地区 / 类型与每集 {@code token}；</li>
- *   <li>{@code GET /v1/playback/resolve/{该集token}} —— 播放解析，返回该集全部线路（{@code line_options}）。</li>
+ *   <li>{@code GET /v1/playback/resolve/{该集token}} —— 播放解析，返回该集全部线路（{@code line_options}）；</li>
+ *   <li>{@code POST /v1/playback/resolve-line} —— 官方线路按集兑换地址。</li>
  * </ol>
  *
  * <p><b>线路形态</b>：{@code line_options} 中第三方资源站通常直接给出 m3u8；
  * 官方线路则给出 {@code resolve_required=true}、url 为 {@code resolve://…} 的票据，
  * 需要通过 {@code POST /v1/playback/resolve-line} 按集兑换。官方直链可能是 MP4 或没有扩展名，
  * 甚至使用图片后缀，因此兑换结果按站点的 {@code resolved} 标记与 HTTP(S) 地址判断，不能仅认 m3u8。
- * 播放与复制支持这些视频直链，离线下载仍只支持 m3u8。
+ * 播放、复制与离线下载均支持这些视频直链；下载任务执行时才兑换地址。
  *
  * <p><b>线路按需解析</b>：每条线路的每一集都要单独请求一次 {@code /v1/playback/resolve}
  * （单次约 2-3 秒），一部 40 集的剧全量解析要 10 秒以上，长剧更久。因此
@@ -97,7 +98,7 @@ public class DongPianSearchService {
     private static final int PROBE_EPISODES = 1;
     /** 单条线路首屏先返回的集数，其余在后台继续解析（避免用户干等十几秒） */
     private static final int FIRST_SCREEN_EPISODES = 12;
-    /** 单条线路最多解析的集数，避免超长短剧把请求拖到分钟级 */
+    /** 第三方线路后台最多预解析的集数；列表与用户主动点选不受此上限限制 */
     private static final int MAX_LINE_EPISODES = 150;
     /** 并发解析数：实测 10 并发约 2.5 秒/集，既能压住总耗时也不至于触发限流 */
     private static final int CONCURRENCY = 6;
@@ -184,7 +185,7 @@ public class DongPianSearchService {
         private volatile Map<String, String> tickets = Map.of();
         /** 票据是否已取过（可能一条都没有，避免重复请求站点） */
         private volatile boolean ticketsLoaded;
-        /** 已兑换出的官方视频直链（线路名 → URL），重复点同一集不再兑换 */
+        /** 永久记录在内存中的副本（线路名 → URL），重复点同一集不再获取 */
         private final Map<String, String> redeemed = new ConcurrentHashMap<>();
         /** 已提交到后台队列：避免反复点同一线路时把同一集重复排队（解析本身靠 synchronized 去重） */
         private volatile boolean queued;
@@ -286,16 +287,26 @@ public class DongPianSearchService {
         return catalog(requireId(id));
     }
 
+    /** 主动打开或刷新资源列表时重新取得更新集数，已保存的链接由数据库保留。 */
+    public Catalog refreshDetail(String id) {
+        String valid = requireId(id);
+        cache.remove(valid);
+        return catalog(valid);
+    }
+
     /**
      * 作品的线路清单（只含名称与集数）。
      *
      * <p>只解析一集、且**不兑换官方线路**——线路名从原始 `line_options` 直接读，
-     * 不需要真实地址，所以这里几乎不耗额度、也快。真实地址在用户点选某条线路时才拉。
+     * 不需要真实地址，所以这里几乎不耗额度、也快。真实地址在用户主动解析或下载时才获取。
      *
      * @param catalog {@link #detail(String)} 的返回值
      * @return 按站点权重降序的线路；该集一条线路都没有时抛异常
      */
     public List<Line> lines(Catalog catalog) {
+        if (catalog.episodes().isEmpty()) {
+            return List.of();
+        }
         Map<String, LineAcc> merged = new LinkedHashMap<>();
         int probe = Math.min(PROBE_EPISODES, catalog.episodes().size());
         for (int i = 0; i < probe; i++) {
@@ -306,7 +317,7 @@ public class DongPianSearchService {
         if (merged.isEmpty()) {
             throw new DongPianException("该作品暂无可播放的线路", null);
         }
-        int total = Math.min(catalog.episodes().size(), MAX_LINE_EPISODES);
+        int total = catalog.episodes().size();
         List<Line> result = new ArrayList<>();
         merged.values().stream()
                 .sorted(Comparator.comparingInt(LineAcc::weight).reversed())                .forEach(acc -> result.add(new Line(acc.name(), total)));
@@ -314,18 +325,22 @@ public class DongPianSearchService {
     }
 
     /**
-     * 只取某集的线路名与权重，**不兑换、不缓存**。
+     * 只取某集的线路名与权重，**不兑换地址**，票据留存供点击后使用。
      *
      * <p>`line_options` 里官方线路虽然只有 `resolve://` 票据，但显示名和权重是齐全的，
      * 生成线路清单足够了——避免为了「看到名字」去兑换、白耗限额。
      */
     private List<LineAcc> probeLineNames(Episode episode) {
         List<LineAcc> names = new ArrayList<>();
+        Map<String, String> tickets = new LinkedHashMap<>();
         JsonNode root = getJson(API_RESOLVE + encode(episode.token()));
         for (JsonNode node : root.path("line_options")) {
             String name = firstNonBlank(text(node, "display_label"), text(node, "label"), text(node, "provider_name"));
             if (name.isEmpty()) {
                 continue;
+            }
+            if (node.path("resolve_required").asBoolean(false) && text(node, "url").startsWith("resolve://")) {
+                tickets.putIfAbsent(name, text(node, "url"));
             }
             // 直链要有 m3u8；官方线路只要有票据就算候选
             boolean usable = node.path("resolved").asBoolean(false)
@@ -334,6 +349,10 @@ public class DongPianSearchService {
             if (usable) {
                 names.add(new LineAcc(name, node.path("preference_weight").asInt(0)));
             }
+        }
+        synchronized (episode) {
+            episode.tickets = tickets;
+            episode.ticketsLoaded = true;
         }
         return names;
     }
@@ -345,38 +364,33 @@ public class DongPianSearchService {
      * <ul>
      *   <li>直链线路：每集一次站点请求（约 1.6 秒），首屏同步解析前
      *       {@value #FIRST_SCREEN_EPISODES} 集，其余后台补；</li>
-     *   <li>官方线路：点选线路时只兑换第一集，其余集在用户点开时按需兑换。</li>
+     *   <li>官方线路：点选线路时只列出已更新集数，不兑换地址，下载任务执行或用户主动解析时才兑换。</li>
      * </ul>
      *
      * @param catalog  作品详情
      * @param lineName 线路显示名（{@link Line#name()}）
-     * @return 当前已解析出来的播放地址（按集号升序）；一集都没有时抛异常
+     * @return 全部分集（按集号升序）；未解析的集地址留空，官方线路无需预先兑换
      */
     public List<PlayItem> line(Catalog catalog, String lineName) {
         String wanted = lineName == null ? "" : lineName.trim();
         if (wanted.isEmpty()) {
             throw new DongPianException("请指定线路", null);
         }
-        int total = Math.min(catalog.episodes().size(), MAX_LINE_EPISODES);
+        int total = catalog.episodes().size();
         List<Episode> episodes = catalog.episodes().subList(0, total);
 
-        // 先把已有缓存一次性读进内存，避免逐个查库；之后只解析真正缺失的集
+        // 永久保存的链接先批量回填；没有保存过的官方集数保持空地址。
+        loadSavedLinks(episodes, wanted);
         loadCachedEpisodes(episodes);
 
         boolean official = isOfficialLine(episodes, wanted);
         List<PlayItem> items = new ArrayList<>();
         if (official) {
-            // 官方线路：站点配额只有「约 20 秒 3 次」，绝不批量兑换。
-            // 只兑换第一集，其余集在用户点开时走 /api/dpd/episode 单集兑换。
+            // 展示线路只返回已更新剧集与永久链接，不预兑换第一集，也不消耗下载额度。
             for (Episode episode : episodes) {
                 String url = episode.redeemed.get(wanted);
                 items.add(new PlayItem(episode.title(), url == null ? "" : url));
             }
-            String first = resolveSingle(episodes.getFirst(), wanted);
-            if (first == null) {
-                throw new DongPianException("线路「" + wanted + "」暂未返回可播放的直链，请稍后重试或换一条线路", null);
-            }
-            items.set(0, new PlayItem(episodes.getFirst().title(), first));
             return items;
         }
 
@@ -426,7 +440,7 @@ public class DongPianSearchService {
 
         // 仍有未解析的集：后台继续补（直链），不阻塞本次响应
         if (unresolved > 0) {
-            for (Episode episode : episodes) {
+            for (Episode episode : episodes.subList(0, Math.min(MAX_LINE_EPISODES, episodes.size()))) {
                 if (episode.lines == null && episode.markQueued()) {
                     CompletableFuture.runAsync(() -> resolveQuietly(episode), pool);
                 }
@@ -482,6 +496,10 @@ public class DongPianSearchService {
             return cached.catalog();
         }
         JsonNode root = getJson(API_CATALOG + encode(id));
+        // 使用站点实际更新 / 可用集数，不使用包含未来占位集的 total_episode_count。
+        int updated = root.path("current_episode_count").asInt(-1);
+        int available = root.path("available_episode_count").asInt(-1);
+        if (available >= 0) updated = updated >= 0 ? Math.min(updated, available) : available;
         List<Episode> episodes = new ArrayList<>();
         for (JsonNode node : root.path("episodes")) {
             String token = text(node, "token");
@@ -495,15 +513,18 @@ public class DongPianSearchService {
             }
             episodes.add(new Episode(id, title, token));
         }
-        if (episodes.isEmpty()) {
-            throw new DongPianException("该作品没有可播放的分集", null);
+        if (updated >= 0 && episodes.size() > updated) {
+            episodes = new ArrayList<>(episodes.subList(0, updated));
+        }
+        if (episodes.isEmpty() && updated != 0) {
+            throw new DongPianException("该作品没有已更新的分集", null);
         }
         int year = root.path("year").asInt(0);
         double score = root.path("score").asDouble(0);
         Catalog catalog = new Catalog(id, text(root, "title"),
                 year > 0 ? String.valueOf(year) : "",
                 text(root, "area"), String.join(",", strings(root.path("genres"))),
-                text(root, "poster_url"), text(root, "remarks"),
+                text(root, "poster_url"), firstNonBlank(text(root, "episode_progress_text"), text(root, "remarks")),
                 score > 0 ? trimNumber(score) : null,
                 List.copyOf(episodes));
         cache.put(id, new CachedCatalog(catalog, System.currentTimeMillis()));
@@ -567,6 +588,7 @@ public class DongPianSearchService {
                 }
             }
             episode.tickets = tickets;
+            episode.ticketsLoaded = true;
             episode.lines = lines;
             // 只缓存直链部分：官方线路地址带签名、随时可能过期，缓存没有意义
             if (!lines.isEmpty()) {
@@ -619,8 +641,11 @@ public class DongPianSearchService {
             return false;
         }
         Episode first = episodes.getFirst();
-        if (first.tickets.isEmpty()) {
+        if (!first.ticketsLoaded) {
             loadTickets(first);
+        }
+        if (!first.ticketsLoaded) {
+            throw new DongPianException("暂时无法读取线路信息，请稍后重试", null);
         }
         return first.tickets.containsKey(lineName);
     }
@@ -642,7 +667,7 @@ public class DongPianSearchService {
         if (wanted.isEmpty() || wantedTitle.isEmpty()) {
             throw new DongPianException("请指定线路与集数", null);
         }
-        int total = Math.min(catalog.episodes().size(), MAX_LINE_EPISODES);
+        int total = catalog.episodes().size();
         for (Episode episode : catalog.episodes().subList(0, total)) {
             if (!episode.title().equals(wantedTitle)) {
                 continue;
@@ -664,28 +689,65 @@ public class DongPianSearchService {
      * @return 该集在该线路上的视频直链；不可用返回 null
      */
     private String resolveSingle(Episode episode, String lineName) {
-        Map<String, RawLine> lines = resolve(episode);
-        RawLine direct = lines.get(lineName);
-        if (direct != null) {
-            return direct.url();
+        // 同一集的点击解析与后台下载共用永久记录，串行避免重复兑换。
+        synchronized (episode) {
+            String cached = episode.redeemed.get(lineName);
+            if (cached != null) {
+                return cached;
+            }
+            List<String> saved = db.queryForList("""
+                    SELECT url FROM dpd_episode_link
+                     WHERE res_id = ? AND episode_title = ? AND line_name = ?
+                    """, String.class, episode.resId(), episode.title(), lineName);
+            if (!saved.isEmpty() && isPlayableUrl(saved.getFirst())) {
+                episode.redeemed.put(lineName, saved.getFirst());
+                return saved.getFirst();
+            }
+            Map<String, RawLine> lines = resolve(episode);
+            RawLine direct = lines.get(lineName);
+            String url;
+            if (direct != null) {
+                url = direct.url();
+            } else {
+                loadTickets(episode);
+                String ticket = episode.tickets.get(lineName);
+                if (ticket == null) {
+                    return null;
+                }
+                url = redeemTicket(ticket, episode.token());
+            }
+            if (url != null) {
+                String now = LocalDateTime.now().format(TIME_FORMAT);
+                db.update("""
+                        INSERT INTO dpd_episode_link (res_id, episode_title, line_name, url, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(res_id, episode_title, line_name) DO UPDATE SET
+                            url = excluded.url, updated_at = excluded.updated_at
+                        """, episode.resId(), episode.title(), lineName, url, now, now);
+                episode.redeemed.put(lineName, url);
+            }
+            return url;
         }
-        // 直链里没有，说明是官方线路：此时才兑换这一条这一集
-        String cached = episode.redeemed.get(lineName);
-        if (cached != null) {
-            return cached;
+    }
+
+    /** 永久记录没有有效期；按稳定的作品、集标题和线路匹配，不依赖临时 token。 */
+    private void loadSavedLinks(List<Episode> episodes, String lineName) {
+        if (episodes.isEmpty()) {
+            return;
         }
-        // 兜底：票据可能在缓存命中路径里没取到
-        loadTickets(episode);
-        String ticket = episode.tickets.get(lineName);
-        if (ticket == null) {
-            return null;
+        Map<String, Episode> byTitle = new LinkedHashMap<>();
+        for (Episode episode : episodes) {
+            byTitle.put(episode.title(), episode);
         }
-        String url = redeemTicket(ticket, episode.token());
-        // 兑换结果按集按线路缓存，重复点同一集不再消耗兑换次数
-        if (url != null) {
-            episode.redeemed.put(lineName, url);
+        for (Map<String, Object> row : db.queryForList("""
+                SELECT episode_title, url FROM dpd_episode_link WHERE res_id = ? AND line_name = ?
+                """, episodes.getFirst().resId(), lineName)) {
+            Episode episode = byTitle.get(String.valueOf(row.get("episode_title")));
+            String url = String.valueOf(row.get("url"));
+            if (episode != null && isPlayableUrl(url)) {
+                episode.redeemed.put(lineName, url);
+            }
         }
-        return url;
     }
 
     /** 批量把数据库里有效的解析结果读进内存（一次查询，避免逐集查库） */
@@ -1060,7 +1122,8 @@ public class DongPianSearchService {
         if (catalog.remarks() != null && !catalog.remarks().isBlank()) {
             payload.put("remarks", catalog.remarks());
         }
-        payload.put("episodeCount", Math.min(catalog.episodes().size(), MAX_LINE_EPISODES));
+        payload.put("episodeCount", catalog.episodes().size());
+        payload.put("updatedEpisodeCount", catalog.episodes().size());
         // 线路清单用 dpdLines 而非 playSources：与前两个来源的载荷字段完全隔开
         List<Map<String, Object>> sources = new ArrayList<>();
         for (Line line : lines) {

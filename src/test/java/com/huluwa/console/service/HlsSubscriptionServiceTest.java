@@ -36,7 +36,7 @@ class HlsSubscriptionServiceTest {
         db = new JdbcTemplate(dataSource);
         source = mock(DyttSearchService.class);
         HlsNoticeService notices = mock(HlsNoticeService.class);
-        downloads = spy(new HlsDownloadService(db, new ConfigService(db), new HlsProperties(), source, notices, new ObjectMapper()));
+        downloads = spy(new HlsDownloadService(db, new ConfigService(db), new HlsProperties(), source, mock(DongPianSearchService.class), notices, new ObjectMapper()));
         doNothing().when(downloads).requireEnvironment();
         subscriptions = new HlsSubscriptionService(db, source, downloads, notices,
                 new SubscriptionCheckLogService(db), new DataSourceTransactionManager(dataSource));

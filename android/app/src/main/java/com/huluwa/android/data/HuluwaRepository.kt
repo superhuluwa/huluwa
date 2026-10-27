@@ -165,7 +165,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
 
     /** 懂片帝作品详情：返回线路清单（各集地址留空，选中线路后再拉） */
     suspend fun dpdDetail(id: String): JsonObject =
-        api.get("dpd", "detail", query = mapOf("resId" to id)).asObject()
+        api.get("dpd", "detail", query = mapOf("resId" to id, "refresh" to "true")).asObject()
 
     /** 懂片帝某条线路的全部剧集 */
     suspend fun dpdLine(id: String, line: String): JsonObject =
@@ -175,18 +175,12 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun dpdEpisode(id: String, line: String, title: String): JsonObject =
         api.get("dpd", "episode", query = mapOf("resId" to id, "line" to line, "title" to title)).asObject()
 
-    /** 懂片帝离线下载：直接提交 m3u8 直链（不带 resId，后端按直链入队） */
+    /** 懂片帝下载只提交作品、线路和集数，真实链接在下载任务执行时获取。 */
     suspend fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) {
         require(episodeNo > 0 && season > 0) { "季号和集号必须大于零" }
-        // 官方线路里有几条返回的是 MP4 直链（高清-官方B / 1080P-官方S、Z、V），
-        // 离线下载组件只处理 m3u8，提前拦下来给出明确提示，避免提交后才报错。
-        require(episode.url.contains(".m3u8", ignoreCase = true)) {
-            "这条线路是 MP4 直链，暂不支持离线下载；可直接点地址播放，或换一条 m3u8 线路"
-        }
-        api.post("hls", "downloads", body = jsonBody {
-            put("title", card.title); put("year", card.year)
+        api.post("dpd", "downloads", body = jsonBody {
+            put("resId", card.id); put("line", line); put("title", episode.title)
             put("season", season); put("episode", episodeNo)
-            put("episodeTitle", episode.title); put("url", episode.url); put("sourceName", line)
         }).requireSuccess()
     }
 

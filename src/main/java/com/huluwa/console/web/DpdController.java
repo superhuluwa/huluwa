@@ -2,7 +2,10 @@ package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.DongPianSearchService;
+import com.huluwa.console.service.HlsDownloadService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -13,8 +16,9 @@ import java.util.Map;
 /**
  * 懂片帝搜索：作品详情与线路按需解析。
  *
- * <p>线路的各集地址只在用户点选某条线路时才解析（见 {@link DongPianSearchService} 的说明），
- * 所以详情接口只返回线路名与集数，{@code /line} 才回填各集地址。复用现有 /api 鉴权。
+ * <p>详情接口返回线路名与已更新集数，官方线路的 {@code /line} 仅列出已更新剧集及永久保存的链接，
+ * 下载任务执行或用户主动解析时才兑换新地址。
+ * 复用现有 /api 鉴权。
  */
 @RestController
 @RequestMapping("/api/dpd")
@@ -22,19 +26,32 @@ public class DpdController {
 
     private final DongPianSearchService source;
 
-    public DpdController(DongPianSearchService source) {
+    private final HlsDownloadService downloads;
+
+    public DpdController(DongPianSearchService source, HlsDownloadService downloads) {
         this.source = source;
+        this.downloads = downloads;
+    }
+
+    public record DownloadRequest(String resId, String line, String title, Integer season, Integer episode) { }
+
+    /** 只持久化作品、线路和集数，轮到任务下载时再取得真实链接。 */
+    @PostMapping("/downloads")
+    public ApiResult<Map<String, Object>> download(@RequestBody DownloadRequest body) {
+        DongPianSearchService.Catalog catalog = source.detail(body.resId());
+        return ApiResult.ok(downloads.enqueueDpd(catalog, body.line(), body.title(), body.season(), body.episode()));
     }
 
     /** 作品详情 + 线路清单（各集地址留空，前端按线路懒加载） */
     @GetMapping("/detail")
-    public ApiResult<Map<String, Object>> detail(@RequestParam String resId) {
-        DongPianSearchService.Catalog catalog = source.detail(resId);
+    public ApiResult<Map<String, Object>> detail(@RequestParam String resId,
+                                                 @RequestParam(defaultValue = "false") boolean refresh) {
+        DongPianSearchService.Catalog catalog = refresh ? source.refreshDetail(resId) : source.detail(resId);
         List<DongPianSearchService.Line> lines = source.lines(catalog);
         return ApiResult.ok(source.toDetail(catalog, lines));
     }
 
-    /** 指定线路的全部剧集地址 */
+    /** 指定线路的全部剧集，官方线路未解析的地址留空 */
     @GetMapping("/line")
     public ApiResult<Map<String, Object>> line(@RequestParam String resId, @RequestParam String line) {
         DongPianSearchService.Catalog catalog = source.detail(resId);

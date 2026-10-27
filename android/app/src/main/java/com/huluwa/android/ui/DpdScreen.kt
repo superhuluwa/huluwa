@@ -46,7 +46,7 @@ import kotlinx.serialization.json.JsonObject
  *  - [DpdResultCard]：聊天里的作品卡，只有「资源列表」与「网站直达」两个入口，
  *    没有订阅按钮（站点按集下发 token，没有稳定地址可比对更新）；
  *  - [DpdSourceDialog]：线路弹框，线路分页签 + 点选后懒解析各集，
- *    每集可播放 / 复制视频直链，m3u8 支持离线下载。
+ *    先展示已更新分集，每集可按需下载，也可解析后播放 / 复制视频直链。
  *
  * 后端载荷用 kind=dpd-title / dpd-detail / dpd-line 区分，字段也不与其它来源重合。
  */
@@ -173,11 +173,16 @@ import kotlinx.serialization.json.JsonObject
                         }
                         if (detail.error != null && detail.data.isEmpty()) return@Column
                         if (lines.isEmpty()) {
-                            Text("该作品暂无可播放的线路", Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                            val emptyMessage = if (detail.data.number("updatedEpisodeCount")?.toInt() == 0)
+                                "该作品暂无已更新的剧集" else "该作品暂无可播放的线路"
+                            Text(emptyMessage, Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                 style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
                             return@Column
                         }
                         DpdLineTabs(lines, selected, { selected = it })
+                        val total = lines.firstOrNull { it.name == current }?.total ?: 0
+                        Text("已更新 $total 集", Modifier.padding(bottom = 10.dp),
+                            style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                         // 懂片帝不是订阅来源，没有订阅季号，固定按第 1 季归档
                         DpdEpisodeList(card, current, lineState, null, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                     }
@@ -185,7 +190,7 @@ import kotlinx.serialization.json.JsonObject
                 HorizontalDivider(color = HuluwaColors.Line)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (sheet.busyLine.isNotBlank()) "正在解析「${sheet.busyLine}」…" else "点选线路后可播放、复制直链；m3u8 支持离线下载",
+                    Text(if (sheet.busyLine.isNotBlank()) "正在加载「${sheet.busyLine}」…" else "点击离线下载后自动获取该集地址；任务在「下载 → 离线剧集」查看",
                         Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     // 出问题时可把这里的日志复制出来定位（同时也会写到 Logcat）
@@ -263,7 +268,7 @@ import kotlinx.serialization.json.JsonObject
         state == null || state.loading -> Row(Modifier.fillMaxWidth().padding(vertical = 26.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             CircularProgressIndicator(Modifier.size(16.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
-            Text("正在解析「$lineName」的各集地址…", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+            Text("正在加载「$lineName」的剧集列表…", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
         }
         state.error != null -> Feedback(state.error, { vm.loadDpdLine(card, lineName) })
         else -> {
@@ -276,13 +281,13 @@ import kotlinx.serialization.json.JsonObject
             // 新集在前，与电影天堂弹层的排序一致；识别不出集号的条目按原顺序排在最后
             episodes.withIndex()
                 .sortedWith(compareByDescending<IndexedValue<DpdEpisode>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
-                .forEach { (_, episode) -> DpdEpisodeRow(card, lineName, episode, defaultSeason, busy, vm, onPlay, onCopy) }
+                .forEach { (index, episode) -> DpdEpisodeRow(card, lineName, episode, defaultSeason, busy, vm, onPlay, onCopy, index + 1) }
         }
     }
 }
 
 @Composable private fun DpdEpisodeRow(card: DpdCard, lineName: String, episode: DpdEpisode, defaultSeason: Int?,
-                                      busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+                                      busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit, fallbackEpisodeNo: Int) {
     // 官方线路受站点限速，只有用户点开的那一集才兑换，其余集地址为空、显示「待解析」
     val ready = episode.url.isNotBlank()
     Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)
@@ -293,16 +298,14 @@ import kotlinx.serialization.json.JsonObject
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (ready) {
                 DpdTinyButton("复制", Icons.Outlined.ContentCopy, primary = true) { onCopy(episode.url) }
-                if (episode.canDownload) {
-                    DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                        vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: 1)
-                    }
-                }
             } else {
                 // 点一下才去兑换/解析这一集，省站点配额
                 DpdTinyButton("解析", Icons.Outlined.PlayCircleOutline, primary = true, enabled = !busy) {
                     vm.resolveDpdEpisode(card, lineName, episode.title)
                 }
+            }
+            DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
+                vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: fallbackEpisodeNo)
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -311,7 +314,7 @@ import kotlinx.serialization.json.JsonObject
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                 color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         } else {
-            Text("点「解析」获取这一集的地址（站点限速，逐集解析）",
+            Text("点击「离线下载」自动获取地址，也可先解析播放",
                 style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

@@ -1056,7 +1056,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
         if (sheet.card.key() != card.key() || line.isBlank()) return
         val existing = sheet.lines[line]
-        if (existing != null && (existing.loading || existing.loaded)) return
+        if (existing != null && (existing.loading || (existing.loaded && existing.error == null))) return
         val current = sheetGeneration
         mutable.update { old ->
             val active = old.sheet as? AppSheet.Dpd ?: return@update old
@@ -1142,7 +1142,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 懂片帝离线下载：直链直接入队，没有采集站 ID，重试时沿用已存地址 */    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
+    /** 懂片帝先按集入队，下载任务执行时才获取该线路的真实链接。 */
+    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
         perform("dpd-episode", "已加入离线下载", close = false, after = { refreshDownloads() }) {
             repository.enqueueDpdEpisode(card, line, episode, season, episodeNo)
         }

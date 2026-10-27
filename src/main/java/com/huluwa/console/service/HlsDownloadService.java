@@ -15,9 +15,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -43,10 +46,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Order(2)
 public class HlsDownloadService implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(HlsDownloadService.class);
+    /** 同一个离线队列中区分懂片帝与 MacCMS 来源，避免把 av_ ID 当成数字采集站 ID。 */
+    private static final String DPD_SOURCE = "dpd";
     private final JdbcTemplate db;
     private final ConfigService config;
     private final HlsProperties paths;
     private final DyttSearchService source;
+    private final DongPianSearchService dpd;
     private final HlsNoticeService notices;
     private final ObjectMapper json;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -57,15 +63,17 @@ public class HlsDownloadService implements ApplicationRunner {
     private volatile boolean ready;
     private volatile boolean stopping;
     private volatile Process activeProcess;
+    private volatile HttpURLConnection activeDpdConnection;
     private volatile long activeTaskId;
     private volatile boolean activeCancelled;
     private record ActiveProgress(long taskId, HlsDownloadProgress progress) { }
     private volatile ActiveProgress activeProgress;
 
     public HlsDownloadService(JdbcTemplate db, ConfigService config, HlsProperties paths,
-                              DyttSearchService source, HlsNoticeService notices, ObjectMapper json) {
+                              DyttSearchService source, DongPianSearchService dpd,
+                              HlsNoticeService notices, ObjectMapper json) {
         this.db = db; this.config = config; this.paths = paths;
-        this.source = source; this.notices = notices; this.json = json;
+        this.source = source; this.dpd = dpd; this.notices = notices; this.json = json;
     }
 
     public record Settings(int threadCount, int maxAttempts, int timeoutMinutes, String format,
@@ -223,10 +231,34 @@ public class HlsDownloadService implements ApplicationRunner {
         return publicTask(id);
     }
 
+    /** 懂片帝先按作品、线路和集数入队，不在浏览或提交任务时兑换播放链接。 */
+    public Map<String, Object> enqueueDpd(DongPianSearchService.Catalog catalog, String lineName,
+                                         String episodeTitle, Integer seasonNumber, Integer episodeNumber) {
+        requireEnvironment();
+        String line = HlsSupport.required(lineName, "线路");
+        String wanted = HlsSupport.required(episodeTitle, "集标题");
+        if (catalog.episodes().stream().noneMatch(item -> item.title().equals(wanted))) {
+            throw new BusinessException(400, "没有找到这一集");
+        }
+        String title = HlsSupport.safeName(catalog.title());
+        int season = HlsSupport.range(seasonNumber, 1, 1, 999, "季号");
+        int episode = HlsSupport.range(episodeNumber, 1, 1, 9999, "集号");
+        // 沿用原有手动下载的去重键，保留已下载文件和历史记录。
+        String key = HlsSupport.seriesKey("", "", title, catalog.year());
+        String headers = HlsSupport.headers(null, "Mozilla/5.0", null, null);
+        long id = discover(null, key, DPD_SOURCE, catalog.id(), title, catalog.year(), season, episode,
+                wanted, line, "", headers, false);
+        reactivate(id, "", line, headers, wanted);
+        kick();
+        return publicTask(id);
+    }
+
     /** 唯一键与 URL 无关；换线路、临时签名变化不会产生重复剧集任务。 */
     public long discover(Long subscription, String key, String api, String resId,
                                       String title, String year, int season, int episode, String episodeTitle,
                                       String sourceName, String url, String headers, boolean skip) {
+        // 懂片帝任务持久化来源信息，真实链接留待执行时获取；其余来源维持 m3u8 校验。
+        url = DPD_SOURCE.equals(api) ? "" : m3u8(url);
         String now = HlsSupport.now();
         db.update("""
                 INSERT OR IGNORE INTO hls_download_task(subscription_id, series_key, api_url, res_id,
@@ -234,7 +266,7 @@ public class HlsDownloadService implements ApplicationRunner {
                     status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, subscription, key, api, resId, title, year, season, episode, episodeTitle,
-                sourceName, m3u8(url), headers, skip ? "skipped" : "pending", now, now);
+                sourceName, url, headers, skip ? "skipped" : "pending", now, now);
         db.update("""
                 UPDATE hls_download_task SET subscription_id = COALESCE(?, subscription_id),
                     api_url = ?, res_id = ?, url = ?, source_name = ?, headers = ?,
@@ -264,7 +296,7 @@ public class HlsDownloadService implements ApplicationRunner {
                        message = NULL, hidden_at = NULL, url = ?, source_name = ?, headers = ?,
                        episode_title = ?, updated_at = ?
                  WHERE id = ? AND status IN ('skipped', 'failed', 'completed', 'cancelled')
-                """, m3u8(url), sourceName, headers, episodeTitle, HlsSupport.now(), id);
+                """, url, sourceName, headers, episodeTitle, HlsSupport.now(), id);
     }
 
     public synchronized Map<String, Object> retry(long id) {
@@ -322,6 +354,8 @@ public class HlsDownloadService implements ApplicationRunner {
         if (running) {
             activeCancelled = true;
             terminate(activeProcess);
+            HttpURLConnection connection = activeDpdConnection;
+            if (connection != null) connection.disconnect();
         }
         // 分片和半成品可立即回收；download.log 仍保留给「日志」查看。
         // 当前尝试可能仍由下载线程持有，等它退出后再清理，避免与正在写入的文件竞争。
@@ -455,18 +489,28 @@ public class HlsDownloadService implements ApplicationRunner {
             db.update("UPDATE hls_download_task SET log_path = ?, updated_at = ? WHERE id = ?", taskLog.toString(), HlsSupport.now(), id);
             String url = freshUrl(task);
             ensureNotCancelled(id);
-            String binary = paths.getBinary();
-            String ffmpeg = paths.getFfmpeg();
-            List<String> command = new ArrayList<>(List.of(binary, url,
-                    "--save-name", name, "--save-dir", output.toString(), "--tmp-dir", segments.toString(),
-                    "--auto-select", "--thread-count", Integer.toString(settings.threadCount()),
-                    "--download-retry-count", "3", "--http-request-timeout", "60", "--check-segments-count", "true",
-                    "--mux-after-done", "format=" + settings.format() + ":muxer=ffmpeg",
-                    "--ffmpeg-binary-path", ffmpeg, "--no-log", "--write-meta-json", "false",
-                    "--no-ansi-color", "--disable-update-check", "--ui-language", "zh-CN"));
             Map<String, String> headers = HlsSupport.headerMap(HlsSupport.text(task.get("headers")));
-            headers.forEach((key, value) -> { command.add("--header"); command.add(key + ": " + value); });
-            if (!settings.maxSpeed().isBlank()) { command.add("--max-speed"); command.add(settings.maxSpeed()); }
+            Path directMedia = attempt.resolve("source.mp4");
+            boolean direct = DPD_SOURCE.equals(HlsSupport.text(task.get("api_url"))) && !isM3u8(url)
+                    && downloadDpdMedia(url, directMedia, headers, settings, progress.progress());
+            List<String> command;
+            if (direct) {
+                // MP4 下载完后仅重新封装，沿用归档、校验、取消及重试流程。
+                command = new ArrayList<>(List.of(paths.getFfmpeg(), "-nostdin", "-y", "-i", directMedia.toString(),
+                        "-map", "0:v:0", "-map", "0:a?", "-c", "copy"));
+                if ("mp4".equals(settings.format())) command.addAll(List.of("-movflags", "+faststart"));
+                command.add(output.resolve(name + "." + settings.format()).toString());
+            } else {
+                command = new ArrayList<>(List.of(paths.getBinary(), url,
+                        "--save-name", name, "--save-dir", output.toString(), "--tmp-dir", segments.toString(),
+                        "--auto-select", "--thread-count", Integer.toString(settings.threadCount()),
+                        "--download-retry-count", "3", "--http-request-timeout", "60", "--check-segments-count", "true",
+                        "--mux-after-done", "format=" + settings.format() + ":muxer=ffmpeg",
+                        "--ffmpeg-binary-path", paths.getFfmpeg(), "--no-log", "--write-meta-json", "false",
+                        "--no-ansi-color", "--disable-update-check", "--ui-language", "zh-CN"));
+                headers.forEach((key, value) -> { command.add("--header"); command.add(key + ": " + value); });
+                if (!settings.maxSpeed().isBlank()) { command.add("--max-speed"); command.add(settings.maxSpeed()); }
+            }
             execute(command, attempt, taskLog, settings.timeoutMinutes(), headers, progress.progress());
             ensureNotCancelled(id);
             if (stopping) throw new InterruptedException();
@@ -543,12 +587,75 @@ public class HlsDownloadService implements ApplicationRunner {
 
     private String freshUrl(Map<String, Object> task) {
         String resId = HlsSupport.text(task.get("res_id"));
+        if (DPD_SOURCE.equals(HlsSupport.text(task.get("api_url")))) {
+            // 先读永久保存的链接，没有记录才按需解析；所得链接由懂片帝服务永久落库。
+            String url = dpd.resolveEpisode(dpd.detail(resId), HlsSupport.text(task.get("source_name")),
+                    HlsSupport.text(task.get("episode_title"))).url();
+            db.update("UPDATE hls_download_task SET url = ? WHERE id = ?", url, task.get("id"));
+            return url;
+        }
         if (resId.isBlank()) return m3u8(HlsSupport.text(task.get("url")));
         DyttSearchService.DyttItem item = source.detail(HlsSupport.text(task.get("api_url")), resId);
         DyttSearchService.PlaySource selected = selectSource(item, HlsSupport.text(task.get("source_name")));
         String url = episodeUrl(selected, (int) HlsSupport.number(task.get("season")), (int) HlsSupport.number(task.get("episode")), HlsSupport.text(task.get("url")), HlsSupport.text(task.get("episode_title")));
         db.update("UPDATE hls_download_task SET url = ? WHERE id = ?", url, task.get("id"));
         return url;
+    }
+
+    /** 无扩展名或图片后缀不能用于判断格式：读文件头，HLS 交给分片工具，MP4 流式下载。 */
+    private boolean downloadDpdMedia(String url, Path target, Map<String, String> headers,
+                                      Settings settings, HlsDownloadProgress progress) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) URI.create(HlsSupport.httpUrl(url, "播放直链")).toURL().openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(15000);
+        headers.forEach(connection::setRequestProperty);
+        activeDpdConnection = connection;
+        long started = System.nanoTime();
+        long timeout = TimeUnit.MINUTES.toNanos(settings.timeoutMinutes());
+        String speed = settings.maxSpeed();
+        double maxBytesPerSecond = speed.isBlank() ? 0 : Double.parseDouble(speed.substring(0, speed.length() - 1))
+                * (speed.endsWith("M") ? 1024 * 1024 : 1024);
+        try {
+            ensureNotCancelled(activeTaskId);
+            if (stopping) throw new InterruptedException();
+            int status = connection.getResponseCode();
+            if (status != 200) throw new IOException("视频直链返回 HTTP " + status);
+            long total = connection.getContentLengthLong();
+            try (var input = new BufferedInputStream(connection.getInputStream())) {
+                byte[] prefix = input.readNBytes(64);
+                String text = new String(prefix, StandardCharsets.UTF_8).replace("\uFEFF", "").stripLeading();
+                if (text.startsWith("#EXTM3U")) return false;
+                if (prefix.length < 12 || prefix[4] != 'f' || prefix[5] != 't' || prefix[6] != 'y' || prefix[7] != 'p') {
+                    throw new IOException("该链接没有返回可下载的 HLS 或 MP4 视频");
+                }
+                try (var output = Files.newOutputStream(target, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+                    output.write(prefix);
+                    long received = prefix.length;
+                    progress.acceptBytes(received, total, started);
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) {
+                        if (activeCancelled || stopping || Thread.currentThread().isInterrupted()) throw new InterruptedException();
+                        if (System.nanoTime() - started >= timeout) throw new IOException("下载任务超时");
+                        output.write(buffer, 0, read);
+                        received += read;
+                        // 使用与 HLS 相同的字节限速设置，等待期间持续响应取消与停机。
+                        while (maxBytesPerSecond > 0 && received / maxBytesPerSecond * 1_000_000_000d > System.nanoTime() - started) {
+                            if (activeCancelled || stopping) throw new InterruptedException();
+                            if (System.nanoTime() - started >= timeout) throw new IOException("下载任务超时");
+                            Thread.sleep(50);
+                        }
+                        progress.acceptBytes(received, total, started);
+                    }
+                    if (total >= 0 && received != total) throw new IOException("视频下载不完整，请重试");
+                }
+            }
+            progress.markMerging();
+            return true;
+        } finally {
+            connection.disconnect();
+            if (activeDpdConnection == connection) activeDpdConnection = null;
+        }
     }
 
     public static DyttSearchService.PlaySource selectSource(DyttSearchService.DyttItem item, String name) {
@@ -949,5 +1056,11 @@ public class HlsDownloadService implements ApplicationRunner {
         if (process.isAlive()) process.destroyForcibly();
     }
     @PreDestroy
-    public void shutdown() { stopping = true; terminate(activeProcess); worker.shutdownNow(); }
+    public void shutdown() {
+        stopping = true;
+        terminate(activeProcess);
+        HttpURLConnection connection = activeDpdConnection;
+        if (connection != null) connection.disconnect();
+        worker.shutdownNow();
+    }
 }

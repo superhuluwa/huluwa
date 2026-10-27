@@ -400,8 +400,7 @@ CREATE TABLE IF NOT EXISTS android_build_server (
     created_at TEXT NOT NULL
 );
 
--- 懂片帝线路解析结果缓存：站点每集都要单独解析、官方线路还要兑换票据（有频率限制），
--- 重复打开同一部剧不应该再打站点。地址本身是长期有效的签名直链，缓存 6 小时后重新解析。
+-- 懂片帝第三方直链的短期解析缓存；用户主动获取的链接另存于 dpd_episode_link，永久保留。
 CREATE TABLE IF NOT EXISTS dpd_episode_cache (
     episode_token TEXT PRIMARY KEY,                  -- 每集唯一的解析 token
     res_id        TEXT NOT NULL,                     -- 作品 ID，按作品清理时用
@@ -412,3 +411,16 @@ CREATE TABLE IF NOT EXISTS dpd_episode_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_dpd_cache_res ON dpd_episode_cache(res_id);
 CREATE INDEX IF NOT EXISTS idx_dpd_cache_time ON dpd_episode_cache(updated_at);
+
+-- 用户主动解析或下载后取得的链接，按作品 / 集标题 / 线路永久保存，不依赖会轮换的 token。
+CREATE TABLE IF NOT EXISTS dpd_episode_link (
+    res_id        TEXT NOT NULL,
+    episode_title TEXT NOT NULL,
+    line_name     TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (res_id, episode_title, line_name)
+);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (9, datetime('now', 'localtime'));

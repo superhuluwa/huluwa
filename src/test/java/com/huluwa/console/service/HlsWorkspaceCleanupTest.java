@@ -45,7 +45,7 @@ class HlsWorkspaceCleanupTest {
         new ResourceDatabasePopulator(new ClassPathResource("schema.sql")).execute(dataSource);
         db = new JdbcTemplate(dataSource);
         downloads = spy(new HlsDownloadService(db, new ConfigService(db), paths,
-                mock(DyttSearchService.class), mock(HlsNoticeService.class), new ObjectMapper()));
+                mock(DyttSearchService.class), mock(DongPianSearchService.class), mock(HlsNoticeService.class), new ObjectMapper()));
         doNothing().when(downloads).requireEnvironment();
         doNothing().when(downloads).kick();
     }

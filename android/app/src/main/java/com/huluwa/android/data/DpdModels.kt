@@ -1,6 +1,5 @@
 package com.huluwa.android.data
 
-import java.net.URI
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -59,11 +58,6 @@ data class DpdLine(val name: String, val total: Int) {
 
 /** 懂片帝的某一集（点选线路后由 /api/dpd/line 返回） */
 data class DpdEpisode(val title: String, val url: String) {
-    /** 离线队列只支持 HLS；MP4 和无扩展名的视频直链可播放、复制。 */
-    val canDownload: Boolean get() = runCatching {
-        URI.create(url).path?.endsWith(".m3u8", ignoreCase = true) == true
-    }.getOrDefault(false)
-
     companion object {
         fun rows(raw: JsonObject): List<DpdEpisode> = raw.rows("episodes").mapNotNull { element ->
             val item = element.asObject()
