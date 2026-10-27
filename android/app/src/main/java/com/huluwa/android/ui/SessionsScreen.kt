@@ -62,7 +62,8 @@ private object SessionsColors {
     }
     BackHandler(revealedSessionId != null) { revealedSessionId = null }
 
-    LazyColumn(Modifier.fillMaxSize().skinBackground(SessionsBackground), state = listState,
+    // 与标题栏共享根布局的完整渐变，列表内部不再重复铺设背景。
+    LazyColumn(Modifier.fillMaxSize(), state = listState,
         overscrollEffect = rememberBounceOverscroll()) {
         // 加载状态显示在标题右侧，列表只保留错误反馈，避免切换标签时挤动内容。
         // 「无法连接服务器」由标题栏的「重连中」徽标统一承载，这里不再重复渲染成错误卡片。

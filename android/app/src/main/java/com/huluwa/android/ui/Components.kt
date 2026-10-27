@@ -134,19 +134,20 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
 }
 /**
  * 各主标签共用同一套标题栏，保证字号、行高和上下留白一致；标题左对齐。
+ * 标题栏保持透明，与状态栏、页面内容共用根布局的背景，避免皮肤渐变出现分界。
  *
  * onTap 用于隐藏手势入口：关闭水波纹与焦点反馈，点击后外观和操作都与普通标题无异。
  * reconnecting 为 true 时在标题文字右侧显示「菊花 + 重连中」，对应后台轮询失败、
  * 服务器暂时连不上的状态；连接恢复后由调用方置回 false，徽标自动淡出。
  */
-@Composable fun PageHeader(title: String, background: Color = HuluwaColors.Paper, onTap: (() -> Unit)? = null,
+@Composable fun PageHeader(title: String, onTap: (() -> Unit)? = null,
     reconnecting: Boolean = false, action: @Composable () -> Unit = {}) {
     val tapModifier = if (onTap != null) Modifier.clickable(
         interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onTap,
     ) else Modifier
     // 高度为原来的三分之二（94dp → 63dp）：上下留白 15dp + 16dp，标题行高 32sp。
     Row(
-        Modifier.fillMaxWidth().background(background).statusBarsPadding()
+        Modifier.fillMaxWidth().statusBarsPadding()
             .heightIn(min = 63.dp).padding(start = 22.dp, end = 22.dp, top = 15.dp, bottom = 16.dp).then(tapModifier),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {

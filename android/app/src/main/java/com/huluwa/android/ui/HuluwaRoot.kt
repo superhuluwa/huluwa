@@ -109,7 +109,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
                             val activeAiHeader = aiHeader?.takeIf { it.visible }
                             key(ui.tab) {
-                                PageHeader(if (ui.tab == MainTab.Ai) "AI 工作台" else ui.tab.title, homeBackground,
+                                PageHeader(if (ui.tab == MainTab.Ai) "AI 工作台" else ui.tab.title,
                                     onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
                                     reconnecting = if (ui.tab == MainTab.Ai) activeAiHeader?.reconnecting == true else reconnecting) {
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
