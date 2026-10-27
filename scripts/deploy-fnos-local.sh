@@ -95,6 +95,25 @@ fail() { printf '\033[31m[错误] %s\033[0m\n' "$*" >&2; exit 1; }
 
 is_root() { [ "$(id -u)" -eq 0 ]; }
 
+# 打印当前工作区的最新 Git 提交信息；非 Git 工作区或未安装 git 时静默跳过。
+show_git_version() {
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  local branch hash subject author committed_at
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  hash="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  [ -n "${hash}" ] || return 0
+  # 只取提交信息首行，避免多行提交说明打乱部署日志。
+  subject="$(git log -1 --pretty=%s 2>/dev/null || true)"
+  author="$(git log -1 --pretty=%an 2>/dev/null || true)"
+  committed_at="$(git log -1 --pretty=%cd --date=format:'%Y-%m-%d %H:%M:%S' 2>/dev/null || true)"
+  log "代码版本：${branch} @ ${hash}"
+  log "最新提交：${subject}"
+  if [ -n "${author}" ]; then
+    log "提交作者：${author}  提交时间：${committed_at}"
+  fi
+}
+
 abs_path() {
   local p="$1"
   case "$p" in
@@ -239,7 +258,7 @@ pull_latest_source() {
     || fail "项目目录不是 Git 工作区：${PROJECT_DIR}；请使用 git clone 获取源码，或使用 --no-git-pull"
   log "拉取当前分支的最新上游代码（git pull --ff-only）"
   git pull --ff-only || fail "源码更新失败，未继续部署；请检查网络、Git 凭据、当前分支上游配置及本地改动"
-  log "源码已更新到：$(git rev-parse --short HEAD)，重新载入部署脚本"
+  log "源码已更新到：$(git rev-parse --short HEAD) - $(git log -1 --pretty=%s 2>/dev/null || true)，重新载入部署脚本"
   # 必须在修改 compose.yaml / .env 前拉取；重新执行最新脚本，并跳过本次已完成的拉取。
   exec bash "${PROJECT_DIR}/deploy-fnos.sh" "${ORIGINAL_ARGS[@]}" --no-git-pull
 }
@@ -494,6 +513,7 @@ restore_old_container() {
 main() {
   log "葫芦娃助手 · 飞牛本机部署"
   log "项目目录：${PROJECT_DIR}"
+  show_git_version
   check_environment
   if [ "${MODE}" = "deploy" ] && [ "${GIT_PULL}" -eq 1 ]; then
     pull_latest_source
@@ -549,12 +569,17 @@ main() {
     printf 'docker_socket=%s\n' "${SOCKET_PATH}"
     printf 'image=%s\n' "${NEW_IMAGE_ID}"
     printf 'container=%s\n' "${CONTAINER}"
+    # 记录本次部署对应的 Git 版本，便于事后回溯。
+    printf 'git_branch=%s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    printf 'git_commit=%s\n' "$(git rev-parse HEAD 2>/dev/null || true)"
+    printf 'git_subject=%s\n' "$(git log -1 --pretty=%s 2>/dev/null || true)"
     printf 'deployed_at=%s\n' "$(date -Iseconds)"
   } > "${STATE_FILE}"
   chmod 600 "${STATE_FILE}" 2>/dev/null || true
   DEPLOY_SUCCEEDED=1
 
   log "部署完成"
+  show_git_version
   docker ps --filter "name=${CONTAINER}" --format '{{.Names}} | {{.Image}} | {{.Status}} | {{.Ports}}'
   log "数据目录：${DATA_DIR}"
   log "下载目录：${DOWNLOAD_DIR}"
