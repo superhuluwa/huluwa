@@ -379,20 +379,18 @@ import java.util.concurrent.atomic.AtomicReference
                             }
                         }
                     }
-                    if (MovieWebVideo.isMoviePage(loadedUrl)) {
-                        val available = detectedVideo != null || MovieWebVideo.canResolve(loadedUrl)
+                    if (detectedVideo != null || MovieWebVideo.canResolve(loadedUrl)) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton({ openVideo(false) }, enabled = available && !resolving) {
+                            OutlinedButton({ openVideo(false) }, enabled = !resolving) {
                                 Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp)); Text("横屏播放")
                             }
-                            TextButton({ openVideo(true) }, enabled = available && !resolving) {
+                            TextButton({ openVideo(true) }, enabled = !resolving) {
                                 Icon(Icons.Outlined.Cast, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp)); Text("投屏")
                             }
                             if (resolving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            else if (!available) Text("请先选择分集", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                         }
                     }
                     cast.selected?.let { device ->
