@@ -113,7 +113,7 @@ import java.time.format.DateTimeFormatter
                             Text("点击海报可放大查看。日历可能晚于实时数据更新，以平台实际播出为准。", Modifier.padding(4.dp, 12.dp, 4.dp, 3.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
                         }
                     } else if (!ui.detail.loading && ui.detail.error == null) Panel(Modifier.fillMaxWidth()) {
-                        DengtaEmpty("暂未提供${detail?.calendarTitle ?: "追剧日历"}", "仍可记录观看进度；排期公布后刷新即可查看。")
+                        DengtaEmpty("暂未提供${detail?.calendarTitle ?: "追剧日历"}", "仍可记录观看进度；排期公布后重新进入即可查看。")
                     }
                 }
                 item { DengtaRules(ui, vm) }

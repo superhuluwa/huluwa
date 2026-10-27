@@ -22,12 +22,12 @@ class DengtaRepository {
         .readTimeout(25, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
 
-    suspend fun ranking(type: String, date: String): DengtaRanking {
+    suspend fun ranking(type: String, date: String, loop: Boolean = false): DengtaRanking {
         require(type in setOf("1", "2", "3")) { "不支持的榜单类型" }
         require(date.isEmpty() || date.matches(Regex("\\d{8}"))) { "榜单日期格式不正确" }
         val payload = buildJsonObject {
             put("configCode", "1"); put("typeCode", type); put("platformCode", "beaconmarketshare_play_vv")
-            put("showDate", date); put("dateType", "0"); put("marketShareType", "2"); put("isLoop", false)
+            put("showDate", date); put("dateType", "0"); put("marketShareType", "2"); put("isLoop", loop)
         }
         return DengtaRanking.from(request("mtop.alipictures.gravitywave.media.rank.list", "3.0", payload).child("data"))
     }

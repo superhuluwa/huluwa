@@ -1,11 +1,15 @@
 package com.huluwa.android
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.huluwa.android.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,13 +20,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
+import kotlin.math.roundToLong
 
 enum class DengtaPage { Ranking, Detail, Journal }
 data class DengtaState(
     val page: DengtaPage = DengtaPage.Ranking, val type: String = "1", val date: String = "",
     val shareMetric: Boolean = false, val platform: String = "全部平台",
     val ranking: LoadState<DengtaRanking> = LoadState(DengtaRanking()),
+    val marketIncrement: Long = 0L, val rowIncrements: Map<String, Long> = emptyMap(), val rankingUpdateId: Long = 0L,
     val selected: DengtaMedia? = null, val detail: LoadState<DengtaDetail?> = LoadState(null),
     val rules: LoadState<List<DengtaPlayRule>> = LoadState(emptyList()),
     val journal: DengtaJournalData = DengtaJournalData(), val journalLoading: Boolean = true,
@@ -46,17 +54,27 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
     private val details = mutableMapOf<String, DengtaDetail>()
     private var rankJob: Job? = null
     private var detailJob: Job? = null
+    private var rankingVisible = false
 
-    init { refreshRanking(); loadJournal() }
+    init { loadJournal() }
+
+    fun setRankingVisible(visible: Boolean) {
+        if (rankingVisible == visible) return
+        rankingVisible = visible
+        if (visible) refreshRanking() else {
+            rankJob?.cancel()
+            mutable.update { it.copy(ranking = it.ranking.copy(loading = false), marketIncrement = 0L, rowIncrements = emptyMap()) }
+        }
+    }
 
     fun selectType(type: String) {
         if (type == mutable.value.type || type !in setOf("1", "2", "3")) return
-        mutable.update { it.copy(type = type, platform = "全部平台", ranking = LoadState(DengtaRanking())) }
+        mutable.update { it.copy(type = type, platform = "全部平台", ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap()) }
         refreshRanking()
     }
     fun selectDate(date: String) {
         if (date == mutable.value.date) return
-        mutable.update { it.copy(date = date, ranking = LoadState(DengtaRanking())) }
+        mutable.update { it.copy(date = date, ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap()) }
         refreshRanking()
     }
     fun selectPlatform(platform: String) { mutable.update { it.copy(platform = platform) } }
@@ -64,17 +82,49 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshRanking() {
         rankJob?.cancel()
+        if (!rankingVisible) return
+        rankJob = viewModelScope.launch {
+            var loop = false
+            while (currentCoroutineContext().isActive && rankingVisible && mutable.value.page == DengtaPage.Ranking) {
+                val startedAt = SystemClock.elapsedRealtime()
+                fetchRanking(loop = loop && isTodayRanking(mutable.value.date))
+                if (!isTodayRanking(mutable.value.date)) break
+                loop = true
+                // 请求串行执行，耗时超过周期时也不叠加请求。
+                delay((3_000L - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(0L))
+            }
+        }
+    }
+
+    private fun isTodayRanking(date: String): Boolean = date.isBlank() || dengtaDate(date) == LocalDate.now(ZoneId.of("Asia/Shanghai"))
+
+    private suspend fun fetchRanking(loop: Boolean) {
         val type = mutable.value.type
         val date = mutable.value.date
-        mutable.update { it.copy(ranking = it.ranking.copy(loading = true, error = null)) }
-        rankJob = viewModelScope.launch {
-            try {
-                val data = repository.ranking(type, date)
-                mutable.update { if (it.type == type && it.date == date) it.copy(ranking = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis())) else it }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                mutable.update { if (it.type == type && it.date == date) it.copy(ranking = it.ranking.copy(loading = false, error = error.dengtaMessage())) else it }
+        if (!mutable.value.ranking.loaded) mutable.update { it.copy(ranking = it.ranking.copy(loading = true, error = null)) }
+        try {
+            val data = repository.ranking(type, date, loop)
+            mutable.update { ui ->
+                if (ui.type != type || ui.date != date || !rankingVisible || ui.page != DengtaPage.Ranking) return@update ui
+                val previous = ui.ranking.data
+                val comparable = ui.ranking.loaded && dengtaDate(previous.date) != null &&
+                    dengtaDate(previous.date) == dengtaDate(data.date) && isTodayRanking(data.date)
+                val oldRows = if (comparable) previous.rows.associateBy { it.media.id } else emptyMap()
+                val increments = data.rows.mapNotNull { row ->
+                    val old = oldRows[row.media.id]?.plays?.raw
+                    val now = row.plays.raw
+                    if (old == null || now == null) null else (now - old).roundToLong().takeIf { it != 0L }?.let { row.media.id to it }
+                }.toMap()
+                val oldMarket = previous.market.raw
+                val newMarket = data.market.raw
+                val marketIncrement = if (comparable && oldMarket != null && newMarket != null) (newMarket - oldMarket).roundToLong() else 0L
+                ui.copy(ranking = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis()),
+                    marketIncrement = marketIncrement, rowIncrements = increments, rankingUpdateId = ui.rankingUpdateId + 1L)
             }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            mutable.update { if (it.type == type && it.date == date && rankingVisible && it.page == DengtaPage.Ranking)
+                it.copy(ranking = it.ranking.copy(loading = false, error = error.dengtaMessage()), marketIncrement = 0L, rowIncrements = emptyMap()) else it }
         }
     }
 

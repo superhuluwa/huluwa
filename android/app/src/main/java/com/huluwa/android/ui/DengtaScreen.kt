@@ -2,6 +2,12 @@ package com.huluwa.android.ui
 
 import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.progressSemantics
@@ -22,16 +28,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleStartEffect
 import coil3.compose.AsyncImage
 import com.huluwa.android.DengtaPage
 import com.huluwa.android.DengtaState
 import com.huluwa.android.DengtaViewModel
 import com.huluwa.android.data.*
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -47,6 +56,10 @@ import kotlin.math.abs
     val back = { if (!vm.back()) onClose() }
     BackHandler(onBack = back)
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LifecycleStartEffect(vm to ui.page) {
+        vm.setRankingVisible(ui.page == DengtaPage.Ranking)
+        onStopOrDispose { vm.setRankingVisible(false) }
+    }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -61,10 +74,6 @@ import kotlin.math.abs
                             style = MaterialTheme.typography.titleMedium)
                         Text(if (ui.page == DengtaPage.Ranking) "影视榜单与追剧日历" else ui.selected?.name ?: "每一集，都有记录",
                             color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    val loading = when { ui.page == DengtaPage.Ranking -> ui.ranking.loading; ui.selected != null -> ui.detail.loading; else -> ui.journalLoading }
-                    IconButton({ when { ui.page == DengtaPage.Ranking -> vm.refreshRanking(); ui.selected != null -> vm.refreshDetail(); else -> vm.loadJournal() } }, enabled = !loading) {
-                        Icon(Icons.Outlined.Refresh, "刷新当前页面")
                     }
                 }
             }
@@ -125,11 +134,14 @@ import kotlin.math.abs
             }
             Panel(Modifier.fillMaxWidth(), HuluwaColors.PineDark, 20.dp) {
                 Text(data.title, color = HuluwaColors.Lime, style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.padding(top = 6.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
                     Text(data.market.value.ifBlank { "—" }, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
                     Text(data.market.unit, Modifier.padding(start = 5.dp, bottom = 6.dp), color = HuluwaColors.Lime)
+                    DengtaIncrement(ui.marketIncrement, ui.rankingUpdateId, HuluwaColors.Lime,
+                        Modifier.weight(1f).padding(start = 8.dp).align(Alignment.Top))
                 }
-                Text("日榜 · ${date.format(DateTimeFormatter.ISO_LOCAL_DATE)} · ${statusUpdatedAt(ui.ranking.updatedAt, ui.ranking.error != null)}",
+                val updated = if (ui.ranking.updatedAt > 0L) "获取于 ${statusTime(ui.ranking.updatedAt)}" else "等待获取"
+                Text("日榜 · ${date.format(DateTimeFormatter.ISO_LOCAL_DATE)} · $updated${if (ui.ranking.error != null) " · 上次数据" else ""}",
                     color = Color(0xFFDCE9DA), style = MaterialTheme.typography.labelMedium)
             }
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -173,6 +185,8 @@ import kotlin.math.abs
                         }
                     }
                     Column(Modifier.widthIn(min = 74.dp, max = 105.dp), horizontalAlignment = Alignment.End) {
+                        DengtaIncrement(if (ui.shareMetric) 0L else ui.rowIncrements[row.media.id] ?: 0L,
+                            ui.rankingUpdateId, HuluwaColors.Danger, Modifier.width(78.dp))
                         Text(if (ui.shareMetric) row.share.ifBlank { "—" } else row.plays.label, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         Text(if (ui.shareMetric) row.plays.label else "市占 ${row.share.ifBlank { "—" }}", color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
                         val max = data.rows.mapNotNull { it.plays.raw }.maxOrNull()
@@ -189,6 +203,29 @@ import kotlin.math.abs
             }
         }
         item { DengtaSourceNote(ui.ranking.updatedAt) }
+    }
+}
+
+/** 为增量预留固定文字高度，出现和淡出时不挤动数值、海报或列表行。 */
+@Composable private fun DengtaIncrement(value: Long, updateId: Long, color: Color, modifier: Modifier = Modifier) {
+    var visible by remember { mutableStateOf(false) }
+    var displayedValue by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(value, updateId) {
+        if (value != 0L) displayedValue = value
+        visible = value != 0L
+        if (visible) {
+            delay(2_050L)
+            visible = false
+        }
+    }
+    val height = with(LocalDensity.current) { 18.sp.toDp() }
+    Box(modifier.height(height), contentAlignment = Alignment.TopEnd) {
+        AnimatedVisibility(visible,
+            enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { it / 3 },
+            exit = fadeOut(tween(250)) + slideOutVertically(tween(250)) { -it / 2 }) {
+            Text(if (displayedValue > 0L) "+$displayedValue" else displayedValue.toString(), color = color, fontSize = 11.sp, lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
