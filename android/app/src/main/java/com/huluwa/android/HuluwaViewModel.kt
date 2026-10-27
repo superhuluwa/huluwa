@@ -31,6 +31,8 @@ sealed interface AppSheet {
         val lines: Map<String, LoadState<JsonObject>> = emptyMap(),
         /** 正在解析的线路名（底部提示用） */
         val busyLine: String = "",
+        /** 单集提交状态，保留到弹框关闭；刷新列表和切换线路不会清空。 */
+        val downloads: Map<DpdDownloadKey, DpdDownloadState> = emptyMap(),
     ) : AppSheet
     data class Text(val title: String, val data: LoadState<String>, val onSave: ((String) -> Unit)? = null) : AppSheet
     data class ContainerDetail(val container: DockerContainer, val data: LoadState<JsonObject>) : AppSheet
@@ -1141,11 +1143,35 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 懂片帝先按集入队，下载任务执行时才获取该线路的真实链接。 */
-    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
-        perform("dpd-episode", "已加入离线下载", close = false, after = { refreshDownloads() }) {
-            repository.enqueueDpdEpisode(card, line, episode, season, episodeNo)
+    /** 懂片帝先按集入队；提交状态在弹框内回显，真实链接留待下载任务执行时获取。 */
+    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) {
+        val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
+        if (sheet.card.key() != card.key()) return
+        val key = DpdDownloadKey(season, episodeNo)
+        if (sheet.downloads[key] != null) return
+        val epoch = generation
+        val current = sheetGeneration
+        fun updateDownload(state: DpdDownloadState?) {
+            if (epoch != generation || current != sheetGeneration) return
+            mutable.update { old ->
+                val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                if (active.card.key() != card.key()) return@update old
+                old.copy(sheet = active.copy(downloads = if (state == null) active.downloads - key
+                    else active.downloads + (key to state)))
+            }
         }
+        perform("dpd-episode", "已加入离线下载", close = false, after = { refreshDownloads() }) {
+            updateDownload(DpdDownloadState.Adding)
+            var added = false
+            try {
+                repository.enqueueDpdEpisode(card, line, episode, season, episodeNo)
+                added = true
+            } finally {
+                // 失败或取消都清除加载态，允许重试；旧弹框的响应不会改写新弹框。
+                updateDownload(if (added) DpdDownloadState.Added else null)
+            }
+        }
+    }
 
     fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
         showSheet(AppSheet.Films(card, LoadState(JsonObject(emptyMap())), defaultSeason))

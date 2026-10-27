@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
@@ -122,7 +123,8 @@ import kotlinx.serialization.json.JsonObject
  * <p>详情接口只给线路名与集数，各集地址由 `/api/dpd/line` 按线路懒解析，
  * 因此切换线路时会出现短暂的「正在解析」，解析完的线路再切回不再请求。
  */
-@Composable fun DpdSourceDialog(sheet: AppSheet.Dpd, busy: Boolean, actionError: String?, vm: HuluwaViewModel, onPlay: (String) -> Unit) {
+@Composable fun DpdSourceDialog(sheet: AppSheet.Dpd, busy: Boolean, actionError: String?, vm: HuluwaViewModel,
+                                snackbar: SnackbarHostState, onPlay: (String) -> Unit) {
     val card = sheet.card
     val detail = sheet.detail
     val context = LocalContext.current
@@ -184,9 +186,11 @@ import kotlinx.serialization.json.JsonObject
                         Text("已更新 $total 集", Modifier.padding(bottom = 10.dp),
                             style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                         // 懂片帝不是订阅来源，没有订阅季号，固定按第 1 季归档
-                        DpdEpisodeList(card, current, lineState, null, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        DpdEpisodeList(card, current, lineState, null, sheet.downloads, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                     }
                 }
+                // Dialog 属于独立窗口，主页面的提示会被遮住；在当前弹框内承载同一条提示。
+                SnackbarHost(snackbar, Modifier.fillMaxWidth().padding(horizontal = 12.dp))
                 HorizontalDivider(color = HuluwaColors.Line)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -263,7 +267,8 @@ import kotlinx.serialization.json.JsonObject
 
 /** 某条线路的分集列表：加载中 / 失败 / 空 / 各集 */
 @Composable private fun DpdEpisodeList(card: DpdCard, lineName: String, state: LoadState<JsonObject>?, defaultSeason: Int?,
-                                       busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+                                       downloads: Map<DpdDownloadKey, DpdDownloadState>, busy: Boolean,
+                                       vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
     when {
         state == null || state.loading -> Row(Modifier.fillMaxWidth().padding(vertical = 26.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -281,13 +286,18 @@ import kotlinx.serialization.json.JsonObject
             // 新集在前，与电影天堂弹层的排序一致；识别不出集号的条目按原顺序排在最后
             episodes.withIndex()
                 .sortedWith(compareByDescending<IndexedValue<DpdEpisode>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
-                .forEach { (index, episode) -> DpdEpisodeRow(card, lineName, episode, defaultSeason, busy, vm, onPlay, onCopy, index + 1) }
+                .forEach { (index, episode) ->
+                    val episodeNo = episodeNumber(episode.title) ?: (index + 1)
+                    val download = downloads[DpdDownloadKey(defaultSeason ?: 1, episodeNo)]
+                    DpdEpisodeRow(card, lineName, episode, defaultSeason, download, busy, vm, onPlay, onCopy, episodeNo)
+                }
         }
     }
 }
 
 @Composable private fun DpdEpisodeRow(card: DpdCard, lineName: String, episode: DpdEpisode, defaultSeason: Int?,
-                                      busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit, fallbackEpisodeNo: Int) {
+                                      download: DpdDownloadState?, busy: Boolean, vm: HuluwaViewModel,
+                                      onPlay: (String) -> Unit, onCopy: (String) -> Unit, fallbackEpisodeNo: Int) {
     // 官方线路受站点限速，只有用户点开的那一集才兑换，其余集地址为空、显示「待解析」
     val ready = episode.url.isNotBlank()
     Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)
@@ -304,8 +314,12 @@ import kotlinx.serialization.json.JsonObject
                     vm.resolveDpdEpisode(card, lineName, episode.title)
                 }
             }
-            DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: fallbackEpisodeNo)
+            val adding = download == DpdDownloadState.Adding
+            val added = download == DpdDownloadState.Added
+            DpdTinyButton(if (adding) "添加中" else if (added) "已添加" else "离线下载",
+                if (added) Icons.Outlined.Check else Icons.Outlined.Download,
+                primary = added, enabled = !busy && !added, busy = adding) {
+                vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, fallbackEpisodeNo)
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -321,13 +335,18 @@ import kotlinx.serialization.json.JsonObject
 }
 
 @Composable private fun DpdTinyButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector,
-                                      primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(8.dp),
+                                      primary: Boolean, enabled: Boolean = true, busy: Boolean = false, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled && !busy, shape = RoundedCornerShape(8.dp),
         color = if (primary) HuluwaColors.Pine else HuluwaColors.White,
         border = if (primary) null else BorderStroke(1.dp, HuluwaColors.Line)) {
         Row(Modifier.padding(horizontal = 9.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(icon, null, Modifier.size(13.dp), tint = if (primary) HuluwaColors.White else HuluwaColors.Pine)
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.5.dp,
+                    color = if (primary) HuluwaColors.White else HuluwaColors.Pine)
+            } else {
+                Icon(icon, null, Modifier.size(13.dp), tint = if (primary) HuluwaColors.White else HuluwaColors.Pine)
+            }
             Text(label, color = if (primary) HuluwaColors.White else HuluwaColors.Pine, fontSize = 12.sp,
                 fontWeight = FontWeight.Medium, maxLines = 1)
         }

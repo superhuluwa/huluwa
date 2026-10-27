@@ -67,3 +67,8 @@ data class DpdEpisode(val title: String, val url: String) {
         }
     }
 }
+
+/** 与后端剧集去重规则一致：切换线路后仍是同一季、同一集的下载任务。 */
+data class DpdDownloadKey(val season: Int, val episode: Int)
+
+enum class DpdDownloadState { Adding, Added }

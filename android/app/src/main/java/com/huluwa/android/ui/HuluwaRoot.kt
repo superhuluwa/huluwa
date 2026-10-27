@@ -147,7 +147,7 @@ private enum class RootPage { Home, Chat, ServerStatus }
                 }
             }
         }
-        AppSheets(ui, vm)
+        AppSheets(ui, vm, snackbar)
     }
 }
 

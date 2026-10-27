@@ -19,7 +19,7 @@ import com.huluwa.android.*
 import com.huluwa.android.data.isServerUnreachable
 import com.huluwa.android.data.text
 
-@Composable fun AppSheets(ui: AppState, vm: HuluwaViewModel) {
+@Composable fun AppSheets(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val sheet = ui.sheet ?: return
     if (sheet is AppSheet.Confirm) {
         AlertDialog(onDismissRequest = vm::dismissSheet, title = { Text(sheet.title) }, text = { Text(sheet.description) },
@@ -40,7 +40,7 @@ import com.huluwa.android.data.text
     }
     // 懂片帝资源弹框：独立于电影港 / 电影天堂的 Films 弹层
     if (sheet is AppSheet.Dpd) {
-        DpdSourceDialog(sheet, ui.busy != null, ui.actionError, vm) { media = it }
+        DpdSourceDialog(sheet, ui.busy != null, ui.actionError, vm, snackbar) { media = it }
         media?.let { url -> MediaViewer(url, true) { media = null } }
         return
     }
