@@ -966,6 +966,17 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun openFilmWebsite(card: FilmCard) {
+        if (mutable.value.busy != null || !session.loggedIn) return
+        val knownUrl = try { repository.knownFilmWebsite(card) }
+        catch (error: IllegalArgumentException) {
+            mutable.update { it.copy(actionError = error.userMessage()) }
+            return
+        }
+        if (knownUrl != null) {
+            dismissSheet()
+            mutable.update { it.copy(browserVisible = true, browserUrl = knownUrl, serverStatusVisible = false, actionError = null) }
+            return
+        }
         val epoch = generation
         val sessionId = mutable.value.chat.session?.id
         perform("film-website:${card.key()}", "", close = false) {

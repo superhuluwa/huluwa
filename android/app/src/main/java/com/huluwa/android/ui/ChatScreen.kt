@@ -227,7 +227,7 @@ import kotlinx.coroutines.flow.first
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilmActionButton("资源列表", Icons.Outlined.FormatListBulleted, outlined = true) {
+            FilmActionButton("资源列表", Icons.Outlined.FormatListBulleted) {
                 vm.filmResources(card)
             }
             FilmActionButton(if (websiteBusy) "正在打开…" else "网站直达", Icons.Outlined.OpenInNew,
@@ -260,13 +260,12 @@ import kotlinx.coroutines.flow.first
 
 /** 小号图文操作按内容宽度排列，避免大面积实色按钮占满卡片底部。 */
 @Composable private fun FilmActionButton(
-    text: String, icon: ImageVector, outlined: Boolean = false, busy: Boolean = false,
+    text: String, icon: ImageVector, busy: Boolean = false,
     enabled: Boolean = true, onClick: () -> Unit,
 ) {
     val contentColor = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted
     val shape = RoundedCornerShape(8.dp)
     Row(Modifier.heightIn(min = 28.dp).clip(shape)
-        .then(if (outlined) Modifier.border(1.dp, HuluwaColors.Line, shape) else Modifier)
         .clickable(enabled = enabled && !busy, role = Role.Button, onClickLabel = text, onClick = onClick)
         .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

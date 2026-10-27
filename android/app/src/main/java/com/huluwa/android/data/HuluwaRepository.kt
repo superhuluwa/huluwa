@@ -152,8 +152,12 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     else if (card.isHls) api.get("hls", "detail", query = buildMap {
         put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
     }).asObject() else api.get("chat", "subscriptions", "magnets", "preview", query = mapOf("url" to card.url, "title" to card.title)).asObject()
+    /** 已知详情页直接打开，电影港磁力来源仍需匹配手机站地址。 */
+    fun knownFilmWebsite(card: FilmCard): String? = if (card.isHls) BrowserAddress.normalize(card.url) else null
+
     suspend fun filmWebsite(card: FilmCard): String {
-        val url = if (card.isHls && !card.isMovieHls) card.url else api.get("chat", "movie-hls", "website", query = mapOf(
+        knownFilmWebsite(card)?.let { return it }
+        val url = api.get("chat", "movie-hls", "website", query = mapOf(
             "url" to card.url, "title" to card.title,
         )).asObject().text("url")
         return BrowserAddress.normalize(url)
