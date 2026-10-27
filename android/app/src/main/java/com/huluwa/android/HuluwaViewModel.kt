@@ -137,14 +137,16 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             if (!ready && cached[service.sessionId] != null) cached.getValue(service.sessionId)
             else Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
-        val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
+        val dengtaSession = Session(DENGTA_SESSION_ID, "灯塔", DENGTA_SESSION_KIND, 0, null,
+            "影视榜单 · 剧集详情 · 追剧日历与日志")
+        val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID + DENGTA_SESSION_ID
         val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
             .groupBy { it.id }.values.map { rows ->
                 rows.maxBy { it.updatedAt }.copy(unread = rows.sumOf { it.unread })
             }
         // 最新置顶的会话排在最前，其余仍按更新时间排序；管理会话无消息时间，按最旧处理。
         val pinOrder = value.pinnedSessionIds.withIndex().associate { it.value to it.index }
-        val sortedSessions = (remoteSessions + managementSessions + upgradeSession).sortedWith(
+        val sortedSessions = (remoteSessions + managementSessions + upgradeSession + dengtaSession).sortedWith(
             compareBy<Session> { pinOrder[it.id] ?: Int.MAX_VALUE }
                 .thenByDescending { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
         return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = sortedSessions))
@@ -215,7 +217,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     val cachedIds = ui.cachedLocalSessions.map { it.id }.toSet()
                     scope to ui.sessions.data.filter { row ->
                         // 首次同步前的加载提示不落盘，已有摘要则继续保留。
-                        !row.isLocal || row.id in cachedIds || when (val service = row.managementService) {
+                        !row.isLocal || row.kind == DENGTA_SESSION_KIND || row.id in cachedIds || when (val service = row.managementService) {
                             null -> upgradePreviewReady(ui.upgrade)
                             else -> managementPreviewReady(ui, service)
                         }
@@ -728,7 +730,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             dismissSheet()
             mutable.update { it.copy(chat = ChatState(session = session), serverStatusVisible = false) }
             val service = session.managementService
-            if (service != null) refreshManagement(service) else checkAppUpdate()
+            if (service != null) refreshManagement(service) else if (session.kind == "upgrade") checkAppUpdate()
             return
         }
         if (session.kind == "movie" || session.kind == "dytt") refreshSubscriptions(true)

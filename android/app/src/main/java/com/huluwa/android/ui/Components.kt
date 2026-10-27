@@ -64,6 +64,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 fun sessionIcon(kind: String): ImageVector = when (kind) {
+    DENGTA_SESSION_KIND -> Icons.Outlined.Insights
     "movie" -> Icons.Outlined.LocalMovies
     "dytt", "movie-hls" -> Icons.Outlined.PlayCircleOutline
     "magnet" -> Icons.Outlined.CloudDownload

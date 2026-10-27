@@ -158,6 +158,11 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                     destination == RootPage.AiConversation ->
                         holder.SaveableStateProvider("ai-session:${pageAiUi.activeAccountId}:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
+                    pageUi.chat.session?.kind == DENGTA_SESSION_KIND ->
+                        holder.SaveableStateProvider("dengta:${pageUi.auth.server}:${pageUi.auth.username}") {
+                            val dengtaVm: DengtaViewModel = viewModel(key = "dengta:${pageUi.auth.server}:${pageUi.auth.username}")
+                            DengtaScreen(dengtaVm, vm::closeChat)
+                        }
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }
                     else -> holder.SaveableStateProvider("session:${pageUi.chat.session?.id}") { ChatScreen(pageUi, vm, snackbar) }

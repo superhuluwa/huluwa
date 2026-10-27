@@ -1,0 +1,190 @@
+package com.huluwa.android
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.huluwa.android.data.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.util.UUID
+
+enum class DengtaPage { Ranking, Detail, Journal }
+data class DengtaState(
+    val page: DengtaPage = DengtaPage.Ranking, val type: String = "1", val date: String = "",
+    val shareMetric: Boolean = false, val platform: String = "全部平台",
+    val ranking: LoadState<DengtaRanking> = LoadState(DengtaRanking()),
+    val selected: DengtaMedia? = null, val detail: LoadState<DengtaDetail?> = LoadState(null),
+    val rules: LoadState<List<DengtaPlayRule>> = LoadState(emptyList()),
+    val journal: DengtaJournalData = DengtaJournalData(), val journalLoading: Boolean = true,
+    val journalBusy: Boolean = false, val journalError: String? = null,
+    val journalFromDetail: Boolean = false,
+) {
+    val selectedFollow: DengtaFollow? get() = journal.media.firstOrNull { it.media.id == selected?.id }
+    val selectedLogs: List<DengtaWatchLog> get() = journal.logs.filter { it.mediaId == selected?.id }.sortedByDescending { it.recordedAt }
+}
+
+/** 网络快照留在会话内存中，收藏和个人日志独立持久化；不持有第三方账号。 */
+class DengtaViewModel(application: Application) : AndroidViewModel(application) {
+    private val session = (application as HuluwaApplication).session
+    private val store = DengtaJournalStore(application, session.server, session.username)
+    private val repository = DengtaRepository()
+    private val mutable = MutableStateFlow(DengtaState())
+    val state = mutable.asStateFlow()
+    private val events = Channel<String>(Channel.BUFFERED)
+    val messages = events.receiveAsFlow()
+    private val journalMutex = Mutex()
+    private val details = mutableMapOf<String, DengtaDetail>()
+    private var rankJob: Job? = null
+    private var detailJob: Job? = null
+
+    init { refreshRanking(); loadJournal() }
+
+    fun selectType(type: String) {
+        if (type == mutable.value.type || type !in setOf("1", "2", "3")) return
+        mutable.update { it.copy(type = type, platform = "全部平台", ranking = LoadState(DengtaRanking())) }
+        refreshRanking()
+    }
+    fun selectDate(date: String) {
+        if (date == mutable.value.date) return
+        mutable.update { it.copy(date = date, ranking = LoadState(DengtaRanking())) }
+        refreshRanking()
+    }
+    fun selectPlatform(platform: String) { mutable.update { it.copy(platform = platform) } }
+    fun selectMetric(share: Boolean) { mutable.update { it.copy(shareMetric = share) } }
+
+    fun refreshRanking() {
+        rankJob?.cancel()
+        val type = mutable.value.type
+        val date = mutable.value.date
+        mutable.update { it.copy(ranking = it.ranking.copy(loading = true, error = null)) }
+        rankJob = viewModelScope.launch {
+            try {
+                val data = repository.ranking(type, date)
+                mutable.update { if (it.type == type && it.date == date) it.copy(ranking = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis())) else it }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { if (it.type == type && it.date == date) it.copy(ranking = it.ranking.copy(loading = false, error = error.dengtaMessage())) else it }
+            }
+        }
+    }
+
+    fun openDetail(media: DengtaMedia) {
+        mutable.update { it.copy(page = DengtaPage.Detail, selected = media) }
+        refreshDetail()
+    }
+    fun openJournal(media: DengtaMedia? = null) {
+        val fromDetail = mutable.value.page == DengtaPage.Detail && media != null
+        mutable.update { it.copy(page = DengtaPage.Journal, selected = media, journalFromDetail = fromDetail) }
+        if (media != null) refreshDetail() else detailJob?.cancel()
+    }
+    /** 返回 false 表示已到会话首页，由根导航退出灯塔。 */
+    fun back(): Boolean {
+        val ui = mutable.value
+        return when {
+            ui.page == DengtaPage.Ranking -> false
+            ui.page == DengtaPage.Journal && ui.selected != null && ui.journalFromDetail -> {
+                mutable.update { it.copy(page = DengtaPage.Detail, journalFromDetail = false) }; true
+            }
+            ui.page == DengtaPage.Journal && ui.selected != null -> {
+                detailJob?.cancel(); mutable.update { it.copy(selected = null) }; true
+            }
+            else -> {
+                detailJob?.cancel(); mutable.update { it.copy(page = DengtaPage.Ranking, selected = null) }; true
+            }
+        }
+    }
+
+    fun refreshDetail() {
+        val media = mutable.value.selected ?: return
+        detailJob?.cancel()
+        val cached = details[media.id]
+        val previous = mutable.value.detail.takeIf { it.data?.media?.id == media.id }
+        mutable.update { it.copy(detail = (previous ?: LoadState(cached, loaded = cached != null)).copy(loading = true, error = null), rules = LoadState(emptyList())) }
+        detailJob = viewModelScope.launch {
+            try {
+                val detail = repository.detail(media.id)
+                details[media.id] = detail
+                if (mutable.value.selected?.id != media.id) return@launch
+                mutable.update { it.copy(selected = detail.media, detail = LoadState(detail, loaded = true, updatedAt = System.currentTimeMillis())) }
+                if (detail.hasPlayRule) loadRules(media.id)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { if (it.selected?.id == media.id) it.copy(detail = it.detail.copy(loading = false, error = error.dengtaMessage())) else it }
+            }
+        }
+    }
+    fun retryRules() {
+        val id = mutable.value.selected?.id ?: return
+        viewModelScope.launch { loadRules(id) }
+    }
+    private suspend fun loadRules(id: String) {
+        if (mutable.value.selected?.id != id) return
+        mutable.update { it.copy(rules = it.rules.copy(loading = true, error = null)) }
+        try {
+            val rules = repository.playRules(id)
+            mutable.update { if (it.selected?.id == id) it.copy(rules = LoadState(rules, loaded = true)) else it }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            mutable.update { if (it.selected?.id == id) it.copy(rules = it.rules.copy(loading = false, error = error.dengtaMessage())) else it }
+        }
+    }
+
+    fun loadJournal() {
+        viewModelScope.launch {
+            journalMutex.withLock {
+                mutable.update { it.copy(journalLoading = true, journalError = null) }
+                try { val data = store.read(); mutable.update { it.copy(journal = data, journalLoading = false) } }
+                catch (error: CancellationException) { throw error }
+                catch (error: Exception) { mutable.update { it.copy(journalLoading = false, journalError = error.dengtaMessage()) } }
+            }
+        }
+    }
+    fun toggleFollow(media: DengtaMedia) = updateJournal("追剧状态已更新") { data ->
+        val existing = data.media.firstOrNull { it.media.id == media.id }
+        val next = existing?.copy(media = media, following = !existing.following) ?: DengtaFollow(media)
+        data.copy(media = listOf(next) + data.media.filterNot { it.media.id == media.id })
+    }
+    fun record(episode: Int, note: String, onSaved: () -> Unit) {
+        val media = mutable.value.selected ?: return
+        if (episode <= 0 || (media.episodeCount != null && episode > media.episodeCount)) {
+            events.trySend("请填写有效的观看集数"); return
+        }
+        updateJournal("观看记录已保存", onSaved) { data ->
+            val existing = data.media.firstOrNull { it.media.id == media.id }
+            val next = existing?.copy(media = media, watched = episode) ?: DengtaFollow(media, watched = episode)
+            data.copy(media = listOf(next) + data.media.filterNot { it.media.id == media.id },
+                logs = listOf(DengtaWatchLog(UUID.randomUUID().toString(), media.id, episode, note.trim().take(160), System.currentTimeMillis())) + data.logs)
+        }
+    }
+    private fun updateJournal(message: String, onSaved: () -> Unit = {}, transform: (DengtaJournalData) -> DengtaJournalData) {
+        if (mutable.value.journalBusy || mutable.value.journalLoading) return
+        mutable.update { it.copy(journalBusy = true) }
+        viewModelScope.launch {
+            try {
+                journalMutex.withLock {
+                    val next = store.update(transform)
+                    mutable.update { it.copy(journal = next, journalError = null) }
+                }
+                onSaved(); events.send(message)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutable.update { it.copy(journalError = error.dengtaMessage()) }; events.send(error.dengtaMessage()) }
+            finally { mutable.update { it.copy(journalBusy = false) } }
+        }
+    }
+}
+
+private fun Exception.dengtaMessage(): String = when (this) {
+    is SocketTimeoutException -> "灯塔请求超时，请稍后重试"
+    is IOException -> "无法连接灯塔，请检查网络后重试"
+    else -> message?.take(240) ?: "灯塔数据加载失败，请重试"
+}

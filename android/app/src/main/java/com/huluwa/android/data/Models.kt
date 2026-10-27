@@ -61,9 +61,9 @@ data class Session(
     val previewOverride: String? = null, val updatedAt: String = last?.createdAt.orEmpty(),
 ) {
     val managementService: ManagementService? get() = ManagementService.entries.firstOrNull { it.kind == kind }
-    val isLocal: Boolean get() = kind == "upgrade" || managementService != null
-    /** 只有本地服务会话归入系统会话，其余内置会话（含系统通知）都属于功能会话。 */
-    val isSystemSession: Boolean get() = isLocal
+    val isLocal: Boolean get() = kind == "upgrade" || kind == DENGTA_SESSION_KIND || managementService != null
+    /** 本地管理服务归入系统；灯塔和系统通知等日常功能会话仍在功能入口。 */
+    val isSystemSession: Boolean get() = isLocal && kind != DENGTA_SESSION_KIND
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject): Session {
