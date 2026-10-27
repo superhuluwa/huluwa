@@ -20,12 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
-import com.huluwa.android.R
 import com.huluwa.android.data.*
 import kotlinx.coroutines.flow.first
 
@@ -119,16 +118,18 @@ import kotlinx.coroutines.flow.first
     playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit, onMedia: (String, Boolean) -> Unit,
 ) {
     val notify = message.notify
+    val film = message.film
     val galleryImages = remember(message.payload) { message.videoImages }
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
             Surface(color = if (message.mine) Color(0xFFDFEBD4) else Color.White,
-                shape = RoundedCornerShape(topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp, bottomStart = 17.dp, bottomEnd = 17.dp),
+                shape = if (film != null) RoundedCornerShape(18.dp) else RoundedCornerShape(
+                    topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp,
+                    bottomStart = 17.dp, bottomEnd = 17.dp),
                 border = BorderStroke(1.dp, HuluwaColors.Line)) {
-                Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val film = message.film
+                Column(Modifier.padding(if (film != null) 14.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {
@@ -193,54 +194,99 @@ import kotlinx.coroutines.flow.first
         ui.subscriptions.data.any { it.enabled && card.matchesSubscription(it) } else card.subscribed
     val followBusy = ui.busy == "film-follow:${card.key()}"
     val websiteBusy = ui.busy == "film-website:${card.key()}"
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(card.title, Modifier.weight(1f).padding(top = 4.dp), style = MaterialTheme.typography.titleMedium,
-            maxLines = 3, overflow = TextOverflow.Ellipsis)
-        if (!card.isMovieHls) FilmFollowButton(subscribed, followBusy, enabled = ui.busy == null) {
-            vm.setFilmFollowing(card, !subscribed)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Poster(card.title, card.cover, size = DpSize(70.dp, 98.dp))
+            Column(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(card.title, Modifier.weight(1f).padding(top = 4.dp), color = HuluwaColors.Ink,
+                        style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    FilmFollowButton(subscribed, followBusy, supported = !card.isMovieHls, enabled = ui.busy == null) {
+                        vm.setFilmFollowing(card, !subscribed)
+                    }
+                }
+                val metadata = listOf(card.year, card.genre).filter(String::isNotBlank).joinToString(" · ")
+                if (metadata.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(metadata, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (card.origin.isNotBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(card.origin, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(9.dp))
+                FilmSourceTag(card)
+            }
         }
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-        Poster(card.title, card.cover, Modifier.width(65.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val metadata = listOf(card.year, card.genre, card.origin).filter(String::isNotBlank).joinToString(" · ")
-            if (metadata.isNotBlank()) Text(metadata, style = MaterialTheme.typography.bodySmall,
-                color = HuluwaColors.Muted, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Tag(card.sourceTitle)
-        }
-    }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        OutlinedButton({ vm.filmResources(card) }, Modifier.fillMaxWidth().heightIn(min = 44.dp),
-            shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, HuluwaColors.Line)) {
-            Icon(Icons.Outlined.FormatListBulleted, null, Modifier.size(17.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("资源列表")
-        }
-        TextButton({ vm.openFilmWebsite(card) }, Modifier.fillMaxWidth().heightIn(min = 44.dp),
-            enabled = ui.busy == null, shape = RoundedCornerShape(12.dp)) {
-            if (websiteBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
-            else Icon(Icons.Outlined.Language, null, Modifier.size(17.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(if (websiteBusy) "正在打开…" else "网站直达")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button({ vm.filmResources(card) }, Modifier.weight(1.2f).heightIn(min = 44.dp),
+                shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = HuluwaColors.Pine, contentColor = Color.White)) {
+                Icon(Icons.Outlined.FormatListBulleted, null, Modifier.size(17.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("资源列表", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+            Button({ vm.openFilmWebsite(card) }, Modifier.weight(1f).heightIn(min = 44.dp),
+                enabled = ui.busy == null, shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = HuluwaColors.SoftGreen, contentColor = HuluwaColors.Pine,
+                    disabledContainerColor = HuluwaColors.SoftGreen, disabledContentColor = HuluwaColors.Muted,
+                )) {
+                if (websiteBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
+                else Icon(Icons.Outlined.OpenInNew, null, Modifier.size(17.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (websiteBusy) "正在打开…" else "网站直达", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
         }
     }
 }
 
-/** 书签与加减徽标表示开始 / 停止追更，两种来源共用同一个右上角操作。 */
-@Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    OutlinedButton(onClick, Modifier.widthIn(min = 96.dp).heightIn(min = 44.dp), enabled = enabled,
-        shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
-        border = BorderStroke(1.dp, if (subscribed) HuluwaColors.Pine.copy(alpha = .22f) else HuluwaColors.Line),
+@Composable private fun FilmSourceTag(card: FilmCard) {
+    val sourceTitle = when {
+        card.isMovieHls -> "电影港 在线"
+        card.isHls -> "电影天堂"
+        else -> "电影港 磁力"
+    }
+    val sourceIcon = when {
+        card.isMovieHls -> Icons.Outlined.PlayCircleOutline
+        card.isHls -> Icons.Outlined.Movie
+        else -> Icons.Outlined.Link
+    }
+    Surface(color = HuluwaColors.SoftGreen, shape = RoundedCornerShape(5.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(sourceIcon, null, Modifier.size(12.dp), tint = HuluwaColors.Pine)
+            Text(sourceTitle, color = HuluwaColors.Pine, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        }
+    }
+}
+
+/** 标题右侧的订阅胶囊；在线来源仅显示不可操作的订阅状态。 */
+@Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, supported: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    OutlinedButton(onClick, Modifier.heightIn(min = 32.dp), enabled = enabled && supported,
+        shape = CircleShape, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
+        border = BorderStroke(1.dp, if (supported && subscribed) HuluwaColors.Pine else HuluwaColors.Line),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (subscribed) HuluwaColors.SoftGreen else HuluwaColors.Paper,
+            containerColor = if (supported && subscribed) HuluwaColors.SoftGreen else Color.White,
             contentColor = HuluwaColors.Pine,
-            disabledContainerColor = if (subscribed) HuluwaColors.SoftGreen else HuluwaColors.Paper,
+            disabledContainerColor = if (supported && subscribed) HuluwaColors.SoftGreen else Color.White,
             disabledContentColor = HuluwaColors.Muted,
         )) {
-        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 1.5.dp)
-        else Icon(painterResource(if (subscribed) R.drawable.ic_film_follow_remove else R.drawable.ic_film_follow_add),
-            null, Modifier.size(18.dp))
+        if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+        else Icon(when {
+            !supported -> Icons.Outlined.NotificationsOff
+            subscribed -> Icons.Outlined.NotificationsActive
+            else -> Icons.Outlined.AddAlert
+        }, null, Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
-        Text(if (subscribed) "取消追更" else "追更", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text(when {
+            !supported -> "暂不支持订阅"
+            subscribed -> "已订阅"
+            else -> "订阅"
+        }, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
