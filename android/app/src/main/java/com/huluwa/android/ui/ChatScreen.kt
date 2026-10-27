@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
+import com.huluwa.android.R
 import com.huluwa.android.data.*
 import kotlinx.coroutines.flow.first
 
