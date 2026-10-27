@@ -138,7 +138,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             else Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
         val dengtaSession = Session(DENGTA_SESSION_ID, "灯塔", DENGTA_SESSION_KIND, 0, null,
-            "影视榜单 · 剧集详情 · 追剧日历与日志")
+            "影视榜单 · 剧集详情 · 追剧日历")
         val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID + DENGTA_SESSION_ID
         val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
             .groupBy { it.id }.values.map { rows ->

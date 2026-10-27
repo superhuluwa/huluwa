@@ -32,7 +32,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.roundToInt
 
-@Composable internal fun DengtaDetailPage(ui: DengtaState, vm: DengtaViewModel) {
+@Composable internal fun DengtaDetailPage(ui: DengtaState, vm: DengtaViewModel, onCalendar: (String) -> Unit) {
     val detail = ui.detail.data
     val media = detail?.media ?: ui.selected ?: return
     var tab by rememberSaveable(media.id) { mutableIntStateOf(0) }
@@ -88,14 +88,16 @@ import kotlin.math.roundToInt
                         }
                     }
                 }
-                Surface(onClick = { vm.openJournal(media) }, color = HuluwaColors.SoftGreen, shape = MaterialTheme.shapes.medium) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Outlined.CalendarMonth, null, tint = HuluwaColors.Pine)
-                        Column(Modifier.weight(1f)) {
-                            Text("追剧日历与日志", fontWeight = FontWeight.SemiBold)
-                            Text("已看${ui.selectedFollow?.watched ?: 0}集${media.updateText.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                if (detail != null && detail.calendarUrl.isNotBlank()) {
+                    Surface(onClick = { onCalendar(detail.calendarUrl) }, color = HuluwaColors.SoftGreen, shape = MaterialTheme.shapes.medium) {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Outlined.CalendarMonth, null, tint = HuluwaColors.Pine)
+                            Column(Modifier.weight(1f)) {
+                                Text(detail.calendarTitle, fontWeight = FontWeight.SemiBold)
+                                Text("点击查看更新排期", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Icon(Icons.AutoMirrored.Outlined.ArrowForward, "查看${detail.calendarTitle}图片", Modifier.size(19.dp), tint = HuluwaColors.Pine)
                         }
-                        Icon(Icons.AutoMirrored.Outlined.ArrowForward, "查看追剧日历与日志", Modifier.size(19.dp), tint = HuluwaColors.Pine)
                     }
                 }
                 if (detail != null) {

@@ -84,7 +84,7 @@ import kotlin.math.abs
             pages.SaveableStateProvider(pageKey) {
                 when (ui.page) {
                     DengtaPage.Ranking -> DengtaRankingPage(ui, vm)
-                    DengtaPage.Detail -> DengtaDetailPage(ui, vm)
+                    DengtaPage.Detail -> DengtaDetailPage(ui, vm) { calendar = it }
                     DengtaPage.Journal -> DengtaJournalPage(ui, vm, { record = true }, { calendar = it })
                 }
             }
@@ -109,10 +109,6 @@ import kotlin.math.abs
     val date = dengtaDate(data.date.ifBlank { ui.date }) ?: LocalDate.now(ZoneId.of("Asia/Shanghai"))
     LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 8.dp, 18.dp, 28.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                Text("排行榜", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = HuluwaColors.Pine, fontWeight = FontWeight.Bold)
-                TextButton({ vm.openJournal() }) { Text("追剧日志", color = HuluwaColors.Muted) }
-            }
             Row(Modifier.padding(top = 12.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("看见好故事", color = HuluwaColors.Pine, style = MaterialTheme.typography.labelMedium)
