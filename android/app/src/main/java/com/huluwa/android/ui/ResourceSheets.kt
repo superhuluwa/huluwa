@@ -29,14 +29,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -49,12 +46,16 @@ import kotlinx.serialization.json.*
 /**
  * 资源列表弹框（对齐网页端 MagnetListDialog / PlaySourceDialog）：
  *  - 居中卡片：图标 + 剧名 + 条数标题，正文区内滚动，底部固定「关闭」；
- *  - 电影港：磁力 / 在线双标签，磁力优先，分别支持下载与分集播放；
+ *  - 电影港：磁力与播放线路合并为同一组选项，磁力优先，点击直接切换；
  *  - 电影天堂：按线路分页签，每行「复制 / 离线下载」。
  */
 @Composable fun FilmResources(sheet: AppSheet.Films, busy: Boolean, actionError: String?, vm: HuluwaViewModel, onPlay: (String) -> Unit) {
     val card = sheet.card
-    var online by rememberSaveable(card.key()) { mutableStateOf(false) }
+    val movieSources = if (card.isMovie) sheet.onlineData.data.rows("playSources").map { PlaySource.from(it.asObject()) }
+        .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 } else emptyList()
+    var selectedSource by rememberSaveable(card.key()) { mutableIntStateOf(0) }
+    val selectedMovieSource = selectedSource.coerceIn(0, movieSources.size)
+    val online = card.isMovie && selectedMovieSource > 0
     val magnetScroll = rememberScrollState()
     val onlineScroll = rememberScrollState()
     val scroll = if (card.isMovie && online) onlineScroll else magnetScroll
@@ -79,22 +80,25 @@ import kotlinx.serialization.json.*
             Column(Modifier.fillMaxWidth()) {
                 FilmDialogHeader(card, resources.data, sheet.data.loading || sheet.onlineData.loading, isHls, vm)
                 HorizontalDivider(color = HuluwaColors.Line)
-                if (card.isMovie) {
-                    TabRow(selectedTabIndex = if (online) 1 else 0, containerColor = HuluwaColors.White,
-                        contentColor = HuluwaColors.Pine) {
-                        listOf("磁力", "在线").forEachIndexed { index, title ->
-                            val selected = online == (index == 1)
-                            Tab(selected = selected, onClick = { online = index == 1 }, text = {
-                                Text(title, color = if (selected) HuluwaColors.Pine else HuluwaColors.Muted)
-                            })
-                        }
-                    }
-                }
                 Box(Modifier.weight(1f, fill = false)) {
                     Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 14.dp)) {
                         // 下载 / 提交失败在弹框内就地提示（共享的 actionError 会被底部弹层的错误区一起显示）
                         actionError?.takeUnless { it.isServerUnreachable() }?.let {
                             Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (card.isMovie) {
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilmSourceChip("磁力", sheet.data.data.rows("magnets").size, selectedMovieSource == 0) { selectedSource = 0 }
+                                movieSources.forEachIndexed { index, source ->
+                                    FilmSourceChip(source.name, source.items.size, selectedMovieSource == index + 1) { selectedSource = index + 1 }
+                                }
+                            }
+                            if (!online) {
+                                Feedback(sheet.onlineData.error, { vm.reloadFilmResources(card) })
+                                if (sheet.data.loaded && !sheet.onlineData.loaded) {
+                                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 12.dp), color = HuluwaColors.Pine)
+                                }
+                            }
                         }
                         Feedback(resources.error, { vm.reloadFilmResources(card) })
                         if (!resources.loaded) {
@@ -102,7 +106,8 @@ import kotlinx.serialization.json.*
                             return@Column
                         }
                         if (resources.error != null && resources.data.isEmpty()) return@Column
-                        if (isHls) HlsSourceList(resourceCard, resources.data, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        if (card.isMovie && online) HlsSourceItems(resourceCard, movieSources[selectedMovieSource - 1], sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        else if (isHls) HlsSourceList(resourceCard, resources.data, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                         else MagnetSourceList(resourceCard, resources.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
                     }
                 }
@@ -146,16 +151,7 @@ import kotlinx.serialization.json.*
 
 @Composable private fun MagnetSourceList(card: FilmCard, data: JsonObject, busy: Boolean, vm: HuluwaViewModel, onCopy: (String) -> Unit) {
     val items = data.rows("magnets").map { it.asObject() }
-    if (items.isEmpty()) { EmptyHint("该作品暂无可用磁力资源，可切换「在线」查看"); return }
-    // 保存目录与下载器：对应网页端「保存目录 / 使用 xx 下载」提示行
-    val downloader = when (data.text("downloader")) {
-        "xunlei-win" -> "迅雷【Win】"; "xunlei" -> "迅雷"; else -> "qBittorrent"
-    }
-    Text(buildAnnotatedString {
-        withStyle(SpanStyle(color = HuluwaColors.Muted)) { append("保存目录：") }
-        withStyle(SpanStyle(color = HuluwaColors.Pine, fontFamily = FontFamily.Monospace)) { append(data.text("savePath").ifBlank { "（未确定）" }) }
-        withStyle(SpanStyle(color = HuluwaColors.Muted)) { append("　使用$downloader 下载，按剧名创建文件夹") }
-    }, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 12.dp))
+    if (items.isEmpty()) { EmptyHint("该作品暂无可用磁力资源"); return }
     items.forEach { item ->
         val downloaded = item.flag("downloaded")
         ResourceRow(downloaded = downloaded) {
@@ -182,32 +178,25 @@ import kotlinx.serialization.json.*
 @Composable private fun HlsSourceList(card: FilmCard, data: JsonObject, defaultSeason: Int?, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
     val sources = data.rows("playSources").map { PlaySource.from(it.asObject()) }
         .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 }
-    if (sources.isEmpty()) { EmptyHint(if (card.isMovieHls) "该作品暂未提供 m3u8 播放列表" else "该资源没有解析到可用地址"); return }
+    if (sources.isEmpty()) { EmptyHint("该资源没有解析到可用地址"); return }
     var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
     val current = sources[selected.coerceIn(sources.indices)]
-    // 剧集按集号倒序（新集在前）；识别不出集号的条目按原顺序排在最后，与网页端 sortPlayItems 一致
-    val items = current.items.withIndex()
-        .sortedWith(compareByDescending<IndexedValue<PlayItem>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
-        .map { it.value }
-    Text(if (card.isMovieHls) "选择分集即可播放、复制 m3u8 直链或离线下载" else "点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
+    Text("点击「复制」拿到 m3u8 直链，粘贴到播放器即可观看", Modifier.padding(bottom = 12.dp),
         style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
     // 安卓端优先排列 dyttm3u8 并默认选中第一条，其余线路保持原有顺序。
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sources.forEachIndexed { index, source ->
-            val active = index == selected.coerceIn(sources.indices)
-            Surface(
-                onClick = { selected = index },
-                shape = RoundedCornerShape(999.dp),
-                color = if (active) HuluwaColors.SoftGreen else HuluwaColors.White,
-                border = BorderStroke(1.dp, if (active) HuluwaColors.Pine else HuluwaColors.Line),
-            ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(source.name, style = MaterialTheme.typography.labelLarge, color = if (active) HuluwaColors.Pine else HuluwaColors.Muted, maxLines = 1)
-                    Text("${source.items.size}", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-                }
-            }
+            FilmSourceChip(source.name, source.items.size, index == selected.coerceIn(sources.indices)) { selected = index }
         }
     }
+    HlsSourceItems(card, current, defaultSeason, busy, vm, onPlay, onCopy)
+}
+
+@Composable private fun HlsSourceItems(card: FilmCard, source: PlaySource, defaultSeason: Int?, busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+    // 剧集按集号倒序（新集在前）；识别不出集号的条目按原顺序排在最后。
+    val items = source.items.withIndex()
+        .sortedWith(compareByDescending<IndexedValue<PlayItem>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
+        .map { it.value }
     items.forEach { item ->
         if (card.isMovieHls) {
             ResourceRow {
@@ -221,7 +210,7 @@ import kotlinx.serialization.json.*
                         vm.resolveMovieHls(item, onCopy)
                     }
                     TinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                        vm.showSheet(AppSheet.Episode(card, current.name, item))
+                        vm.showSheet(AppSheet.Episode(card, source.name, item))
                     }
                 }
             }
@@ -234,8 +223,8 @@ import kotlinx.serialization.json.*
                 if (item.url.startsWith("http")) TinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
                     if (defaultSeason != null) {
                         // 沿用订阅季号并识别资源集号；电影正片等无集号条目默认第 1 集。
-                        vm.enqueueEpisode(card, current.name, item, defaultSeason, episodeNumber(item.title) ?: 1)
-                    } else vm.showSheet(AppSheet.Episode(card, current.name, item))
+                        vm.enqueueEpisode(card, source.name, item, defaultSeason, episodeNumber(item.title) ?: 1)
+                    } else vm.showSheet(AppSheet.Episode(card, source.name, item))
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -246,6 +235,21 @@ import kotlinx.serialization.json.*
 }
 
 // ---------------------------------------------------------------- 共用小组件
+
+/** 磁力与播放线路共用的圆角选项。 */
+@Composable private fun FilmSourceChip(title: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) HuluwaColors.SoftGreen else HuluwaColors.White,
+        border = BorderStroke(1.dp, if (selected) HuluwaColors.Pine else HuluwaColors.Line),
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, color = if (selected) HuluwaColors.Pine else HuluwaColors.Muted, maxLines = 1)
+            Text("$count", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+        }
+    }
+}
 
 /** 行容器：浅底 + 细边框 + 8dp 圆角，对应网页端 mm-row / ps-row；已下载的行整体压暗 */
 @Composable private fun ResourceRow(downloaded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
