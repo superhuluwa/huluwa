@@ -9,6 +9,9 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.IOException;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -26,6 +29,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,7 +52,11 @@ import java.util.regex.Pattern;
  * 结果以小写十六进制放入 {@code x-ai-movie-signature}，并同时带上
  * {@code x-ai-movie-timestamp} 与 {@code x-ai-movie-nonce}。
  *
- * <p><b>用到的四个接口</b>：
+ * <p><b>访客会话</b>：官方线路兑换前先调用 {@code POST /v1/users/anonymous}，
+ * 使用稳定的 {@code anonymous_id} 初始化访客，并由实例内的 CookieManager 复用
+ * {@code ai_movie_session}。接口明确返回会话失效时重建一次，不把登录或等级限制当成限流。
+ *
+ * <p><b>播放相关接口</b>：
  * <ol>
  *   <li>{@code GET /v1/browse/catalog?q=片名&limit=N} —— 搜索，返回作品卡片；</li>
  *   <li>{@code GET /v1/catalog/{作品ID}} —— 作品详情，返回海报 / 年份 / 地区 / 类型与每集 {@code token}；</li>
@@ -82,7 +90,10 @@ public class DongPianSearchService {
     private static final String API_SEARCH = "/v1/browse/catalog";
     private static final String API_CATALOG = "/v1/catalog/";
     private static final String API_RESOLVE = "/v1/playback/resolve/";
-    /** 官方线路兑换：POST {ticket, episode_token} → {line: {resolved, url}}，是否需登录以站点响应为准 */
+    private static final String API_ANONYMOUS = "/v1/users/anonymous";
+    private static final URI SITE_URI = URI.create(BASE_URL);
+    private static final String SESSION_COOKIE = "ai_movie_session";
+    /** 官方线路兑换：POST {ticket, episode_token} → {line: {resolved, url}}，携带访客会话 */
     private static final String API_RESOLVE_LINE = "/v1/playback/resolve-line";
 
     /** 懂片帝自己的一套消息载荷类型，安卓端据此走独立渲染，不与其他影视来源混用 */
@@ -102,15 +113,9 @@ public class DongPianSearchService {
     private static final int MAX_LINE_EPISODES = 150;
     /** 并发解析数：实测 10 并发约 2.5 秒/集，既能压住总耗时也不至于触发限流 */
     private static final int CONCURRENCY = 6;
-    /**
-     * 官方线路兑换的最小间隔。
-     *
-     * <p>实测：连续快速兑换会返回 401，但间隔 4 秒左右就能稳定成功。
-     * 报错码是 {@code playback_user_session_required}（提示"需要登录"），
-     * 实际是未登录用户的**免费额度被限速**，不是真的要登录。
-     */
+    /** 官方线路兑换串行执行并保持最小间隔；401 会话错误另行恢复，不按限流重试。 */
     private static final long REDEEM_INTERVAL_MS = 4000;
-    /** 兑换失败后的重试次数（限速是暂时的，退避重试基本都能成功） */
+    /** 限流、网络或服务端临时故障的最大兑换尝试次数 */
     private static final int REDEEM_ATTEMPTS = 3;
     /** 重试退避基数：第 n 次重试前等 n × 该值 */
     private static final long REDEEM_RETRY_BACKOFF_MS = 5000;
@@ -126,7 +131,13 @@ public class DongPianSearchService {
     private static final String USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+    /** 会话只保存在当前服务实例内，不修改 JVM 全局 Cookie，也不转发给媒体下载域名。 */
+    private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER);
+    private final Object sessionLock = new Object();
+    /** 与浏览器一致，同一实例重建会话时复用身份，不在每次重试时生成新访客。 */
+    private final String anonymousId = "web_" + UUID.randomUUID();
     private final HttpClient http = HttpClient.newBuilder()
+            .cookieHandler(cookies)
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
@@ -247,6 +258,18 @@ public class DongPianSearchService {
     public static class DongPianException extends RuntimeException {
         public DongPianException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /** 保留上游错误类型，只有临时故障才参与兑换退避重试。 */
+    private static final class DongPianApiException extends DongPianException {
+        private final boolean sessionRequired;
+        private final boolean retryable;
+
+        private DongPianApiException(String message, boolean sessionRequired, boolean retryable) {
+            super(message, null);
+            this.sessionRequired = sessionRequired;
+            this.retryable = retryable;
         }
     }
 
@@ -849,14 +872,8 @@ public class DongPianSearchService {
     }
 
     /**
-     * 用该集专属票据兑换官方线路的真实地址。
-     *
-     * <p>兑换接口有频率限制：实测并发 5 个以上直接返回 401。这里用信号量把兑换
-     * 串行化并保持最小间隔，宁可慢一点也不丢线路。
-     *
-     * @param ticket       线路 url 里的 {@code resolve://} 票据
-     * @param episodeToken 该集的 token（站点按它确定兑换哪一集）
-     * @return 兑换出的视频直链；失败返回 null（该线路直接跳过）
+     * 用该集专属票据兑换官方线路的真实地址，携带访客会话并串行限速。
+     * 仅限流、网络和服务端临时故障退避重试；失败保留具体原因给下载队列及接口调用方。
      */
     private String redeemTicket(String ticket, String episodeToken) {
         if (!ticket.startsWith("resolve://")) {
@@ -868,10 +885,9 @@ public class DongPianSearchService {
         }
         redeemLock.lock();
         try {
-            // 实测连续兑换会被限流（第 4 次起返回 401），失败后加大间隔重试
             for (int attempt = 0; attempt < REDEEM_ATTEMPTS; attempt++) {
-                // 与上一次兑换保持最小间隔，避免触发站点限流
-                long wait = lastRedeemAt + REDEEM_INTERVAL_MS - System.currentTimeMillis();
+                long wait = Math.max(lastRedeemAt + REDEEM_INTERVAL_MS - System.currentTimeMillis(),
+                        REDEEM_RETRY_BACKOFF_MS * attempt);
                 if (wait > 0) {
                     Thread.sleep(wait);
                 }
@@ -884,22 +900,24 @@ public class DongPianSearchService {
                     if (line.path("resolved").asBoolean(false) && isPlayableUrl(url)) {
                         return url;
                     }
-                    // 拿到了响应但没有可用地址，重试也没用
-                    return null;
-                } catch (Exception e) {
-                    // 401/限流：退避后再试，越往后等得越久
-                    log.debug("懂片帝官方线路兑换第 {} 次失败：{}", attempt + 1, e.getMessage());
-                    if (attempt + 1 < REDEEM_ATTEMPTS) {
-                        Thread.sleep(REDEEM_RETRY_BACKOFF_MS * (attempt + 1L));
+                    String detail = firstNonBlank(text(line, "message"), text(root, "message"));
+                    throw new DongPianException("懂片帝官方线路未返回可播放地址"
+                            + (detail.isEmpty() ? "" : "：" + detail), null);
+                } catch (DongPianException e) {
+                    boolean retryable = e instanceof DongPianApiException api
+                            ? api.retryable : e.getCause() instanceof IOException;
+                    if (!retryable || Thread.currentThread().isInterrupted() || attempt + 1 >= REDEEM_ATTEMPTS) {
+                        throw e;
                     }
+                    log.debug("懂片帝官方线路兑换第 {} 次失败，将退避重试：{}", attempt + 1, e.getMessage());
                 } finally {
                     lastRedeemAt = System.currentTimeMillis();
                 }
             }
-            return null;
+            throw new DongPianException("懂片帝官方线路兑换失败", null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return null;
+            throw new DongPianException("懂片帝官方线路兑换已中断", e);
         } finally {
             redeemLock.unlock();
         }
@@ -942,6 +960,52 @@ public class DongPianSearchService {
      * @param body          POST 请求体（GET 传 null），序列化成 JSON
      */
     private JsonNode sendJson(String method, String pathAndQuery, Map<String, Object> body) {
+        if (API_RESOLVE_LINE.equals(pathAndQuery)) {
+            ensureAnonymousSession(null);
+        }
+        String usedSession = sessionCookie();
+        try {
+            return sendJsonOnce(method, pathAndQuery, body);
+        } catch (DongPianApiException e) {
+            if (!e.sessionRequired) {
+                throw e;
+            }
+            // 每次请求最多恢复一次会话；重新发送时生成新的时间戳、nonce 和签名。
+            ensureAnonymousSession(usedSession);
+            return sendJsonOnce(method, pathAndQuery, body);
+        }
+    }
+
+    /** rejectedSession 为空表示按需初始化，否则只替换被站点拒绝的那个会话。 */
+    private void ensureAnonymousSession(String rejectedSession) {
+        synchronized (sessionLock) {
+            String current = sessionCookie();
+            if (current != null && (rejectedSession == null || !current.equals(rejectedSession))) {
+                return;
+            }
+            // 并发请求如果已经重建会话，上面的比较会直接复用；只移除本站的旧会话 Cookie。
+            for (var cookie : cookies.getCookieStore().get(SITE_URI)) {
+                if (SESSION_COOKIE.equals(cookie.getName())) {
+                    cookies.getCookieStore().remove(SITE_URI, cookie);
+                }
+            }
+            sendJsonOnce("POST", API_ANONYMOUS, Map.of("anonymous_id", anonymousId));
+            if (sessionCookie() == null) {
+                throw new DongPianException("懂片帝访客会话初始化失败：站点未返回有效的会话 Cookie", null);
+            }
+        }
+    }
+
+    private String sessionCookie() {
+        return cookies.getCookieStore().get(SITE_URI).stream()
+                .filter(cookie -> SESSION_COOKIE.equals(cookie.getName()) && !cookie.hasExpired())
+                .map(java.net.HttpCookie::getValue)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst().orElse(null);
+    }
+
+    /** 初始化会话也走此方法，避免初始化与自动恢复相互递归。 */
+    private JsonNode sendJsonOnce(String method, String pathAndQuery, Map<String, Object> body) {
         String timestamp = String.valueOf(System.currentTimeMillis());
         byte[] nonceBytes = new byte[16];
         random.nextBytes(nonceBytes);
@@ -968,20 +1032,63 @@ public class DongPianSearchService {
             byte[] responseBody = response.body() == null ? new byte[0] : response.body();
             // 兑换接口成功时返回 201
             if (status != 200 && status != 201) {
-                String detail = new String(responseBody, StandardCharsets.UTF_8);
-                log.warn("懂片帝接口 {} {} 返回 HTTP {}：{}", method, pathAndQuery, status,
-                        detail.length() > 200 ? detail.substring(0, 200) : detail);
-                if (status == 401 || status == 403) {
-                    throw new DongPianException("站点签名校验失败或兑换限流（HTTP " + status + "）", null);
-                }
-                throw new DongPianException("站点返回 HTTP " + status, null);
+                DongPianApiException error = apiFailure(status, responseBody);
+                log.warn("懂片帝接口 {} {}：{}", method, pathAndQuery, error.getMessage());
+                throw error;
             }
             return mapper.readTree(responseBody);
         } catch (DongPianException e) {
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new DongPianException("懂片帝请求已中断", e);
         } catch (Exception e) {
             throw new DongPianException("请求失败：" + e.getMessage(), e);
         }
+    }
+
+    /** 根据站点结构化错误恢复会话或决定退避，不能把所有 401/403 都当成签名或限流。 */
+    private DongPianApiException apiFailure(int status, byte[] responseBody) {
+        JsonNode error = mapper.createObjectNode();
+        try {
+            JsonNode parsed = mapper.readTree(responseBody);
+            if (parsed != null && parsed.isObject()) error = parsed;
+        } catch (IOException ignored) {
+            // 非 JSON 错误页只报告 HTTP 状态，不把整页内容或可能的敏感字段带给客户端。
+        }
+        String code = text(error, "code");
+        String state = text(error, "state");
+        String detail = firstNonBlank(text(error, "message"), text(error, "error"));
+        boolean sessionRequired = status == 401 && (
+                ("playback_user_session_required".equals(code)
+                        && (state.isEmpty() || "login_required".equals(state)))
+                || ("request_error".equals(text(error, "error"))
+                        && ("User session is required.".equals(detail)
+                        || "User session belongs to a different site.".equals(detail))));
+        boolean rateLimited = status == 429 || code.contains("rate_limit") || state.contains("rate_limit")
+                || "too_many_requests".equals(code);
+        String reason;
+        if ("invalid_request_signature".equals(code)) {
+            reason = "懂片帝接口签名校验失败";
+        } else if (sessionRequired) {
+            reason = "懂片帝访客会话缺失或已失效";
+        } else if (rateLimited) {
+            reason = "懂片帝请求过于频繁，请稍后重试";
+        } else if (code.contains("level") || state.contains("level")) {
+            reason = "懂片帝线路有等级限制";
+        } else if ("login_required".equals(state)) {
+            reason = "懂片帝该线路需要登录账号";
+        } else {
+            reason = "懂片帝站点请求失败";
+        }
+        String message = reason + "（HTTP " + status
+                + (code.isEmpty() ? "" : "，code=" + code)
+                + (state.isEmpty() ? "" : "，state=" + state) + "）";
+        if (!detail.isBlank() && !detail.stripLeading().startsWith("<")) {
+            message += "：" + HlsSupport.redact(detail.substring(0, Math.min(detail.length(), 300)));
+        }
+        return new DongPianApiException(message, sessionRequired,
+                !sessionRequired && (rateLimited || status == 408 || status >= 500 && status <= 599));
     }
 
     /** HMAC-SHA256(密钥, "METHOD\npathAndQuery\ntimestamp\nnonce")，小写十六进制 */

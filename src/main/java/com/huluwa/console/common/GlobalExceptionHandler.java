@@ -1,5 +1,7 @@
 package com.huluwa.console.common;
 
+import com.huluwa.console.service.DongPianSearchService.DongPianException;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -23,6 +25,13 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.resolve(ex.getCode());
         return ResponseEntity.status(status == null ? HttpStatus.BAD_REQUEST : status)
                 .body(ApiResult.fail(ex.getCode(), ex.getMessage()));
+    }
+
+    /** 上游懂片帝的会话、权限和限流原因直接交给客户端，避免被通用 500 提示覆盖。 */
+    @ExceptionHandler(DongPianException.class)
+    public ResponseEntity<ApiResult<Void>> handleDongPian(DongPianException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ApiResult.fail(502, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
