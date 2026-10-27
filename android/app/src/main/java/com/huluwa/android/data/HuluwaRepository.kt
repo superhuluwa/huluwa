@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     private val previousCpu = ConcurrentHashMap<String, JsonObject>()
+    // FRP 保存提交完整表单，必须保留 tcp、false 等默认值。
+    private val tunnelRequestJson = Json(ApiJson) { encodeDefaults = true }
     suspend fun authStatus(server: String) = api.request("GET", listOf("auth", "status"), server = server, token = "").asObject()
     suspend fun login(server: String, username: String, password: String, setup: Boolean): JsonObject = api.request(
         "POST", listOf("auth", if (setup) "setup" else "login"), ApiJson.encodeToJsonElement(Credentials(username, password)), server = server, token = ""
@@ -198,7 +200,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         tunnels.await() to runtime.await()
     }
     suspend fun saveTunnel(original: String?, draft: TunnelDraft) {
-        val body = ApiJson.encodeToJsonElement(draft)
+        val body = tunnelRequestJson.encodeToJsonElement(draft)
         if (original == null) {
             api.post("frp", "tunnels", body = body).requireSuccess()
             if (!draft.enabled) api.post("frp", "tunnels", draft.name, "toggle", query = mapOf("enabled" to "false")).requireSuccess()
