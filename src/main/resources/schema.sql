@@ -399,3 +399,16 @@ CREATE TABLE IF NOT EXISTS android_build_server (
     token_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- 懂片帝线路解析结果缓存：站点每集都要单独解析、官方线路还要兑换票据（有频率限制），
+-- 重复打开同一部剧不应该再打站点。地址本身是长期有效的签名直链，缓存 6 小时后重新解析。
+CREATE TABLE IF NOT EXISTS dpd_episode_cache (
+    episode_token TEXT PRIMARY KEY,                  -- 每集唯一的解析 token
+    res_id        TEXT NOT NULL,                     -- 作品 ID，按作品清理时用
+    episode_title TEXT NOT NULL,
+    lines         TEXT NOT NULL,                     -- JSON：[{"name":"红牛资源","url":"https://…m3u8"}]
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dpd_cache_res ON dpd_episode_cache(res_id);
+CREATE INDEX IF NOT EXISTS idx_dpd_cache_time ON dpd_episode_cache(updated_at);
