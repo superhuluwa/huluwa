@@ -17,8 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -137,9 +139,17 @@ private object SessionsColors {
         },
     ) {
         val menuVisible = swipeState.offset < -0.5f
-        // 背景菜单始终占据同一个布局节点，拖动过程中只移动前景内容。
+        // 透明列表行不会遮挡底层菜单，只绘制左滑实际露出的区域，避免操作区透出或与文字重叠。
+        // 保留固定布局节点，让裁剪边界跟随拖动和收起动画更新。
         Box(
-            Modifier.matchParentSize().then(if (menuVisible) Modifier else Modifier.clearAndSetSemantics {}),
+            Modifier.matchParentSize()
+                .drawWithContent {
+                    val revealedWidth = (-swipeState.offset.roundToInt()).toFloat().coerceIn(0f, size.width)
+                    if (revealedWidth > 0f) {
+                        clipRect(left = size.width - revealedWidth) { this@drawWithContent.drawContent() }
+                    }
+                }
+                .then(if (menuVisible) Modifier else Modifier.clearAndSetSemantics {}),
             contentAlignment = Alignment.CenterEnd,
         ) {
             Column(
