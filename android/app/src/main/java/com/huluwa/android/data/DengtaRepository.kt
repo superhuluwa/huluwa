@@ -47,6 +47,24 @@ class DengtaRepository {
             .rows("dataList").map { value -> value.asObject().let { DengtaPlayRule(it.text("platformName"), it.text("updateEpisode"), it.text("playRule")) } }
     }
 
+    suspend fun marketing(id: String, eventType: String = "all"): DengtaMarketingContent {
+        require(id.matches(Regex("\\d+"))) { "作品编号无效" }
+        return DengtaMarketingContent.from(request("mtop.alipictures.gravitywave.media.detail.marketingEvent.list", "1.0",
+            buildJsonObject { put("mediaId", id); put("eventType", eventType) }).child("data"))
+    }
+
+    suspend fun materials(id: String, tab: String = "", menuCode: String = "all"): DengtaMaterialContent {
+        require(id.matches(Regex("\\d+"))) { "作品编号无效" }
+        return DengtaMaterialContent.from(request("mtop.alipictures.gravitywave.media.detail.material.list", "1.0",
+            buildJsonObject { put("mediaId", id); put("menuCode", menuCode); if (tab.isNotBlank()) put("selectTab", tab) }).child("data"))
+    }
+
+    suspend fun highlights(id: String, dataType: String, lastTime: String = ""): DengtaHighlightContent {
+        require(id.matches(Regex("\\d+"))) { "作品编号无效" }
+        return DengtaHighlightContent.from(request("mtop.alipictures.gravitywave.highlight.timeline", "1.0",
+            buildJsonObject { put("dataId", id); put("dataTypeStr", dataType); if (lastTime.isNotBlank()) put("lastTime", lastTime) }).child("data"))
+    }
+
     private suspend fun request(api: String, version: String, payload: JsonObject): JsonObject = withContext(Dispatchers.IO) {
         requestMutex.withLock {
             if (cookies.token().isBlank()) bootstrap(api, version)

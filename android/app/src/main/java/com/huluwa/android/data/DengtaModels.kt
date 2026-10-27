@@ -83,6 +83,11 @@ data class DengtaDetail(
     val today: DengtaValue, val total: DengtaValue, val share: DengtaValue, val shareMaximum: DengtaValue,
     val average: DengtaValue, val statisticsDate: String, val honors: List<String>,
     val playTrends: List<DengtaSeries>, val heats: List<DengtaHeat>,
+    val englishName: String = "", val platformIcons: List<String> = emptyList(), val summaryName: String = "灯塔全网正片播放",
+    val todayName: String = "今日实时播放量", val opinion: DengtaValue = DengtaValue(), val opinionMaximum: DengtaValue = DengtaValue(),
+    val highlights: List<DengtaHighlight> = emptyList(), val highlightCount: Int = 0,
+    val marketingEvents: List<DengtaMarketingEvent> = emptyList(), val information: DengtaInformation = DengtaInformation(),
+    val informationTitle: String = "剧集信息", val highlightType: String = "SHOW_TV",
 ) {
     companion object {
         fun from(document: JsonObject, requestedId: String): DengtaDetail {
@@ -113,11 +118,12 @@ data class DengtaDetail(
                 heatDetails.rows("platforms").map { it.asObject().text("value") } +
                 heatSummary.keys.filter { heatSummary.child(it).text("hotName").isNotBlank() }).filter(String::isNotBlank).distinct()
             val rank = extra.child("rankVO")
+            val message = info.firstOrNull { "message" in it }?.child("message") ?: JsonObject(emptyMap())
             return DengtaDetail(
                 media, base.stringList("type").joinToString(" / "), base.text("openDay"), base.text("playTime"),
                 base.text("duration"), extra.text("bgColor"), dengtaImageUrl(extra.text("releaseCalendar")),
                 if (extra.child("bigType").text("value") == "VARIETY") "追综日历" else "追剧日历",
-                rank.text("rankName").replace('\n', ' '), rank.number("rankNo")?.toInt()?.takeIf { it > 0 }, base.flag("hasPlayRule"),
+                rank.text("rankName"), rank.number("rankNo")?.toInt()?.takeIf { it > 0 }, base.flag("hasPlayRule"),
                 DengtaValue.from(plays.child("nowValueWithUnit")), DengtaValue.from(plays.child("totalValueWithUnit")),
                 DengtaValue.from(share.child("nowValueWithUnit")), DengtaValue.from(share.child("maxValueWithUnit")),
                 DengtaValue.from(average.child("nowValueWithUnit")), average.text("fixedDateStr"),
@@ -130,12 +136,22 @@ data class DengtaDetail(
                         if (heatSummary.flag("disableNowValue")) "" else hot.text("nowValue"),
                         hot.text("maxValue"), hot.text("maxValueDate"), dengtaSeries(detail))
                 },
+                englishName = base.text("mediaNameEn"), platformIcons = base.stringList("platformIcons").map(::dengtaImageUrl).filter(String::isNotBlank),
+                summaryName = summary.text("name", fallback = "灯塔全网正片播放"), todayName = plays.text("name", fallback = "今日实时播放量"),
+                opinion = DengtaValue.from(summary.child("todayHotIndexUnit")), opinionMaximum = DengtaValue.from(summary.child("maxHotIndexUnit")),
+                highlights = message.rows("list").map { it.asObject() }.map { DengtaHighlight(it.text("contentHtml", "simpleContentHtml"), it.number("publishTimestamp")?.toLong() ?: 0L) }
+                    .filter { it.html.isNotBlank() },
+                highlightCount = message.number("count")?.toInt() ?: 0,
+                highlightType = message.rows("list").firstOrNull()?.asObject()?.text("dataType").orEmpty().ifBlank { "SHOW_TV" },
+                marketingEvents = sections("mediaMarketEvent").flatMap { it.rows("mediaEventList") }.map { DengtaMarketingEvent.from(it.asObject()) },
+                information = DengtaInformation.from(sections("mediaArtAndCompany")),
+                informationTitle = when (extra.child("bigType").text("value")) { "VARIETY" -> "综艺信息"; "ANIME", "ANIMATION" -> "动漫信息"; else -> "剧集信息" },
             )
         }
     }
 }
 
-private fun JsonObject.stringList(key: String) = rows(key).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.filter(String::isNotBlank)
+internal fun JsonObject.stringList(key: String) = rows(key).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.filter(String::isNotBlank)
 private fun dengtaSeries(data: JsonObject): List<DengtaSeries> = data.child("chartDataVO").rows("lines").mapNotNull { item ->
     val line = item.asObject()
     val points = line.rows("line").mapNotNull { entry ->

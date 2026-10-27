@@ -33,6 +33,10 @@ data class DengtaState(
     val marketIncrement: Long = 0L, val rowIncrements: Map<String, Long> = emptyMap(), val rankingUpdateId: Long = 0L,
     val selected: DengtaMedia? = null, val detail: LoadState<DengtaDetail?> = LoadState(null),
     val rules: LoadState<List<DengtaPlayRule>> = LoadState(emptyList()),
+    val marketing: LoadState<DengtaMarketingContent> = LoadState(DengtaMarketingContent()), val marketingType: String = "all",
+    val materials: LoadState<DengtaMaterialContent> = LoadState(DengtaMaterialContent()),
+    val materialTab: String = "", val materialCategory: String = "all",
+    val highlights: LoadState<DengtaHighlightContent> = LoadState(DengtaHighlightContent()),
     val journal: DengtaJournalData = DengtaJournalData(), val journalLoading: Boolean = true,
     val journalBusy: Boolean = false, val journalError: String? = null,
     val journalFromDetail: Boolean = false,
@@ -54,6 +58,10 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
     private val details = mutableMapOf<String, DengtaDetail>()
     private var rankJob: Job? = null
     private var detailJob: Job? = null
+    private var marketingJob: Job? = null
+    private var materialJob: Job? = null
+    private var highlightJob: Job? = null
+    private var contentMediaId: String? = null
     private var rankingVisible = false
 
     init { loadJournal() }
@@ -129,6 +137,7 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun openDetail(media: DengtaMedia) {
+        contentMediaId = null
         mutable.update { it.copy(page = DengtaPage.Detail, selected = media) }
         refreshDetail()
     }
@@ -157,6 +166,13 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshDetail() {
         val media = mutable.value.selected ?: return
         detailJob?.cancel()
+        if (contentMediaId != media.id) {
+            marketingJob?.cancel(); materialJob?.cancel(); highlightJob?.cancel()
+            contentMediaId = media.id
+            mutable.update { it.copy(marketing = LoadState(DengtaMarketingContent()), marketingType = "all",
+                materials = LoadState(DengtaMaterialContent()), materialTab = "", materialCategory = "all",
+                highlights = LoadState(DengtaHighlightContent())) }
+        }
         val cached = details[media.id]
         val previous = mutable.value.detail.takeIf { it.data?.media?.id == media.id }
         mutable.update { it.copy(detail = (previous ?: LoadState(cached, loaded = cached != null)).copy(loading = true, error = null), rules = LoadState(emptyList())) }
@@ -173,6 +189,74 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+    fun loadMarketing(type: String = mutable.value.marketingType, force: Boolean = false) {
+        val current = mutable.value
+        val id = current.selected?.id ?: return
+        if (!force && current.marketingType == type && (current.marketing.loading || current.marketing.loaded)) return
+        marketingJob?.cancel()
+        val previous = if (current.marketingType == type) current.marketing.data else DengtaMarketingContent(options = current.marketing.data.options)
+        mutable.update { it.copy(marketingType = type, marketing = LoadState(previous, loading = true)) }
+        marketingJob = viewModelScope.launch {
+            try {
+                val data = repository.marketing(id, type)
+                mutable.update { if (it.selected?.id == id && it.marketingType == type)
+                    it.copy(marketing = LoadState(data, loaded = true)) else it }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { if (it.selected?.id == id && it.marketingType == type)
+                    it.copy(marketing = it.marketing.copy(loading = false, error = error.dengtaMessage())) else it }
+            }
+        }
+    }
+
+    fun loadMaterials(tab: String = mutable.value.materialTab, category: String = mutable.value.materialCategory, force: Boolean = false) {
+        val current = mutable.value
+        val id = current.selected?.id ?: return
+        if (!force && current.materialTab == tab && current.materialCategory == category && (current.materials.loading || current.materials.loaded)) return
+        materialJob?.cancel()
+        val previous = if (current.materialTab == tab && current.materialCategory == category) current.materials.data
+            else DengtaMaterialContent(options = if (current.materialTab == tab) current.materials.data.options else emptyList(),
+                tabs = current.materials.data.tabs, selectedTab = tab)
+        mutable.update { it.copy(materialTab = tab, materialCategory = category, materials = LoadState(previous, loading = true)) }
+        materialJob = viewModelScope.launch {
+            try {
+                val data = repository.materials(id, tab, category)
+                mutable.update { if (it.selected?.id == id && it.materialTab == tab && it.materialCategory == category)
+                    it.copy(materialTab = data.selectedTab, materials = LoadState(data, loaded = true)) else it }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { if (it.selected?.id == id && it.materialTab == tab && it.materialCategory == category)
+                    it.copy(materials = it.materials.copy(loading = false, error = error.dengtaMessage())) else it }
+            }
+        }
+    }
+
+    fun loadHighlights(more: Boolean = false) {
+        val current = mutable.value
+        val detail = current.detail.data ?: return
+        if (current.highlights.loading || (!more && current.highlights.loaded)) return
+        val cursor = if (more) current.highlights.data.nextTime else ""
+        if (more && cursor.isBlank()) return
+        highlightJob?.cancel()
+        mutable.update { it.copy(highlights = it.highlights.copy(loading = true, error = null)) }
+        highlightJob = viewModelScope.launch {
+            try {
+                val data = repository.highlights(detail.media.id, detail.highlightType, cursor)
+                mutable.update {
+                    if (it.selected?.id != detail.media.id) it else {
+                        val items = (if (more) it.highlights.data.items + data.items else data.items).distinctBy { item -> item.timestamp to item.html }
+                        val next = data.nextTime.takeIf { data.items.isNotEmpty() && it != cursor }.orEmpty()
+                        it.copy(highlights = LoadState(DengtaHighlightContent(items, next), loaded = true))
+                    }
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { if (it.selected?.id == detail.media.id)
+                    it.copy(highlights = it.highlights.copy(loading = false, error = error.dengtaMessage())) else it }
+            }
+        }
+    }
+
     fun retryRules() {
         val id = mutable.value.selected?.id ?: return
         viewModelScope.launch { loadRules(id) }

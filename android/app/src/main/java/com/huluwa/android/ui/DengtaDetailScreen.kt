@@ -1,19 +1,27 @@
 package com.huluwa.android.ui
 
-import android.text.Html
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -31,121 +39,142 @@ import com.huluwa.android.data.*
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable internal fun DengtaDetailPage(ui: DengtaState, vm: DengtaViewModel, onCalendar: (String) -> Unit) {
     val detail = ui.detail.data
     val media = detail?.media ?: ui.selected ?: return
-    var tab by rememberSaveable(media.id) { mutableIntStateOf(0) }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val tabsOffset = with(LocalDensity.current) { 52.dp.roundToPx() }
+    var dialog by rememberSaveable(media.id) { mutableStateOf("") }
+    var imageUrls by rememberSaveable(media.id) { mutableStateOf(emptyList<String>()) }
+    var imageIndex by rememberSaveable(media.id) { mutableIntStateOf(0) }
+    var imageTitle by rememberSaveable(media.id) { mutableStateOf("") }
+    var videoUrl by rememberSaveable(media.id) { mutableStateOf<String?>(null) }
     val heroColor = remember(detail?.background) {
-        runCatching { Color(android.graphics.Color.parseColor(detail?.background.orEmpty())) }.getOrDefault(HuluwaColors.PineDark)
+        runCatching { Color(android.graphics.Color.parseColor(detail?.background.orEmpty())) }.getOrDefault(Color(0xFF493F35))
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item {
-            Column(Modifier.fillMaxWidth().background(heroColor).padding(22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(17.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DengtaPoster(media.poster, media.name, Modifier.size(90.dp, 136.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text(media.name, color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(detail?.genres?.ifBlank { media.typeName } ?: media.typeName, color = Color(0xFFF0EBDD), style = MaterialTheme.typography.bodySmall)
-                        Text(listOfNotNull(media.episodeCount?.let { "共${it}集" }, media.updateText.takeIf(String::isNotBlank)).joinToString(" · "), color = Color(0xFFF0EBDD), style = MaterialTheme.typography.bodySmall)
-                        Text(media.platforms.ifBlank { "播出平台待公布" }, color = Color(0xFFF0EBDD), style = MaterialTheme.typography.bodySmall)
-                        detail?.openDay?.takeIf(String::isNotBlank)?.let { Text("$it 首播", color = Color(0xFFF0EBDD), style = MaterialTheme.typography.labelMedium) }
+    val activeTab by remember(list, tabsOffset) {
+        derivedStateOf {
+            val visible = list.layoutInfo.visibleItemsInfo.filter { it.index >= 3 }
+            val anchor = visible.lastOrNull { it.offset <= tabsOffset + 16 }?.index ?: 0
+            when { !list.canScrollForward && list.canScrollBackward -> 3; anchor >= 6 -> 3; anchor >= 5 -> 2; anchor >= 4 -> 1; else -> 0 }
+        }
+    }
+    val jumpTo: (Int) -> Unit = { index -> scope.launch { list.animateScrollToItem(intArrayOf(3, 4, 5, 6)[index], -tabsOffset) }; Unit }
+    val showImages: (List<String>, Int, String) -> Unit = { urls, index, title ->
+        val available = urls.filter(String::isNotBlank)
+        if (available.isNotEmpty()) { imageUrls = available; imageIndex = index.coerceIn(0, available.lastIndex); imageTitle = title }
+    }
+    val openLink: (String) -> Unit = { url ->
+        if (url.startsWith("https://") || url.startsWith("http://")) {
+            val resource = url.substringBefore('?').lowercase()
+            if (listOf(".mp4", ".m3u8", ".webm").any(resource::endsWith)) videoUrl = url
+            else runCatching { uriHandler.openUri(url) }.onFailure { Toast.makeText(context, "暂时无法打开该内容", Toast.LENGTH_SHORT).show() }
+        }
+        Unit
+    }
+    val showMaterial: (DengtaMaterial, List<DengtaMaterial>) -> Unit = { material, materials ->
+        if (material.type == "VIDEO" && material.targetUrl.isNotBlank()) openLink(material.targetUrl)
+        else {
+            val photos = materials.filter { it.type == material.type && it.preview.isNotBlank() }
+            showImages(photos.map { it.preview }, photos.indexOf(material).coerceAtLeast(0), material.title.ifBlank { "${media.name} · 物料" })
+        }
+    }
+    LazyColumn(Modifier.fillMaxSize().background(Color.White), state = list, contentPadding = PaddingValues(bottom = 28.dp)) {
+        item(key = "hero") {
+            DengtaDetailHero(media, detail, heroColor,
+                onCalendar = { detail?.calendarUrl?.takeIf(String::isNotBlank)?.let(onCalendar) },
+                onPoster = { showImages(listOf(media.poster), 0, media.name) }, onRules = { dialog = "rules" },
+                onHighlights = { dialog = "highlights" }, onPerformance = { jumpTo(0) }, onHeat = { jumpTo(1) })
+        }
+        stickyHeader(key = "navigation") {
+            Surface(Modifier.fillMaxWidth().background(heroColor), color = Color.White, shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
+                Row(Modifier.fillMaxWidth().height(52.dp)) {
+                    listOf("播放表现", "平台热度", "营销事件", detail?.informationTitle ?: "剧集信息").forEachIndexed { index, title ->
+                        Column(Modifier.weight(1f).fillMaxHeight().clickable { jumpTo(index) },
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text(title, color = if (activeTab == index) DengtaDetailColors.Orange else DengtaDetailColors.Ink,
+                                fontSize = 13.sp, fontWeight = if (activeTab == index) FontWeight.SemiBold else FontWeight.Normal)
+                            Spacer(Modifier.height(6.dp))
+                            Box(Modifier.size(18.dp, 3.dp).clip(RoundedCornerShape(2.dp))
+                                .background(if (activeTab == index) DengtaDetailColors.Orange else Color.Transparent))
+                        }
                     }
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(detail?.rankNo?.let { "${detail?.rankName.orEmpty().ifBlank { "全网日榜" }} 第${it}名" } ?: media.typeName.ifBlank { "影视作品" },
-                        Modifier.weight(1f), color = HuluwaColors.Lime, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        item {
-            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (ui.detail.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+        item(key = "status") {
+            if (ui.detail.loading || ui.detail.error != null || ui.journalError != null) Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (ui.detail.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = DengtaDetailColors.Orange)
                 ui.detail.error?.let { StatusNotice(it, if (detail != null) "正在显示上次获取的数据" else null, onRetry = vm::refreshDetail) }
                 ui.journalError?.let { StatusNotice(it, onRetry = vm::loadJournal) }
-                if (detail != null) {
-                    Panel(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("今日正片播放量", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                            Text("最新快照", color = HuluwaColors.Pine, style = MaterialTheme.typography.labelMedium)
-                        }
-                        Text(detail.today.label, Modifier.padding(top = 4.dp), fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                        HorizontalDivider(Modifier.padding(vertical = 15.dp), color = HuluwaColors.Line)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            DengtaMetric("播放市占", detail.share.label, Modifier.weight(1f))
-                            DengtaMetric("累计播放量", detail.total.label, Modifier.weight(1f))
-                            DengtaMetric("集均播放量", detail.average.label, Modifier.weight(1f))
-                        }
-                        if (detail.statisticsDate.isNotBlank()) Text(detail.statisticsDate, Modifier.padding(top = 12.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-                        if (detail.honors.isNotEmpty()) {
-                            val honor = remember(detail.honors) { Html.fromHtml(detail.honors.first(), Html.FROM_HTML_MODE_LEGACY).toString().trim() }
-                            Text("高光时刻 · $honor", Modifier.padding(top = 14.dp), color = HuluwaColors.Amber, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                if (detail != null && detail.calendarUrl.isNotBlank()) {
-                    Surface(onClick = { onCalendar(detail.calendarUrl) }, color = HuluwaColors.SoftGreen, shape = MaterialTheme.shapes.medium) {
-                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Outlined.CalendarMonth, null, tint = HuluwaColors.Pine)
-                            Column(Modifier.weight(1f)) {
-                                Text(detail.calendarTitle, fontWeight = FontWeight.SemiBold)
-                                Text("点击查看更新排期", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                            }
-                            Icon(Icons.AutoMirrored.Outlined.ArrowForward, "查看${detail.calendarTitle}图片", Modifier.size(19.dp), tint = HuluwaColors.Pine)
-                        }
-                    }
-                }
-                if (detail != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("播放表现", "平台热度", "剧集信息").forEachIndexed { index, text ->
-                            TextButton({ tab = index }, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                                Text(text, color = if (tab == index) HuluwaColors.Pine else HuluwaColors.Muted, fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Normal)
-                            }
-                        }
-                    }
-                    when (tab) {
-                        0 -> Panel(Modifier.fillMaxWidth()) {
-                            Text("正片播放走势", style = MaterialTheme.typography.titleMedium)
-                            if (detail.playTrends.isEmpty()) DengtaEmpty("暂无播放走势数据")
-                            else DengtaTrendPicker(detail.playTrends)
-                            Text("当日数据尚未结束时，以虚线表示当日累计，避免与全天数据混淆。", Modifier.padding(top = 10.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-                        }
-                        1 -> {
-                            if (detail.heats.isEmpty()) Panel(Modifier.fillMaxWidth()) { DengtaEmpty("暂无平台热度数据") }
-                            detail.heats.forEach { heat ->
-                                Panel(Modifier.fillMaxWidth()) {
-                                    Text(heat.name, style = MaterialTheme.typography.titleMedium)
-                                    Row(Modifier.fillMaxWidth().padding(top = 15.dp), horizontalArrangement = Arrangement.spacedBy(15.dp)) {
-                                        DengtaMetric("最新热度", heat.current.ifBlank { "—" }, Modifier.weight(1f))
-                                        DengtaMetric("历史最高", heat.maximum.ifBlank { "—" }, Modifier.weight(1f))
-                                    }
-                                    if (heat.maximumDate.isNotBlank()) Text("历史峰值日期：${heat.maximumDate}", Modifier.padding(top = 8.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-                                    if (heat.trends.isNotEmpty()) DengtaTrendPicker(heat.trends)
-                                    Text("不同平台热度口径独立，不直接跨平台比较。", Modifier.padding(top = 12.dp), color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
-                                }
-                            }
-                        }
-                        else -> {
-                            Panel(Modifier.fillMaxWidth()) {
-                                Text("剧集信息", style = MaterialTheme.typography.titleMedium)
-                                listOf("作品类型" to media.typeName, "题材" to detail.genres, "播出平台" to media.platforms,
-                                    "剧集进度" to media.updateText, "总集数" to media.episodeCount?.let { "${it}集" }.orEmpty(),
-                                    "首播日期" to detail.openDay, "上线时间" to detail.playTime,
-                                    "单集时长" to detail.duration.takeIf(String::isNotBlank)?.let { "约${it}分钟" }.orEmpty()).forEach { (label, value) ->
-                                    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                                        Text(label, color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                                        Text(value.ifBlank { "暂未提供" }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
-                            DengtaRules(ui, vm)
-                        }
-                    }
-                }
-                DengtaSourceNote(ui.detail.updatedAt)
             }
         }
+        item(key = "performance") {
+            if (detail != null) DengtaDetailSection {
+                DengtaContentHeading(detail.summaryName)
+                if (detail.playTrends.isEmpty()) DengtaEmpty("暂无播放走势数据") else DengtaTrendPicker(detail.playTrends)
+                Text("当日数据尚未结束时，以虚线表示当日累计。", Modifier.padding(top = 10.dp), color = DengtaDetailColors.Muted, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        item(key = "heat") {
+            if (detail != null) DengtaDetailSection {
+                if (detail.heats.isEmpty()) { DengtaContentHeading("平台热度"); DengtaEmpty("暂无平台热度数据") }
+                detail.heats.forEachIndexed { index, heat ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(vertical = 18.dp), color = DengtaDetailColors.Line)
+                    DengtaContentHeading(heat.name)
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(15.dp)) {
+                        DengtaMetric("今日实时", heat.current.ifBlank { "—" }, Modifier.weight(1f))
+                        DengtaMetric("历史最高", heat.maximum.ifBlank { "—" }, Modifier.weight(1f))
+                    }
+                    if (heat.maximumDate.isNotBlank()) Text("历史峰值日期：${heat.maximumDate}", color = DengtaDetailColors.Muted, fontSize = 11.sp)
+                    if (heat.trends.isNotEmpty()) DengtaTrendPicker(heat.trends)
+                }
+            }
+        }
+        item(key = "marketing") {
+            if (detail != null) DengtaDetailSection {
+                DengtaContentHeading("营销事件") { dialog = "marketing" }
+                DengtaMarketingTimeline(detail.marketingEvents, onImages = showImages, onLink = openLink)
+            }
+        }
+        item(key = "materials") {
+            if (detail != null) DengtaDetailSection {
+                DengtaMaterialStrip(detail.information, { dialog = "materials" }) { showMaterial(it, detail.information.materials) }
+            }
+        }
+        item(key = "people") {
+            if (detail != null) DengtaDetailSection {
+                DengtaContentHeading("演职人员", if (detail.information.people.isNotEmpty()) ({ dialog = "people" }) else null)
+                if (detail.information.people.isEmpty()) DengtaEmpty("暂无演职人员资料")
+                else LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(detail.information.people) { person -> DengtaPersonCard(person, onImages = showImages) }
+                }
+            }
+        }
+        item(key = "companies") {
+            if (detail != null) DengtaDetailSection {
+                DengtaContentHeading("出品发行", if (detail.information.companies.isNotEmpty() || detail.information.companyGroups.isNotEmpty()) ({ dialog = "companies" }) else null)
+                val companies = detail.information.companies.ifEmpty { detail.information.companyGroups.flatMap { it.companies }.distinctBy { it.id to it.name } }
+                if (companies.isEmpty()) DengtaEmpty("暂无出品发行资料") else companies.forEach { DengtaCompanyRow(it) }
+            }
+        }
+        item(key = "synopsis") { if (detail != null) DengtaDetailSection { DengtaSynopsis(detail.information.description, media.id) } }
+        item(key = "source") { DengtaSourceNote(ui.detail.updatedAt) }
     }
+    if (dialog.isNotBlank()) DengtaDetailContentDialog(dialog, ui, vm, { dialog = "" }, showImages, openLink, showMaterial)
+    videoUrl?.let { url -> MediaViewer(url, true) { videoUrl = null } }
+    if (imageUrls.isNotEmpty()) DengtaDetailImageGallery(imageUrls, imageIndex, imageTitle) { imageUrls = emptyList() }
+}
+
+@Composable private fun DengtaDetailSection(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp), content = content)
+    HorizontalDivider(Modifier.fillMaxWidth(), thickness = 7.dp, color = Color(0xFFFAFAFB))
 }
 
 @Composable private fun DengtaMetric(title: String, value: String, modifier: Modifier) {
