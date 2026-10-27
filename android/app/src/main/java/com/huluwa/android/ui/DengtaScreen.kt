@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -156,10 +157,11 @@ import kotlin.math.abs
         items(rows, key = { it.media.id }) { row ->
             Column(Modifier.fillMaxWidth().background(Color.White).clickable { vm.openDetail(row.media) }.padding(horizontal = 12.dp)) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Column(Modifier.width(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(row.rank.toString().padStart(2, '0'), color = if (row.rank <= 3) HuluwaColors.Amber else HuluwaColors.Muted, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Column(Modifier.widthIn(min = 32.dp).width(IntrinsicSize.Min), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(row.rank.toString().padStart(2, '0'), color = if (row.rank <= 3) HuluwaColors.Amber else HuluwaColors.Muted,
+                            fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                         Text(if (row.rankChange == 0) "—" else "${if (row.rankChange > 0) "↑" else "↓"}${abs(row.rankChange.toLong())}",
-                            color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
+                            color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
                     }
                     DengtaPoster(row.media.poster, row.media.name, Modifier.size(42.dp, 62.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -174,9 +176,13 @@ import kotlin.math.abs
                         Text(if (ui.shareMetric) row.share.ifBlank { "—" } else row.plays.label, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         Text(if (ui.shareMetric) row.plays.label else "市占 ${row.share.ifBlank { "—" }}", color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium)
                         val max = data.rows.mapNotNull { it.plays.raw }.maxOrNull()
-                        if (row.plays.raw != null && max != null && max > 0) LinearProgressIndicator(
-                            progress = { (row.plays.raw / max).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.width(78.dp).padding(top = 8.dp).height(3.dp),
-                            color = HuluwaColors.Pine, trackColor = HuluwaColors.SoftGreen)
+                        if (row.plays.raw != null && max != null && max > 0) {
+                            val progress = (row.plays.raw / max).toFloat().coerceIn(0f, 1f)
+                            Box(Modifier.padding(top = 8.dp).width(78.dp).height(3.dp).progressSemantics(progress)
+                                .clip(RoundedCornerShape(3.dp)).background(HuluwaColors.SoftGreen)) {
+                                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(HuluwaColors.Pine, RoundedCornerShape(3.dp)))
+                            }
+                        }
                     }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
