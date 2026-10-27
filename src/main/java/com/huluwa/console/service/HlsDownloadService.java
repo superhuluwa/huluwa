@@ -237,12 +237,11 @@ public class HlsDownloadService implements ApplicationRunner {
         requireEnvironment();
         String line = HlsSupport.required(lineName, "线路");
         String wanted = HlsSupport.required(episodeTitle, "集标题");
-        if (catalog.episodes().stream().noneMatch(item -> item.title().equals(wanted))) {
-            throw new BusinessException(400, "没有找到这一集");
-        }
         String title = HlsSupport.safeName(catalog.title());
         int season = HlsSupport.range(seasonNumber, 1, 1, 999, "季号");
         int episode = HlsSupport.range(episodeNumber, 1, 1, 9999, "集号");
+        // 首集存在的 4K 线路可能缺少后续集；只校验目标集票据，真实地址仍留待执行时兑换。
+        dpd.requireEpisodeLine(catalog, line, wanted);
         // 沿用原有手动下载的去重键，保留已下载文件和历史记录。
         String key = HlsSupport.seriesKey("", "", title, catalog.year());
         String headers = HlsSupport.headers(null, "Mozilla/5.0", null, null);
@@ -553,7 +552,9 @@ public class HlsDownloadService implements ApplicationRunner {
             }
             int attempts = (int) HlsSupport.number(task.get("attempts"));
             int maxAttempts = settings == null ? config.getInt("hls.attempts", 3) : settings.maxAttempts();
-            boolean failed = attempts >= maxAttempts;
+            // 已入队的旧任务也准确报告缺源，不把不存在的线路当成暂时故障反复重试。
+            boolean failed = attempts >= maxAttempts
+                    || e instanceof DongPianSearchService.DongPianLineUnavailableException;
             String message = HlsSupport.error(e);
             int changed = db.update("""
                     UPDATE hls_download_task SET status = ?, message = ?, next_attempt_at = ?, updated_at = ?

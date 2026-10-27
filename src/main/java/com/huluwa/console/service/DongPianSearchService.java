@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -105,7 +106,7 @@ public class DongPianSearchService {
     private static final int SEARCH_PAGE_SIZE = 20;
     /** 与电影港 / 电影天堂一致的默认展示条数 */
     public static final int DEFAULT_MAX = 10;
-    /** 确认线路清单时预解析的集数：实测第 1 集就包含全部线路（25/25），无需多解析 */
+    /** 从首集探测候选线路；后续集是否提供该线路，需要在用户选择该集时确认。 */
     private static final int PROBE_EPISODES = 1;
     /** 单条线路首屏先返回的集数，其余在后台继续解析（避免用户干等十几秒） */
     private static final int FIRST_SCREEN_EPISODES = 12;
@@ -258,6 +259,13 @@ public class DongPianSearchService {
     public static class DongPianException extends RuntimeException {
         public DongPianException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /** 目标集缺少用户选择的线路；与网络、会话或兑换失败分开处理。 */
+    public static final class DongPianLineUnavailableException extends DongPianException {
+        public DongPianLineUnavailableException(String message) {
+            super(message, null);
         }
     }
 
@@ -658,7 +666,7 @@ public class DongPianSearchService {
         }
     }
 
-    /** 这条线路是不是官方线路（需要兑换票据）；只看第一集即可，线路结构各集一致 */
+    /** 识别首集探测到的官方线路；后续集是否提供该线路仍须逐集确认。 */
     private boolean isOfficialLine(List<Episode> episodes, String lineName) {
         if (episodes.isEmpty()) {
             return false;
@@ -682,26 +690,63 @@ public class DongPianSearchService {
      * @param catalog  作品详情
      * @param lineName 线路显示名
      * @param title    集标题（用于定位是哪一集）
-     * @return 该集地址；定位不到或有误返回 null
+     * @return 该集地址；缺源时明确报告当前集与线路，并给出可选线路
      */
     public PlayItem resolveEpisode(Catalog catalog, String lineName, String title) {
+        String wanted = requireLine(lineName);
+        Episode episode = findEpisode(catalog, title);
+        String url = resolveSingle(episode, wanted);
+        if (url == null) {
+            throw lineUnavailable(catalog, episode, wanted);
+        }
+        return new PlayItem(episode.title(), url);
+    }
+
+    /** 入队前只检查该集的线路和票据，不兑换地址，避免缺源的剧集先显示已添加再后台失败。 */
+    public void requireEpisodeLine(Catalog catalog, String lineName, String title) {
+        String wanted = requireLine(lineName);
+        Episode episode = findEpisode(catalog, title);
+        synchronized (episode) {
+            loadSavedLinks(List.of(episode), wanted);
+            if (episode.redeemed.containsKey(wanted)) {
+                return;
+            }
+            Map<String, RawLine> lines = resolve(episode);
+            if (lines.containsKey(wanted)) {
+                return;
+            }
+            loadTickets(episode);
+            if (!episode.ticketsLoaded) {
+                throw new DongPianException("暂时无法读取该集线路信息，请稍后重试", null);
+            }
+            if (!episode.tickets.containsKey(wanted)) {
+                throw lineUnavailable(catalog, episode, wanted);
+            }
+        }
+    }
+
+    private static String requireLine(String lineName) {
         String wanted = lineName == null ? "" : lineName.trim();
-        String wantedTitle = title == null ? "" : title.trim();
-        if (wanted.isEmpty() || wantedTitle.isEmpty()) {
-            throw new DongPianException("请指定线路与集数", null);
+        if (wanted.isEmpty()) {
+            throw new DongPianException("请指定线路", null);
         }
-        int total = catalog.episodes().size();
-        for (Episode episode : catalog.episodes().subList(0, total)) {
-            if (!episode.title().equals(wantedTitle)) {
-                continue;
-            }
-            String url = resolveSingle(episode, wanted);
-            if (url == null) {
-                throw new DongPianException("这一集在该线路上没有可播放的地址", null);
-            }
-            return new PlayItem(episode.title(), url);
-        }
-        throw new DongPianException("没有找到这一集", null);
+        return wanted;
+    }
+
+    private static Episode findEpisode(Catalog catalog, String title) {
+        String wanted = title == null ? "" : title.trim();
+        return catalog.episodes().stream().filter(episode -> episode.title().equals(wanted))
+                .findFirst().orElseThrow(() -> new DongPianException("没有找到这一集", null));
+    }
+
+    private static DongPianLineUnavailableException lineUnavailable(Catalog catalog, Episode episode, String lineName) {
+        // 4K 与普通源是不同的 provider，不能去掉 4K 前缀后自动替换用户选择的线路。
+        var available = new LinkedHashSet<>(episode.tickets.keySet());
+        if (episode.lines != null) available.addAll(episode.lines.keySet());
+        String alternatives = String.join("、", available.stream().limit(8).toList());
+        return new DongPianLineUnavailableException("《" + catalog.title() + "》" + episode.title()
+                + "在「" + lineName + "」没有资源"
+                + (alternatives.isEmpty() ? "，请切换其他线路" : "；可切换到：" + alternatives));
     }
 
     /**
@@ -735,6 +780,9 @@ public class DongPianSearchService {
                 loadTickets(episode);
                 String ticket = episode.tickets.get(lineName);
                 if (ticket == null) {
+                    if (!episode.ticketsLoaded) {
+                        throw new DongPianException("暂时无法读取该集线路信息，请稍后重试", null);
+                    }
                     return null;
                 }
                 url = redeemTicket(ticket, episode.token());

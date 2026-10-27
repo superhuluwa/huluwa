@@ -1,6 +1,7 @@
 package com.huluwa.console.common;
 
 import com.huluwa.console.service.DongPianSearchService.DongPianException;
+import com.huluwa.console.service.DongPianSearchService.DongPianLineUnavailableException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -25,6 +26,11 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.resolve(ex.getCode());
         return ResponseEntity.status(status == null ? HttpStatus.BAD_REQUEST : status)
                 .body(ApiResult.fail(ex.getCode(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(DongPianLineUnavailableException.class)
+    public ResponseEntity<ApiResult<Void>> handleDongPianLineUnavailable(DongPianLineUnavailableException ex) {
+        return ResponseEntity.unprocessableEntity().body(ApiResult.fail(422, ex.getMessage()));
     }
 
     /** 上游懂片帝的会话、权限和限流原因直接交给客户端，避免被通用 500 提示覆盖。 */
