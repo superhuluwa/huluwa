@@ -27,7 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Cast
-import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.*
@@ -304,8 +304,8 @@ import java.util.concurrent.atomic.AtomicReference
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton({ openVideo(false) }, enabled = available && !resolving) {
-                                Icon(Icons.Outlined.Fullscreen, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp)); Text("全屏播放")
+                                Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp)); Text("横屏播放")
                             }
                             TextButton({ openVideo(true) }, enabled = available && !resolving) {
                                 Icon(Icons.Outlined.Cast, null, Modifier.size(18.dp))
