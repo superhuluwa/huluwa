@@ -68,7 +68,7 @@ import kotlin.math.abs
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
-                    if (ui.page == DengtaPage.Ranking) RoundIcon(Icons.Outlined.Insights, modifier = Modifier.size(36.dp))
+                    if (ui.page == DengtaPage.Ranking) SessionIcon(DENGTA_SESSION_KIND, Modifier.size(36.dp))
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                         Text(when (ui.page) { DengtaPage.Ranking -> "灯塔"; DengtaPage.Detail -> "剧集详情"; DengtaPage.Journal -> "追剧日志" },
                             style = MaterialTheme.typography.titleMedium)

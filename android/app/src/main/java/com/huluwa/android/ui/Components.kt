@@ -93,6 +93,7 @@ fun sessionColor(kind: String): Color = when (kind) {
 
 /** 会话品牌图标与网页版 SessionIcon.vue 保持一致；无品牌图标的会话返回 null。 */
 private fun sessionBrandIcon(kind: String): Int? = when (kind) {
+    DENGTA_SESSION_KIND -> R.drawable.session_icon_dengta
     "movie", "movie-hls" -> R.drawable.session_icon_movie
     "dytt" -> R.drawable.session_icon_dytt
     "magnet" -> R.drawable.session_icon_magnet
@@ -119,7 +120,10 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
 @Composable fun SessionIcon(kind: String, modifier: Modifier = Modifier) {
     val brandIcon = sessionBrandIcon(kind)
     if (brandIcon != null) {
-        Image(painterResource(brandIcon), null, modifier.size(44.dp), contentScale = ContentScale.Fit)
+        val imageModifier = modifier.size(44.dp)
+        Image(painterResource(brandIcon), null,
+            if (kind == DENGTA_SESSION_KIND) imageModifier.clip(RoundedCornerShape(13.dp)) else imageModifier,
+            contentScale = ContentScale.Fit)
     } else {
         RoundIcon(sessionIcon(kind), sessionColor(kind), modifier)
     }
