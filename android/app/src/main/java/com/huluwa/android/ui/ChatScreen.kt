@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -129,7 +130,7 @@ import kotlinx.coroutines.flow.first
                     topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp,
                     bottomStart = 17.dp, bottomEnd = 17.dp),
                 border = BorderStroke(1.dp, HuluwaColors.Line)) {
-                Column(Modifier.padding(if (film != null) 14.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(if (film != null) 12.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {
@@ -194,16 +195,19 @@ import kotlinx.coroutines.flow.first
         ui.subscriptions.data.any { it.enabled && card.matchesSubscription(it) } else card.subscribed
     val followBusy = ui.busy == "film-follow:${card.key()}"
     val websiteBusy = ui.busy == "film-website:${card.key()}"
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Poster(card.title, card.cover, size = DpSize(70.dp, 98.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Poster(card.title, card.cover, size = DpSize(64.dp, 90.dp))
             Column(Modifier.weight(1f)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(card.title, Modifier.weight(1f).padding(top = 4.dp), color = HuluwaColors.Ink,
-                        style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    FilmFollowButton(subscribed, followBusy, supported = !card.isMovieHls, enabled = ui.busy == null) {
-                        vm.setFilmFollowing(card, !subscribed)
+                    Text(card.title, Modifier.weight(1f), color = HuluwaColors.Ink,
+                        style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (!card.isMovieHls) {
+                        FilmFollowButton(subscribed, followBusy, enabled = ui.busy == null) {
+                            vm.setFilmFollowing(card, !subscribed)
+                        }
                     }
                 }
                 val metadata = listOf(card.year, card.genre).filter(String::isNotBlank).joinToString(" · ")
@@ -217,7 +221,7 @@ import kotlinx.coroutines.flow.first
                     Text(card.origin, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                Spacer(Modifier.height(9.dp))
+                Spacer(Modifier.height(8.dp))
                 FilmSourceTag(card)
             }
         }
@@ -265,28 +269,22 @@ import kotlinx.coroutines.flow.first
     }
 }
 
-/** 标题右侧的订阅胶囊；在线来源仅显示不可操作的订阅状态。 */
-@Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, supported: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    OutlinedButton(onClick, Modifier.heightIn(min = 32.dp), enabled = enabled && supported,
-        shape = CircleShape, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
-        border = BorderStroke(1.dp, if (supported && subscribed) HuluwaColors.Pine else HuluwaColors.Line),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (supported && subscribed) HuluwaColors.SoftGreen else Color.White,
-            contentColor = HuluwaColors.Pine,
-            disabledContainerColor = if (supported && subscribed) HuluwaColors.SoftGreen else Color.White,
-            disabledContentColor = HuluwaColors.Muted,
-        )) {
-        if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
-        else Icon(when {
-            !supported -> Icons.Outlined.NotificationsOff
-            subscribed -> Icons.Outlined.NotificationsActive
-            else -> Icons.Outlined.AddAlert
-        }, null, Modifier.size(14.dp))
+/** 紧凑订阅胶囊不引入 Material 按钮的最小布局高度，避免把标题与简介撑开。 */
+@Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val contentColor = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted
+    Row(Modifier.widthIn(min = 68.dp).heightIn(min = 30.dp)
+        .clip(CircleShape)
+        .background(if (subscribed) HuluwaColors.SoftGreen else Color.White)
+        .border(1.dp, if (subscribed) HuluwaColors.Pine else HuluwaColors.Line, CircleShape)
+        .clickable(enabled = enabled && !busy, role = Role.Button,
+            onClickLabel = if (subscribed) "取消订阅" else "订阅", onClick = onClick)
+        .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        if (busy) CircularProgressIndicator(Modifier.size(14.dp), color = contentColor, strokeWidth = 1.5.dp)
+        else Icon(if (subscribed) Icons.Outlined.NotificationsActive else Icons.Outlined.AddAlert,
+            null, Modifier.size(14.dp), tint = contentColor)
         Spacer(Modifier.width(4.dp))
-        Text(when {
-            !supported -> "暂不支持订阅"
-            subscribed -> "已订阅"
-            else -> "订阅"
-        }, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text(if (subscribed) "已订阅" else "订阅", color = contentColor,
+            style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
