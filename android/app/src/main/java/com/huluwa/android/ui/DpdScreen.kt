@@ -244,21 +244,35 @@ import kotlinx.serialization.json.JsonObject
 
 @Composable private fun DpdEpisodeRow(card: DpdCard, lineName: String, episode: DpdEpisode, defaultSeason: Int?,
                                       busy: Boolean, vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+    // 官方线路受站点限速，只有用户点开的那一集才兑换，其余集地址为空、显示「待解析」
+    val ready = episode.url.isNotBlank()
     Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)
         .background(Color(0x08243D32), RoundedCornerShape(8.dp))
         .border(1.dp, HuluwaColors.Line, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(episode.title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            DpdTinyButton("复制", Icons.Outlined.ContentCopy, primary = true) { onCopy(episode.url) }
-            DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: 1)
+            if (ready) {
+                DpdTinyButton("复制", Icons.Outlined.ContentCopy, primary = true) { onCopy(episode.url) }
+                DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
+                    vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: 1)
+                }
+            } else {
+                // 点一下才去兑换/解析这一集，省站点配额
+                DpdTinyButton("解析", Icons.Outlined.PlayCircleOutline, primary = true, enabled = !busy) {
+                    vm.resolveDpdEpisode(card, lineName, episode.title)
+                }
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(episode.url, Modifier.fillMaxWidth().clickable { onPlay(episode.url) },
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-            color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (ready) {
+            Text(episode.url, Modifier.fillMaxWidth().clickable { onPlay(episode.url) },
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Text("点「解析」获取这一集的地址（站点限速，逐集解析）",
+                style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 

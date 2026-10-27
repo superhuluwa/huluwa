@@ -41,4 +41,13 @@ public class DpdController {
         List<DongPianSearchService.PlayItem> items = source.line(catalog, line);
         return ApiResult.ok(source.toLinePayload(catalog, line, items));
     }
+
+    /** 单集按需解析：长剧首屏之外的集在用户点开时才解析/兑换 */
+    @GetMapping("/episode")
+    public ApiResult<Map<String, Object>> episode(@RequestParam String resId, @RequestParam String line,
+                                                  @RequestParam String title) {
+        DongPianSearchService.Catalog catalog = source.detail(resId);
+        DongPianSearchService.PlayItem item = source.resolveEpisode(catalog, line, title);
+        return ApiResult.ok(source.toLinePayload(catalog, line, List.of(item)));
+    }
 }

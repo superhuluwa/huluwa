@@ -171,6 +171,10 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun dpdLine(id: String, line: String): JsonObject =
         api.get("dpd", "line", query = mapOf("resId" to id, "line" to line)).asObject()
 
+    /** 懂片帝单集按需解析（官方线路受站点限速，只有点开的那一集才兑换） */
+    suspend fun dpdEpisode(id: String, line: String, title: String): JsonObject =
+        api.get("dpd", "episode", query = mapOf("resId" to id, "line" to line, "title" to title)).asObject()
+
     /** 懂片帝离线下载：直接提交 m3u8 直链（不带 resId，后端按直链入队） */
     suspend fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) {
         require(episodeNo > 0 && season > 0) { "季号和集号必须大于零" }

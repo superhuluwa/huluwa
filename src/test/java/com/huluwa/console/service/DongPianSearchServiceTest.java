@@ -77,7 +77,7 @@ class DongPianSearchServiceTest {
     /** 卡片载荷与电影天堂同形，source 用 dpd 区分；空字段不下发，避免前端拿到 "null" 字符串 */
     @Test
     void payloadCarriesSourceAndSkipsBlankFields() {
-        DongPianSearchService service = new DongPianSearchService();
+        DongPianSearchService service = new DongPianSearchService(null);
         var payload = service.toPayload(new DongPianSearchService.DpdItem(
                 "av_x", "狂飙", "2023", "中国大陆", "剧情,犯罪", "", "https://dongpian19.com/player/av_x",
                 null, "全39集"));
@@ -99,7 +99,7 @@ class DongPianSearchServiceTest {
     /** 详情载荷带上线路清单与集数，各集地址留空由前端按线路懒加载 */
     @Test
     void detailPayloadListsLinesWithoutItems() {
-        DongPianSearchService service = new DongPianSearchService();
+        DongPianSearchService service = new DongPianSearchService(null);
         var catalog = new DongPianSearchService.Catalog("av_x", "狂飙", "2023", "中国大陆", "剧情",
                 "https://img.example.com/a.webp", "全39集", "8.5",
                 List.of());
@@ -121,7 +121,7 @@ class DongPianSearchServiceTest {
     /** 线路各集用 episodes 字段下发，与详情同形 */
     @Test
     void linePayloadUsesEpisodesField() {
-        DongPianSearchService service = new DongPianSearchService();
+        DongPianSearchService service = new DongPianSearchService(null);
         var catalog = new DongPianSearchService.Catalog("av_x", "狂飙", "2023", "中国大陆", "剧情",
                 "", "", null, List.of());
         var payload = service.toLinePayload(catalog, "豆瓣资源",

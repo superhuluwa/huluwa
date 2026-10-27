@@ -1094,8 +1094,44 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(browserVisible = true, browserUrl = url, serverStatusVisible = false, actionError = null) }
     }
 
-    /** 懂片帝离线下载：直链直接入队，没有采集站 ID，重试时沿用已存地址 */
-    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
+    /**
+     * 懂片帝单集按需解析：官方线路受站点限速，只有用户点开的那一集才去兑换。
+     * 成功后把这一集的地址回填到弹层里，界面立即变成可播放状态。
+     */
+    fun resolveDpdEpisode(card: DpdCard, line: String, title: String) {
+        val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
+        if (sheet.card.key() != card.key()) return
+        val current = sheetGeneration
+        perform("dpd-episode-resolve", "", close = false) {
+            val result = repository.dpdEpisode(card.id, line, title)
+            if (current != sheetGeneration) return@perform
+            val episodes = DpdEpisode.rows(result)
+            if (episodes.isEmpty()) return@perform
+            val resolved = episodes.first()
+            mutable.update { old ->
+                val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                val state = active.lines[line] ?: return@update old
+                // 只替换这一集的地址，其它集保持原样
+                val updated = state.data.rows("episodes").map { element ->
+                    val item = element.asObject()
+                    if (item.text("title") == resolved.title) {
+                        jsonBody {
+                            item.forEach { (key, value) -> put(key, value) }
+                            put("url", resolved.url)
+                        }
+                    } else element
+                }
+                val data = jsonBody {
+                    state.data.forEach { (key, value) -> put(key, value) }
+                    put("episodes", JsonArray(updated))
+                }
+                old.copy(sheet = active.copy(lines = active.lines +
+                    (line to state.copy(data = data))))
+            }
+        }
+    }
+
+    /** 懂片帝离线下载：直链直接入队，没有采集站 ID，重试时沿用已存地址 */    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
         perform("dpd-episode", "已加入离线下载", close = false, after = { refreshDownloads() }) {
             repository.enqueueDpdEpisode(card, line, episode, season, episodeNo)
         }

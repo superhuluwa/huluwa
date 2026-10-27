@@ -100,8 +100,18 @@ public class DongPianSearchService {
     private static final int MAX_LINE_EPISODES = 150;
     /** 并发解析数：实测 10 并发约 2.5 秒/集，既能压住总耗时也不至于触发限流 */
     private static final int CONCURRENCY = 6;
-    /** 官方线路兑换的最小间隔：站点对 resume-line 有频率限制，并发 5 个就会 401 */
-    private static final long REDEEM_INTERVAL_MS = 120;
+    /**
+     * 官方线路兑换的最小间隔。
+     *
+     * <p>实测：连续快速兑换会返回 401，但间隔 4 秒左右就能稳定成功。
+     * 报错码是 {@code playback_user_session_required}（提示"需要登录"），
+     * 实际是未登录用户的**免费额度被限速**，不是真的要登录。
+     */
+    private static final long REDEEM_INTERVAL_MS = 4000;
+    /** 兑换失败后的重试次数（限速是暂时的，退避重试基本都能成功） */
+    private static final int REDEEM_ATTEMPTS = 3;
+    /** 重试退避基数：第 n 次重试前等 n × 该值 */
+    private static final long REDEEM_RETRY_BACKOFF_MS = 5000;
     /** 作品缓存条数上限（每部作品的详情 + 各集解析结果） */
     private static final int CACHE_MAX = 64;
     /** 作品缓存有效期：站点每集会更新，token 也会过期 */
@@ -171,6 +181,8 @@ public class DongPianSearchService {
         private volatile Map<String, RawLine> lines;
         /** 该集官方线路的票据（线路名 → resolve://…），真正点播时才兑换，避免浪费 */
         private volatile Map<String, String> tickets = Map.of();
+        /** 票据是否已取过（可能一条都没有，避免重复请求站点） */
+        private volatile boolean ticketsLoaded;
         /** 已兑换出的官方线路地址（线路名 → m3u8），重复点同一集不再兑换 */
         private final Map<String, String> redeemed = new ConcurrentHashMap<>();
         /** 已提交到后台队列：避免反复点同一线路时把同一集重复排队（解析本身靠 synchronized 去重） */
@@ -351,17 +363,30 @@ public class DongPianSearchService {
         // 先把已有缓存一次性读进内存，避免逐个查库；之后只解析真正缺失的集
         loadCachedEpisodes(episodes);
 
-        // 首屏同步：只解析前 N 集（直链解析 + 官方线路按需兑换）
+        boolean official = isOfficialLine(episodes, wanted);
+        List<PlayItem> items = new ArrayList<>();
+        if (official) {
+            // 官方线路：站点配额只有「约 20 秒 3 次」，绝不批量兑换。
+            // 只兑换第一集，其余集在用户点开时走 /api/dpd/episode 单集兑换。
+            for (Episode episode : episodes) {
+                String url = episode.redeemed.get(wanted);
+                items.add(new PlayItem(episode.title(), url == null ? "" : url));
+            }
+            String first = resolveSingle(episodes.getFirst(), wanted);
+            if (first == null) {
+                throw new DongPianException("线路「" + wanted + "」暂时没有可播放的地址（站点兑换配额已用完，稍后重试）", null);
+            }
+            items.set(0, new PlayItem(episodes.getFirst().title(), first));
+            return items;
+        }
+
+        // 直链线路：每集一次站点请求（约 1.6 秒），首屏同步解析前 N 集，其余后台补
         List<Episode> firstScreen = episodes.subList(0, Math.min(FIRST_SCREEN_EPISODES, episodes.size()));
         List<CompletableFuture<PlayItem>> futures = new ArrayList<>();
-        List<Episode> missing = new ArrayList<>();
         for (Episode episode : firstScreen) {
-            // 直链已在内存或库里，直接取；否则才去站点
-            if (episode.lines == null || !episode.lines.containsKey(wanted)) {
-                missing.add(episode);
+            if (episode.lines != null && episode.lines.containsKey(wanted)) {
+                continue;
             }
-        }
-        for (Episode episode : missing) {
             futures.add(CompletableFuture.supplyAsync(() -> {
                 String url = resolveSingle(episode, wanted);
                 return url == null ? null : new PlayItem(episode.title(), url);
@@ -369,29 +394,10 @@ public class DongPianSearchService {
         }
         CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
 
-        // 其余集丢到后台继续解析直链，不阻塞本次响应（官方线路不预兑换）
-        List<Episode> rest = episodes.subList(firstScreen.size(), episodes.size());
-        for (Episode episode : rest) {
-            if (episode.markQueued()) {
-                CompletableFuture.runAsync(() -> resolveQuietly(episode), pool);
-            }
-        }
-
-        // 按首屏顺序组装：先取已有缓存，再补这次新解析/兑换的
         Map<String, String> found = new LinkedHashMap<>();
-        for (Episode episode : firstScreen) {
-            Map<String, RawLine> resolved = episode.lines;
-            if (resolved == null) {
-                continue;
-            }
-            RawLine match = resolved.get(wanted);
-            if (match != null) {
-                found.putIfAbsent(episode.title(), match.url());
-            }
-        }
-        for (int i = 0; i < futures.size(); i++) {
+        for (CompletableFuture<PlayItem> future : futures) {
             try {
-                PlayItem item = futures.get(i).join();
+                PlayItem item = future.join();
                 if (item != null) {
                     found.putIfAbsent(item.title(), item.url());
                 }
@@ -400,12 +406,31 @@ public class DongPianSearchService {
                 log.debug("懂片帝线路解析失败：{}", e.getMessage());
             }
         }
-        if (found.isEmpty()) {
+
+        // 返回**全部**集：已解析的带地址，没解析的地址留空（前端显示为待解析）。
+        // 只返回首屏会让长剧的第 13 集以后在界面上完全消失。
+        int unresolved = 0;
+        for (Episode episode : episodes) {
+            Map<String, RawLine> resolved = episode.lines;
+            RawLine match = resolved == null ? null : resolved.get(wanted);
+            // 直链/内存里的优先，其次用本次刚解析出来的
+            String url = match != null ? match.url() : found.get(episode.title());
+            if (url == null) {
+                unresolved++;
+            }
+            items.add(new PlayItem(episode.title(), url == null ? "" : url));
+        }
+        if (items.stream().noneMatch(item -> !item.url().isBlank())) {
             throw new DongPianException("线路「" + wanted + "」没有可播放的地址", null);
         }
-        List<PlayItem> items = new ArrayList<>();
-        for (Map.Entry<String, String> entry : found.entrySet()) {
-            items.add(new PlayItem(entry.getKey(), entry.getValue()));
+
+        // 仍有未解析的集：后台继续补（直链），不阻塞本次响应
+        if (unresolved > 0) {
+            for (Episode episode : episodes) {
+                if (episode.lines == null && episode.markQueued()) {
+                    CompletableFuture.runAsync(() -> resolveQuietly(episode), pool);
+                }
+            }
         }
         return items;
     }
@@ -504,10 +529,14 @@ public class DongPianSearchService {
             if (cached != null) {
                 return cached;
             }
-            // 先查数据库：同一集解析过一次就不再打站点（官方线路兑换有频率限制）
+            // 先查数据库：直链部分命中就不必再打站点。
+            // 注意此时 tickets 仍为空——官方线路的票据只存在于站点响应里，
+            // 兑换前必须补一次站点请求，否则官方线路永远拿不到。
             Map<String, RawLine> stored = loadCachedLines(episode.token());
             if (stored != null) {
                 episode.lines = stored;
+                // 缓存命中时也补取票据，否则用户点官方线路会兑换失败
+                loadTickets(episode);
                 return stored;
             }
             JsonNode root = getJson(API_RESOLVE + encode(episode.token()));
@@ -548,6 +577,86 @@ public class DongPianSearchService {
     }
 
     /**
+     * 只为该集补取官方线路的票据（不兑换、不写缓存）。
+     *
+     * <p>直链命中数据库缓存时会跳过完整解析，但官方线路的票据只存在于站点响应里，
+     * 不补这一步用户点官方线路就会「没有可播放的地址」。
+     */
+    private void loadTickets(Episode episode) {
+        // 已经取过（哪怕一条都没有）就不再请求站点
+        if (episode.ticketsLoaded) {
+            return;
+        }
+        synchronized (episode) {
+            if (episode.ticketsLoaded) {
+                return;
+            }
+            try {
+                JsonNode root = getJson(API_RESOLVE + encode(episode.token()));
+                Map<String, String> tickets = new LinkedHashMap<>();
+                for (JsonNode node : root.path("line_options")) {
+                    if (!node.path("resolve_required").asBoolean(false)) {
+                        continue;
+                    }
+                    String name = firstNonBlank(text(node, "display_label"), text(node, "label"), text(node, "provider_name"));
+                    String ticket = text(node, "url");
+                    if (!name.isEmpty() && ticket.startsWith("resolve://")) {
+                        tickets.putIfAbsent(name, ticket);
+                    }
+                }
+                episode.tickets = tickets;
+            } catch (Exception e) {
+                log.debug("懂片帝补取官方线路票据失败：{}", e.getMessage());
+                return;
+            }
+            episode.ticketsLoaded = true;
+        }
+    }
+
+    /** 这条线路是不是官方线路（需要兑换票据）；只看第一集即可，线路结构各集一致 */
+    private boolean isOfficialLine(List<Episode> episodes, String lineName) {
+        if (episodes.isEmpty()) {
+            return false;
+        }
+        Episode first = episodes.getFirst();
+        if (first.tickets.isEmpty()) {
+            loadTickets(first);
+        }
+        return first.tickets.containsKey(lineName);
+    }
+
+    /**
+     * 只解析某一集在指定线路上的地址（用户点开未解析的集时才调用）。
+     *
+     * <p>长剧首屏只解析前十几集，后面的集在界面上是「待解析」，
+     * 用户点它时再兑换/解析这一集，避免一次性把所有集都兑换完。
+     *
+     * @param catalog  作品详情
+     * @param lineName 线路显示名
+     * @param title    集标题（用于定位是哪一集）
+     * @return 该集地址；定位不到或有误返回 null
+     */
+    public PlayItem resolveEpisode(Catalog catalog, String lineName, String title) {
+        String wanted = lineName == null ? "" : lineName.trim();
+        String wantedTitle = title == null ? "" : title.trim();
+        if (wanted.isEmpty() || wantedTitle.isEmpty()) {
+            throw new DongPianException("请指定线路与集数", null);
+        }
+        int total = Math.min(catalog.episodes().size(), MAX_LINE_EPISODES);
+        for (Episode episode : catalog.episodes().subList(0, total)) {
+            if (!episode.title().equals(wantedTitle)) {
+                continue;
+            }
+            String url = resolveSingle(episode, wanted);
+            if (url == null) {
+                throw new DongPianException("这一集在该线路上没有可播放的地址", null);
+            }
+            return new PlayItem(episode.title(), url);
+        }
+        throw new DongPianException("没有找到这一集", null);
+    }
+
+    /**
      * 解析某条线路的一集：直链直接返回；官方线路在这一刻才兑换（按集按需，最省次数）。
      *
      * @param episode    目标集
@@ -565,6 +674,8 @@ public class DongPianSearchService {
         if (cached != null) {
             return cached;
         }
+        // 兜底：票据可能在缓存命中路径里没取到
+        loadTickets(episode);
         String ticket = episode.tickets.get(lineName);
         if (ticket == null) {
             return null;
@@ -695,24 +806,37 @@ public class DongPianSearchService {
         }
         redeemLock.lock();
         try {
-            // 与上一次兑换保持最小间隔，避免触发站点限流
-            long wait = lastRedeemAt + REDEEM_INTERVAL_MS - System.currentTimeMillis();
-            if (wait > 0) {
-                Thread.sleep(wait);
+            // 实测连续兑换会被限流（第 4 次起返回 401），失败后加大间隔重试
+            for (int attempt = 0; attempt < REDEEM_ATTEMPTS; attempt++) {
+                // 与上一次兑换保持最小间隔，避免触发站点限流
+                long wait = lastRedeemAt + REDEEM_INTERVAL_MS - System.currentTimeMillis();
+                if (wait > 0) {
+                    Thread.sleep(wait);
+                }
+                try {
+                    JsonNode root = postJson(API_RESOLVE_LINE,
+                            Map.of("ticket", value, "episode_token", episodeToken));
+                    String url = text(root.path("line"), "url");
+                    if (url.startsWith("http") && isM3u8(url)) {
+                        return url;
+                    }
+                    // 拿到了响应但没有可用地址，重试也没用
+                    return null;
+                } catch (Exception e) {
+                    // 401/限流：退避后再试，越往后等得越久
+                    log.debug("懂片帝官方线路兑换第 {} 次失败：{}", attempt + 1, e.getMessage());
+                    if (attempt + 1 < REDEEM_ATTEMPTS) {
+                        Thread.sleep(REDEEM_RETRY_BACKOFF_MS * (attempt + 1L));
+                    }
+                } finally {
+                    lastRedeemAt = System.currentTimeMillis();
+                }
             }
-            JsonNode root = postJson(API_RESOLVE_LINE,
-                    Map.of("ticket", value, "episode_token", episodeToken));
-            String url = text(root.path("line"), "url");
-            return url.startsWith("http") && isM3u8(url) ? url : null;
+            return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
-        } catch (Exception e) {
-            log.debug("懂片帝官方线路兑换失败 {}：{}",
-                    ticket.substring(0, Math.min(24, ticket.length())), e.getMessage());
-            return null;
         } finally {
-            lastRedeemAt = System.currentTimeMillis();
             redeemLock.unlock();
         }
     }
