@@ -26,6 +26,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.Refresh
@@ -36,8 +41,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -52,9 +60,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.huluwa.android.HuluwaViewModel
+import com.huluwa.android.HuluwaApplication
 import com.huluwa.android.VideoCastViewModel
 import com.huluwa.android.data.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -63,13 +74,24 @@ import java.util.concurrent.atomic.AtomicReference
  * 应用内无痕浏览器：支持隐藏入口与影视卡片的「网站直达」，可传入初始页面。
  *
  * 无痕做法：禁用文件访问与混合内容；进入和退出时清除 Cookie、WebStorage 与磁盘缓存；
- * 关闭页面时销毁 WebView，不留下本次浏览的会话数据。
+ * 关闭页面时销毁 WebView；主动收藏的网址单独保存在 App 本地，关闭后仍保留。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable fun HiddenBrowserScreen(vm: HuluwaViewModel, initialUrl: String = "") {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val addressFocus = remember { FocusRequester() }
+    val bookmarkStore = remember(context) { (context.applicationContext as HuluwaApplication).browserBookmarks }
+    val bookmarks by bookmarkStore.bookmarks.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var browserMenu by remember { mutableStateOf(false) }
+    var showBookmarks by rememberSaveable { mutableStateOf(false) }
+    var savingBookmark by remember { mutableStateOf(false) }
+    var bookmarkError by remember { mutableStateOf<String?>(null) }
+
     var address by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     // 保存当前页地址，屏幕旋转重建 WebView 时可以恢复浏览位置。
     var loadedUrl by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
@@ -84,15 +106,45 @@ import java.util.concurrent.atomic.AtomicReference
     var showCast by remember { mutableStateOf(false) }
     var resolving by remember { mutableStateOf(false) }
     var resolutionJob by remember { mutableStateOf<Job?>(null) }
-    var pageTitle by remember { mutableStateOf("电影港在线视频") }
+    var pageTitle by remember(initialUrl) { mutableStateOf("") }
     val currentPage = remember(initialUrl) { AtomicReference(initialUrl) }
     val pageSequence = remember(initialUrl) { AtomicLong(0) }
     val nativeActive by rememberUpdatedState(nativeVideo != null)
     val castActive by rememberUpdatedState(cast.selected != null && cast.playing)
+    val bookmarkUrl = remember(loadedUrl) { runCatching { BrowserAddress.normalize(loadedUrl) }.getOrNull() }
+    val bookmarked = bookmarks.any { it.url == bookmarkUrl }
+
+    fun bookmarkNotice(message: String) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(message)
+        }
+    }
+    fun changeBookmark(remove: BrowserBookmark? = null) {
+        if (savingBookmark) return
+        val url = remove?.url ?: bookmarkUrl ?: return
+        val title = pageTitle.ifBlank { url }
+        savingBookmark = true
+        bookmarkError = null
+        scope.launch {
+            try {
+                if (remove != null) {
+                    bookmarkStore.remove(url)
+                    bookmarkNotice("收藏已删除")
+                } else bookmarkNotice(if (bookmarkStore.toggle(url, title)) "已收藏当前网页" else "已取消收藏")
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) {
+                bookmarkError = "收藏保存失败，请重试"
+                if (!showBookmarks) bookmarkNotice("收藏保存失败，请重试")
+            }
+            finally { savingBookmark = false }
+        }
+    }
+
 
     fun capture(value: String, page: String, userAgent: String, positionMs: Long = 0, referer: String = page) {
         if (!MovieWebVideo.isM3u8(value)) return
-        detectedVideo = BrowserVideo(value, pageTitle, referer, userAgent,
+        detectedVideo = BrowserVideo(value, pageTitle.ifBlank { "电影港在线视频" }, referer, userAgent,
             CookieManager.getInstance().getCookie(value).orEmpty(), positionMs.coerceAtLeast(0))
     }
     fun captureDom(result: String?, page: String, userAgent: String) {
@@ -122,6 +174,7 @@ import java.util.concurrent.atomic.AtomicReference
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                     failure = null
                     progress = 1
+                    pageTitle = ""
                     pageSequence.incrementAndGet()
                     resolutionJob?.cancel()
                     resolving = false
@@ -215,16 +268,18 @@ import java.util.concurrent.atomic.AtomicReference
             webView.destroy()
         }
     }
-    fun navigate() {
-        val url = runCatching { BrowserAddress.normalize(address) }.getOrElse {
+    fun navigateTo(value: String) {
+        val url = runCatching { BrowserAddress.normalize(value) }.getOrElse {
             failure = it.message
             return
         }
         address = url
         failure = null
         keyboard?.hide()
+        focus.clearFocus()
         webView.loadUrl(url)
     }
+    fun navigate() = navigateTo(address)
     fun pauseWebVideo() {
         webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
         webView.onPause()
@@ -256,7 +311,7 @@ import java.util.concurrent.atomic.AtomicReference
                 captureDom(result, page, webView.settings.userAgentString)
                 if (MovieWebVideo.canResolve(page)) {
                     resolutionJob = vm.resolveBrowserVideo(page, onResolved = { url ->
-                        resolved(BrowserVideo(url, pageTitle, page, webView.settings.userAgentString,
+                        resolved(BrowserVideo(url, pageTitle.ifBlank { "电影港在线视频" }, page, webView.settings.userAgentString,
                             CookieManager.getInstance().getCookie(url).orEmpty(), detectedVideo?.positionMs ?: 0))
                     }, onFailure = ::failed)
                 } else detectedVideo?.let(::resolved) ?: failed("请先在网页中选择并播放一个分集")
@@ -273,6 +328,7 @@ import java.util.concurrent.atomic.AtomicReference
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = HuluwaColors.Paper,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Surface(color = Color.White) {
                 Column {
@@ -285,9 +341,17 @@ import java.util.concurrent.atomic.AtomicReference
                         }
                         OutlinedTextField(
                             address, { address = it },
-                            Modifier.weight(1f).onFocusChanged { editing = it.isFocused },
+                            Modifier.weight(1f).focusRequester(addressFocus).onFocusChanged { editing = it.isFocused },
                             singleLine = true, shape = RoundedCornerShape(14.dp),
                             leadingIcon = { Icon(Icons.Outlined.Shield, null, Modifier.size(17.dp), tint = HuluwaColors.Pine) },
+                            trailingIcon = {
+                                if (address.isNotEmpty()) IconButton({
+                                    address = ""
+                                    failure = null
+                                    addressFocus.requestFocus()
+                                    keyboard?.show()
+                                }) { Icon(Icons.Outlined.Close, "清空网址", Modifier.size(18.dp)) }
+                            },
                             placeholder = { Text("输入网址", style = MaterialTheme.typography.bodySmall) },
                             textStyle = MaterialTheme.typography.bodyMedium,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
@@ -298,6 +362,22 @@ import java.util.concurrent.atomic.AtomicReference
                             ),
                         )
                         IconButton({ webView.reload() }, enabled = loadedUrl.isNotBlank()) { Icon(Icons.Outlined.Refresh, "刷新网页") }
+                        Box {
+                            IconButton({ browserMenu = true }) { Icon(Icons.Outlined.MoreVert, "浏览器菜单") }
+                            DropdownMenu(browserMenu, { browserMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(if (bookmarked) "取消当前收藏" else "收藏当前网页") },
+                                    leadingIcon = { Icon(if (bookmarked) Icons.Outlined.Star else Icons.Outlined.StarBorder, null) },
+                                    enabled = bookmarkUrl != null && !savingBookmark,
+                                    onClick = { browserMenu = false; changeBookmark() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("我的收藏（${bookmarks.size}）") },
+                                    leadingIcon = { Icon(Icons.Outlined.Bookmarks, null) },
+                                    onClick = { browserMenu = false; keyboard?.hide(); showBookmarks = true },
+                                )
+                            }
+                        }
                     }
                     if (MovieWebVideo.isMoviePage(loadedUrl)) {
                         val available = detectedVideo != null || MovieWebVideo.canResolve(loadedUrl)
@@ -339,7 +419,12 @@ import java.util.concurrent.atomic.AtomicReference
                 ) {
                     RoundIcon(Icons.Outlined.Shield, modifier = Modifier.size(60.dp))
                     Text("无痕浏览", style = MaterialTheme.typography.titleMedium)
-                    Text("输入网址开始浏览，关闭页面后清除本次记录", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    Text("输入网址开始浏览，关闭后清除浏览记录，收藏会保留", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    TextButton({ keyboard?.hide(); showBookmarks = true }) {
+                        Icon(Icons.Outlined.Bookmarks, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("我的收藏（${bookmarks.size}）")
+                    }
                 }
             }
             failure?.let { message ->
@@ -357,6 +442,9 @@ import java.util.concurrent.atomic.AtomicReference
             }
         }
     }
+    if (showBookmarks) BrowserBookmarksDialog(bookmarks, savingBookmark, bookmarkError,
+        onOpen = { bookmark -> showBookmarks = false; navigateTo(bookmark.url) },
+        onRemove = { changeBookmark(it) }, dismiss = { showBookmarks = false })
     nativeVideo?.let { media ->
         BrowserVideoPlayer(media, onCast = { castVideo = media; showCast = true; castVm.scan() }) {
             nativeVideo = null
