@@ -6,7 +6,7 @@
 #
 # 脚本会完成：
 #   - 校验 Docker / Compose / socket
-#   - 构建当前工作区最新源码镜像
+#   - 默认执行 git pull --ff-only，更新源码后构建镜像
 #   - 处理 data / downloads / frpc / docker.sock 权限
 #   - 停机备份整个持久化数据目录
 #   - 重建容器并等待健康检查、校验挂载与权限
@@ -15,7 +15,8 @@
 # 可选参数：
 #   --check        只检查环境和 Compose 配置，不构建、不重建
 #   --no-backup    跳过停机数据快照（不建议）
-#   --git-pull     部署前先执行 git pull --ff-only
+#   --git-pull     部署前先执行 git pull --ff-only（默认启用）
+#   --no-git-pull  跳过源码更新，直接部署当前工作区
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

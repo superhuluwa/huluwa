@@ -4,21 +4,23 @@
 # 在飞牛本机项目根目录执行：
 #   bash deploy-fnos.sh
 #
-# 本脚本只处理当前工作区源码，不执行 SSH、scp，也不会默认 git pull。
+# 本脚本在飞牛本机执行，默认先 git pull --ff-only 更新源码，不执行 SSH、scp。
 #
 # 部署顺序：
-#   1. 校验 Docker / Compose / socket / 目录 / .env
-#   2. 构建新镜像（旧容器继续运行）
-#   3. 修正 data / downloads / frpc 权限
-#   4. 备份前先停旧容器，完整快照 /app/data
-#   5. 重建容器并等待健康检查
-#   6. 校验挂载、UID 10001 权限、Docker socket、frpc 可写
-#   7. 失败时尝试恢复旧镜像
+#   1. 校验 Docker / Compose / socket 与项目目录
+#   2. 拉取当前分支的最新上游代码，重新载入更新后的部署脚本
+#   3. 准备目录、.env 与 Compose 配置，构建新镜像（旧容器继续运行）
+#   4. 修正 data / downloads / frpc 权限
+#   5. 备份前先停旧容器，完整快照 /app/data
+#   6. 重建容器并等待健康检查
+#   7. 校验挂载、UID 10001 权限、Docker socket、frpc 可写
+#   8. 失败时尝试恢复旧镜像
 #
 # 可选参数：
 #   --check       只检查环境和配置，不构建、不重建
 #   --no-backup   跳过停机数据快照（不建议）
-#   --git-pull    部署前拉取 Git 代码（默认不拉取）
+#   --git-pull    部署前拉取 Git 代码（默认启用）
+#   --no-git-pull 跳过源码更新，直接部署当前工作区
 #
 # 环境变量覆盖：
 #   HULUWA_APP_DIR（默认脚本所在项目根目录）
@@ -50,7 +52,8 @@ cd "${PROJECT_DIR}"
 
 MODE="deploy"
 BACKUP=1
-GIT_PULL=0
+GIT_PULL=1
+ORIGINAL_ARGS=("$@")
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check|--verify-only) MODE="check" ;;
@@ -228,6 +231,17 @@ check_environment() {
   if ! is_root; then
     log "当前用户通过 Docker socket 执行部署；目录属主由临时 root 容器处理"
   fi
+}
+
+pull_latest_source() {
+  command -v git >/dev/null 2>&1 || fail "未检测到 git；请安装 git，或使用 --no-git-pull 部署当前工作区"
+  [ -e "${PROJECT_DIR}/.git" ] && [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] \
+    || fail "项目目录不是 Git 工作区：${PROJECT_DIR}；请使用 git clone 获取源码，或使用 --no-git-pull"
+  log "拉取当前分支的最新上游代码（git pull --ff-only）"
+  git pull --ff-only || fail "源码更新失败，未继续部署；请检查网络、Git 凭据、当前分支上游配置及本地改动"
+  log "源码已更新到：$(git rev-parse --short HEAD)，重新载入部署脚本"
+  # 必须在修改 compose.yaml / .env 前拉取；重新执行最新脚本，并跳过本次已完成的拉取。
+  exec bash "${PROJECT_DIR}/deploy-fnos.sh" "${ORIGINAL_ARGS[@]}" --no-git-pull
 }
 
 prepare_directories() {
@@ -481,6 +495,9 @@ main() {
   log "葫芦娃助手 · 飞牛本机部署"
   log "项目目录：${PROJECT_DIR}"
   check_environment
+  if [ "${MODE}" = "deploy" ] && [ "${GIT_PULL}" -eq 1 ]; then
+    pull_latest_source
+  fi
   ensure_env
   prepare_directories
   prepare_compose_override
@@ -492,11 +509,6 @@ main() {
   fi
 
   ensure_base_images
-
-  if [ "${GIT_PULL}" -eq 1 ]; then
-    log "拉取最新代码（git pull --ff-only）"
-    git pull --ff-only || fail "git pull 失败，未继续部署"
-  fi
 
   record_old_image
   if ! build_image; then

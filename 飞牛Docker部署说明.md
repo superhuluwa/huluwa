@@ -133,7 +133,7 @@ bash deploy-fnos.sh
 - 修正数据目录属主为 `10001:10001`
 - 修正下载目录 TrimACL / POSIX ACL
 - 修正 frpc 共享目录权限
-- 构建当前工作区最新源码镜像
+- 默认先执行 `git pull --ff-only` 更新当前分支，再构建最新源码镜像
 - 构建成功后停止旧容器，完整备份 `/app/data`
 - 重建容器并等待健康检查
 - 校验实际挂载、UID `10001` 写权限、Docker socket、frpc 目录和媒体只读状态
@@ -151,13 +151,15 @@ bash deploy-fnos.sh --check
 bash deploy-fnos.sh --no-backup
 ```
 
-部署前先拉取 Git 代码：
+默认部署会先执行 `git pull --ff-only`，拉取当前分支对应上游分支的最新代码，再重新载入更新后的部署脚本。源码更新发生在修改 `.env`、临时调整 `compose.yaml` 和构建镜像之前；更新失败会立即停止部署，不替换正在运行的容器。`--check` 仅做预检，不拉取代码。`--git-pull` 参数保留兼容。
+
+源码目录须为 Git 工作区，当前分支须配置上游分支，并具备远程仓库读取权限。脚本不会强制覆盖本地改动或自动合并分叉历史；拉取因冲突等原因失败时，处理后再部署。
+
+需要部署当前工作区、跳过源码更新时：
 
 ```bash
-bash deploy-fnos.sh --git-pull
+bash deploy-fnos.sh --no-git-pull
 ```
-
-默认不执行 `git pull`，只部署当前工作区源码，避免本地改动被自动覆盖。
 
 可用环境变量覆盖路径：
 
