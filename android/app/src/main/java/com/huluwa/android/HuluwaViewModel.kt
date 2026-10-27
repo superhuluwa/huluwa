@@ -1007,6 +1007,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
 
     /** 打开懂片帝资源弹框并拉取作品详情（线路清单） */
     fun openDpdSources(card: DpdCard) {
+        AppLog.d("懂片帝", "打开资源列表：${card.title} (${card.id.take(16)}…)")
         showSheet(AppSheet.Dpd(card, LoadState(JsonObject(emptyMap()))))
         reloadDpdSources(card)
     }
@@ -1027,6 +1028,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val result = repository.dpdDetail(card.id)
+                AppLog.d("懂片帝", "详情返回：${result.rows("dpdLines").size} 条线路")
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
@@ -1035,6 +1037,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                AppLog.e("懂片帝", "详情加载失败", error)
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
@@ -1061,9 +1064,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 busyLine = line,
                 lines = active.lines + (line to LoadState(JsonObject(emptyMap()), loading = true))))
         }
+        AppLog.d("懂片帝", "开始解析线路：$line")
+        val startedAt = System.currentTimeMillis()
         viewModelScope.launch {
             try {
                 val result = repository.dpdLine(card.id, line)
+                val items = result.rows("episodes")
+                AppLog.d("懂片帝", "线路「$line」返回 ${items.size} 集，其中 ${items.count { e -> e.asObject().text("url").isNotBlank() }} 集有地址（${System.currentTimeMillis() - startedAt}ms）")
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
@@ -1074,6 +1081,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                AppLog.e("懂片帝", "线路「$line」解析失败（${System.currentTimeMillis() - startedAt}ms）", error)
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
@@ -1102,8 +1110,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
         if (sheet.card.key() != card.key()) return
         val current = sheetGeneration
+        AppLog.d("懂片帝", "解析单集：$line / $title")
+        val startedAt = System.currentTimeMillis()
         perform("dpd-episode-resolve", "", close = false) {
             val result = repository.dpdEpisode(card.id, line, title)
+            AppLog.d("懂片帝", "单集「$title」解析完成（${System.currentTimeMillis() - startedAt}ms）")
             if (current != sheetGeneration) return@perform
             val episodes = DpdEpisode.rows(result)
             if (episodes.isEmpty()) return@perform

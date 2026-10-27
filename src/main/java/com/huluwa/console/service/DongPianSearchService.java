@@ -817,7 +817,8 @@ public class DongPianSearchService {
                     JsonNode root = postJson(API_RESOLVE_LINE,
                             Map.of("ticket", value, "episode_token", episodeToken));
                     String url = text(root.path("line"), "url");
-                    if (url.startsWith("http") && isM3u8(url)) {
+                    // 官方线路可能是 m3u8，也可能是 MP4 直链，两者都能播
+                    if (isPlayableUrl(url)) {
                         return url;
                     }
                     // 拿到了响应但没有可用地址，重试也没用
@@ -954,6 +955,35 @@ public class DongPianSearchService {
         try {
             String path = URI.create(url).getPath();
             return path != null && path.toLowerCase().contains(".m3u8");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 官方线路兑换出的地址是否可用。
+     *
+     * <p>实测官方线路返回三种形态，都能直接播放：
+     * <ul>
+     *   <li>普通 m3u8（路径带 .m3u8）——1080P-官方R / 海外 / 4K海外 / 优酷；</li>
+     *   <li>隐藏 m3u8（路径没有 .m3u8 后缀，如 {@code /doapi/m3u8/xxx?auth_key=….m3u8}）
+     *       ——新4K-限时等级专属，只看路径会误判成无效；</li>
+     *   <li>MP4 直链（{@code video/mp4}）——高清-官方B / 1080P-官方S / Z / V，
+     *       播放器可以直接播，离线下载则需按 mp4 处理。</li>
+     * </ul>
+     * 因此这里放宽为「http(s) 且不是图片地址」。官方线路的 {@code url_kind} 一律是
+     * {@code m3u8} 或 {@code mp4}，不会混进海报之类的图片。
+     */
+    static boolean isPlayableUrl(String url) {
+        if (url == null || !url.startsWith("http")) {
+            return false;
+        }
+        try {
+            String path = URI.create(url).getPath();
+            String lower = path == null ? "" : path.toLowerCase();
+            // 图片是站点的海报资源，不属于播放地址
+            return !(lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                    || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif"));
         } catch (Exception e) {
             return false;
         }

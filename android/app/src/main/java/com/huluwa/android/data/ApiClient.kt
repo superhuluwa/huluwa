@@ -59,6 +59,8 @@ class ApiClient(val store: SessionStore) {
             // HTTP 层有响应（含 4xx / 5xx）说明服务器在线，只有连接失败才算不可达；
             // 超时单独提示，不作为断线，与 userMessage() 的分支保持一致。
             if (error !is ApiException && error !is SocketTimeoutException) mutableReachable.value = false
+            // 失败原因直接记日志，便于在 App 内定位（4xx/5xx 带服务端返回的 message）
+            AppLog.e("网络", "${method} ${segments.joinToString("/")} 失败：${userMessage()}", error)
             throw error
         }
     }

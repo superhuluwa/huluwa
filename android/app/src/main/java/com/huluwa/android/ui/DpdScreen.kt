@@ -10,6 +10,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -132,6 +133,7 @@ import kotlinx.serialization.json.JsonObject
     }
     val lines = remember(detail.data) { DpdLine.rows(detail.data) }
     var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
+    var logVisible by remember { mutableStateOf(false) }
     val current = lines.getOrNull(selected.coerceIn(0, (lines.size - 1).coerceAtLeast(0)))?.name.orEmpty()
     // 选中线路后按需解析；解析过的线路由 ViewModel 缓存，不会重复请求
     LaunchedEffect(current) { if (current.isNotBlank()) vm.loadDpdLine(card, current) }
@@ -186,10 +188,47 @@ import kotlinx.serialization.json.JsonObject
                     Text(if (sheet.busyLine.isNotBlank()) "正在解析「${sheet.busyLine}」…" else "点选线路后可播放、复制 m3u8 直链；离线任务在「下载 → 离线剧集」查看",
                         Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // 出问题时可把这里的日志复制出来定位（同时也会写到 Logcat）
+                    TextButton(onClick = { logVisible = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("日志", style = MaterialTheme.typography.labelLarge, color = HuluwaColors.Muted)
+                    }
                     OutlinedButton(vm::dismissDpdSources, Modifier.height(36.dp), shape = RoundedCornerShape(11.dp),
                         border = BorderStroke(1.dp, HuluwaColors.Line), contentPadding = PaddingValues(horizontal = 14.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = HuluwaColors.Pine)) {
                         Text("关闭", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+    if (logVisible) DpdLogDialog(onDismiss = { logVisible = false })
+}
+
+/** 运行日志弹窗：只读展示最近日志，可一键复制给他人排查 */
+@Composable private fun DpdLogDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // 打开时快照一次，避免滚动时内容跳动
+    val text = remember { AppLog.dump() }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp)
+            .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .8f),
+            shape = RoundedCornerShape(20.dp), color = HuluwaColors.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("运行日志", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = {
+                        context.getSystemService(ClipboardManager::class.java)
+                            ?.setPrimaryClip(ClipData.newPlainText("日志", text))
+                    }) { Text("复制", style = MaterialTheme.typography.labelLarge) }
+                    IconButton(onDismiss) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
+                }
+                HorizontalDivider(color = HuluwaColors.Line)
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    SelectionContainer {
+                        Text(text, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            color = HuluwaColors.Ink)
                     }
                 }
             }

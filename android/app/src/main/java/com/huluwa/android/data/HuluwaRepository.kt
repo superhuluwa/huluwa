@@ -178,6 +178,11 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     /** 懂片帝离线下载：直接提交 m3u8 直链（不带 resId，后端按直链入队） */
     suspend fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) {
         require(episodeNo > 0 && season > 0) { "季号和集号必须大于零" }
+        // 官方线路里有几条返回的是 MP4 直链（高清-官方B / 1080P-官方S、Z、V），
+        // 离线下载组件只处理 m3u8，提前拦下来给出明确提示，避免提交后才报错。
+        require(episode.url.contains(".m3u8", ignoreCase = true)) {
+            "这条线路是 MP4 直链，暂不支持离线下载；可直接点地址播放，或换一条 m3u8 线路"
+        }
         api.post("hls", "downloads", body = jsonBody {
             put("title", card.title); put("year", card.year)
             put("season", season); put("episode", episodeNo)
