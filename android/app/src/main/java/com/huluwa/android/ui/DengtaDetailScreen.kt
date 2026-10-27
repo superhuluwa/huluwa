@@ -65,7 +65,6 @@ import kotlin.math.roundToInt
         }
         item {
             Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (ui.detail.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
                 ui.detail.error?.let { StatusNotice(it, if (detail != null) "正在显示上次获取的数据" else null, onRetry = vm::refreshDetail) }
                 ui.journalError?.let { StatusNotice(it, onRetry = vm::loadJournal) }
                 if (detail != null) {
@@ -164,7 +163,6 @@ import kotlin.math.roundToInt
     if (ui.detail.data?.hasPlayRule != true) return
     Panel(Modifier.fillMaxWidth()) {
         Text("平台更新规则", style = MaterialTheme.typography.titleMedium)
-        if (ui.rules.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = HuluwaColors.Pine)
         ui.rules.error?.let { StatusNotice(it, onRetry = vm::retryRules) }
         ui.rules.data.forEach { rule ->
             Text("${rule.platform} · ${rule.update}", Modifier.padding(top = 14.dp), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
