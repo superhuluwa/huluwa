@@ -23,6 +23,15 @@ sealed interface AppSheet {
     data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
         val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
+    /** 懂片帝资源弹框：独立于 Films（电影港 / 电影天堂），各线路按需解析 */
+    data class Dpd(
+        val card: DpdCard,
+        val detail: LoadState<JsonObject>,
+        /** 线路名 → 该线路各集；点选线路后才拉取 */
+        val lines: Map<String, LoadState<JsonObject>> = emptyMap(),
+        /** 正在解析的线路名（底部提示用） */
+        val busyLine: String = "",
+    ) : AppSheet
     data class Text(val title: String, val data: LoadState<String>, val onSave: ((String) -> Unit)? = null) : AppSheet
     data class ContainerDetail(val container: DockerContainer, val data: LoadState<JsonObject>) : AppSheet
     data class CreateResource(val section: DockerSection) : AppSheet
@@ -993,6 +1002,104 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+    // ------------------------------------------------------------------ 懂片帝
+    // 独立的一套入口与状态：不经过 filmResources / Films，避免与电影港、电影天堂互相牵连。
+
+    /** 打开懂片帝资源弹框并拉取作品详情（线路清单） */
+    fun openDpdSources(card: DpdCard) {
+        showSheet(AppSheet.Dpd(card, LoadState(JsonObject(emptyMap()))))
+        reloadDpdSources(card)
+    }
+
+    fun dismissDpdSources() {
+        if (mutable.value.sheet is AppSheet.Dpd) dismissSheet()
+    }
+
+    /** 重新抓取作品详情；已解析的各线路一并清空，避免集数变化后仍显示旧地址 */
+    fun reloadDpdSources(card: DpdCard) {
+        val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
+        if (sheet.card.key() != card.key()) return
+        val current = sheetGeneration
+        mutable.update { old ->
+            val active = old.sheet as? AppSheet.Dpd ?: return@update old
+            old.copy(sheet = active.copy(detail = active.detail.copy(loading = true, error = null), lines = emptyMap(), busyLine = ""))
+        }
+        viewModelScope.launch {
+            try {
+                val result = repository.dpdDetail(card.id)
+                if (current != sheetGeneration) return@launch
+                mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                    old.copy(sheet = active.copy(detail = LoadState(result, loaded = true)))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (current != sheetGeneration) return@launch
+                mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                    old.copy(sheet = active.copy(detail = LoadState(JsonObject(emptyMap()), loaded = true, error = error.userMessage())))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    /**
+     * 解析某条线路的全部剧集。
+     * 每条线路的每集都要单独请求站点，很慢，所以只在用户点选这条线路时才拉；结果缓存到弹框状态里。
+     */
+    fun loadDpdLine(card: DpdCard, line: String) {
+        val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
+        if (sheet.card.key() != card.key() || line.isBlank()) return
+        val existing = sheet.lines[line]
+        if (existing != null && (existing.loading || existing.loaded)) return
+        val current = sheetGeneration
+        mutable.update { old ->
+            val active = old.sheet as? AppSheet.Dpd ?: return@update old
+            old.copy(sheet = active.copy(
+                busyLine = line,
+                lines = active.lines + (line to LoadState(JsonObject(emptyMap()), loading = true))))
+        }
+        viewModelScope.launch {
+            try {
+                val result = repository.dpdLine(card.id, line)
+                if (current != sheetGeneration) return@launch
+                mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                    old.copy(sheet = active.copy(
+                        busyLine = if (active.busyLine == line) "" else active.busyLine,
+                        lines = active.lines + (line to LoadState(result, loaded = true))))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (current != sheetGeneration) return@launch
+                mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                    old.copy(sheet = active.copy(
+                        busyLine = if (active.busyLine == line) "" else active.busyLine,
+                        lines = active.lines + (line to LoadState(
+                            JsonObject(emptyMap()), loaded = true, error = error.userMessage()))))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    /** 懂片帝作品页（站点 /player/{作品ID}）用内置浏览器打开 */
+    fun openDpdWebsite(card: DpdCard) {
+        val url = card.pageUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return
+        dismissSheet()
+        mutable.update { it.copy(browserVisible = true, browserUrl = url, serverStatusVisible = false, actionError = null) }
+    }
+
+    /** 懂片帝离线下载：直链直接入队，没有采集站 ID，重试时沿用已存地址 */
+    fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) =
+        perform("dpd-episode", "已加入离线下载", close = false, after = { refreshDownloads() }) {
+            repository.enqueueDpdEpisode(card, line, episode, season, episodeNo)
+        }
+
     fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
         showSheet(AppSheet.Films(card, LoadState(JsonObject(emptyMap())), defaultSeason))
         reloadFilmResources(card)

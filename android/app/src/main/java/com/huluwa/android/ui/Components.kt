@@ -67,6 +67,8 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     DENGTA_SESSION_KIND -> Icons.Outlined.Insights
     "movie" -> Icons.Outlined.LocalMovies
     "dytt", "movie-hls" -> Icons.Outlined.PlayCircleOutline
+    // 懂片帝：独自一套图标与配色，与电影港 / 电影天堂区分
+    "dpd" -> Icons.Outlined.LocalPlay
     "magnet" -> Icons.Outlined.CloudDownload
     "video" -> Icons.Outlined.SmartDisplay
     "xunlei", "xunlei-win" -> Icons.Outlined.Bolt
@@ -83,6 +85,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
 }
 fun sessionColor(kind: String): Color = when (kind) {
     "movie", "movie-hls" -> HuluwaColors.Lilac
+    "dpd" -> Color(0xFF2E7D6F)
     "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber

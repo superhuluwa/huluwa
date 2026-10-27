@@ -160,6 +160,27 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             "type" to if (online) "online" else "magnet", "url" to url, "title" to card.title, "year" to card.year,
         )).asObject()
     }
+    // ------------------------------------------------------------------ 懂片帝
+    // 独立接口：不复用 hls/detail 或 hls/downloads，与电影港、电影天堂完全隔开。
+
+    /** 懂片帝作品详情：返回线路清单（各集地址留空，选中线路后再拉） */
+    suspend fun dpdDetail(id: String): JsonObject =
+        api.get("dpd", "detail", query = mapOf("resId" to id)).asObject()
+
+    /** 懂片帝某条线路的全部剧集 */
+    suspend fun dpdLine(id: String, line: String): JsonObject =
+        api.get("dpd", "line", query = mapOf("resId" to id, "line" to line)).asObject()
+
+    /** 懂片帝离线下载：直接提交 m3u8 直链（不带 resId，后端按直链入队） */
+    suspend fun enqueueDpdEpisode(card: DpdCard, line: String, episode: DpdEpisode, season: Int, episodeNo: Int) {
+        require(episodeNo > 0 && season > 0) { "季号和集号必须大于零" }
+        api.post("hls", "downloads", body = jsonBody {
+            put("title", card.title); put("year", card.year)
+            put("season", season); put("episode", episodeNo)
+            put("episodeTitle", episode.title); put("url", episode.url); put("sourceName", line)
+        }).requireSuccess()
+    }
+
     /** 已知详情页或已匹配的在线地址直接打开，其余磁力卡片按需匹配手机站。 */
     fun knownFilmWebsite(card: FilmCard): String? = when {
         card.isHls -> BrowserAddress.normalize(card.url)

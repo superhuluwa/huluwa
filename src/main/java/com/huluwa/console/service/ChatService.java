@@ -52,6 +52,8 @@ public class ChatService {
     public static final String MOVIE_HLS_SESSION = "movie-hls";
     /** 电影天堂会话键（schema 内置） */
     public static final String DYTT_SESSION = "dytt";
+    /** 懂片帝会话键（schema 内置） */
+    public static final String DPD_SESSION = "dpd";
     /** 磁力下载会话键（schema 内置） */
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
@@ -86,6 +88,8 @@ public class ChatService {
     private static final int MOVIE_SHOW_MAX = MovieSearchService.DEFAULT_MAX;
     /** 电影天堂单条搜索最多展示的结果条数 */
     private static final int DYTT_SHOW_MAX = DyttSearchService.DEFAULT_MAX;
+    /** 懂片帝单条搜索最多展示的结果条数 */
+    private static final int DPD_SHOW_MAX = DongPianSearchService.DEFAULT_MAX;
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
@@ -98,6 +102,7 @@ public class ChatService {
 
     private final JdbcTemplate jdbcTemplate;
     private final DyttSearchService dyttSearchService;
+    private final DongPianSearchService dongPianSearchService;
     private final MovieCatalogService movieCatalogService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
@@ -110,6 +115,7 @@ public class ChatService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ChatService(JdbcTemplate jdbcTemplate, DyttSearchService dyttSearchService,
+                       DongPianSearchService dongPianSearchService,
                        MovieCatalogService movieCatalogService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
@@ -119,6 +125,7 @@ public class ChatService {
                        ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
         this.dyttSearchService = dyttSearchService;
+        this.dongPianSearchService = dongPianSearchService;
         this.movieCatalogService = movieCatalogService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
@@ -387,6 +394,9 @@ public class ChatService {
             } else if ("dytt".equals(kind)) {
                 // 电影天堂（dyttzyw）搜索：只需要去掉可选的指令前缀，关键字保持原样
                 replies.addAll(runDyttSearch(sessionId, normalizeDyttKeyword(text)));
+            } else if ("dpd".equals(kind)) {
+                // 懂片帝搜索：与电影天堂同一套指令前缀归一化规则
+                replies.addAll(runDpdSearch(sessionId, normalizeDpdKeyword(text)));
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runMagnetTask(sessionId, text));
@@ -477,6 +487,104 @@ public class ChatService {
             return rest.isEmpty() ? text : rest;
         }
         return text;
+    }
+
+    /**
+     * 懂片帝关键字归一化：兼容「懂片帝搜索 凡人」/「懂片帝 凡人」/「dpd 凡人」→「凡人」，
+     * 规则与电影天堂一致；纯片名（含数字片名）保持原样。
+     */
+    static String normalizeDpdKeyword(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return text;
+        }
+        int space = -1;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '　' || ch == '\t' || ch == '\n' || ch == '\r') {
+                space = i;
+                break;
+            }
+        }
+        if (space <= 0) {
+            return text;
+        }
+        String head = text.substring(0, space);
+        if ("懂片帝搜索".equals(head) || "懂片帝".equals(head)
+                || "dpd".equalsIgnoreCase(head) || "dongpian".equalsIgnoreCase(head)) {
+            String rest = text.substring(space + 1).trim();
+            return rest.isEmpty() ? text : rest;
+        }
+        return text;
+    }
+
+    /**
+     * 懂片帝搜索：回复形态与电影天堂一致（摘要一条 + 每条结果一条气泡）。
+     *
+     * <p>与电影天堂的差别：懂片帝的线路清单要等打开「资源列表」时再解析（每集一次请求，
+     * 全量解析很慢），所以卡片载荷里不带线路，安卓端进弹层后走 /api/dpd/detail。
+     * 也不参与订阅追更（站点按集下发 token，没有稳定的分集地址可对比）。
+     */
+    private List<ChatMessage> runDpdSearch(String sessionId, String keyword) {
+        List<ChatMessage> replies = new ArrayList<>();
+        List<DongPianSearchService.DpdItem> found;
+        try {
+            found = dongPianSearchService.search(keyword);
+        } catch (Exception e) {
+            replies.add(append(sessionId, "bot", "error", "搜索失败：" + safeMessage(e), null, null));
+            return replies;
+        }
+
+        if (found.isEmpty()) {
+            replies.add(append(sessionId, "bot", "error",
+                    "未搜索到「" + keyword + "」相关资源，换个片名试试（懂片帝按片名匹配）。", null, null));
+            return replies;
+        }
+
+        int shown = Math.min(found.size(), DPD_SHOW_MAX);
+        replies.add(append(sessionId, "bot", "text",
+                "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown + " 条：\n"
+                        + "点「资源列表」查看该作品的各路播放源（m3u8 直链，可播放 / 复制 / 离线下载）。", null, null));
+        for (int i = 0; i < shown; i++) {
+            DongPianSearchService.DpdItem item = found.get(i);
+            String caption = dpdCaption(item);
+            String payload = toJson(dongPianSearchService.toPayload(item));
+            if (item.cover() == null || item.cover().isBlank()) {
+                replies.add(append(sessionId, "bot", "text", caption, null, payload));
+            } else {
+                replies.add(append(sessionId, "bot", "image", item.cover(), caption, payload));
+            }
+        }
+        return replies;
+    }
+
+    /** 懂片帝卡片配文：标题（年代 / 产地 / 类型 / 评分）+ 更新备注 + 详情页链接 */
+    private static String dpdCaption(DongPianSearchService.DpdItem item) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(item.title());
+        List<String> meta = new ArrayList<>();
+        if (notBlank(item.year())) {
+            meta.add(item.year());
+        }
+        if (notBlank(item.origin())) {
+            meta.add(item.origin());
+        }
+        if (notBlank(item.genre())) {
+            meta.add(item.genre());
+        }
+        if (notBlank(item.score())) {
+            meta.add("评分 " + item.score());
+        }
+        if (!meta.isEmpty()) {
+            sb.append('（').append(String.join(" / ", meta)).append('）');
+        }
+        if (notBlank(item.remarks())) {
+            sb.append('\n').append("状态：").append(item.remarks());
+        }
+        if (notBlank(item.url())) {
+            sb.append('\n').append("详情：").append(item.url());
+        }
+        return sb.toString();
     }
 
     /**
