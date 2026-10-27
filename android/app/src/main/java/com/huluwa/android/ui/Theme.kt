@@ -1,8 +1,17 @@
 package com.huluwa.android.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -10,30 +19,83 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/** 保留原有取色入口，通过快照状态让已有页面随皮肤变化重新绘制。 */
 object HuluwaColors {
-    val Pine = Color(0xFF206C54)
-    val PineDark = Color(0xFF194F3E)
-    val Lime = Color(0xFFD5E9B8)
-    val Paper = Color(0xFFF6F8F5)
+    var skin by mutableStateOf(AppSkin.Pine)
+        private set
+
+    fun selectSkin(value: AppSkin) { skin = value }
+
+    val Pine get() = skin.palette.primary
+    val PineDark get() = skin.palette.primaryDark
+    val Lime get() = skin.palette.accent
+    val Paper get() = skin.palette.background
     val White = Color.White
-    val Ink = Color(0xFF243D32)
-    val Muted = Color(0xFF63746A)
-    val Line = Color(0xFFE3EAE0)
-    val SoftGreen = Color(0xFFE6EFE2)
+    val Ink get() = skin.palette.ink
+    val Muted get() = skin.palette.muted
+    val Line get() = skin.palette.line
+    val SoftGreen get() = skin.palette.primarySoft
+    val ChatBubble get() = if (skin == AppSkin.Pine) Color(0xFFDFEBD4) else SoftGreen
+    // 错误、警告和业务分类色保留语义，不随外观改变。
     val Danger = Color(0xFFB44452)
     val Amber = Color(0xFF956223)
     val Lilac = Color(0xFF8260A1)
     val Blue = Color(0xFF4E78A7)
 }
-private val Palette = lightColorScheme(
-    primary = HuluwaColors.Pine, onPrimary = Color.White, primaryContainer = HuluwaColors.SoftGreen,
-    onPrimaryContainer = HuluwaColors.PineDark, secondary = Color(0xFF557C46), secondaryContainer = Color(0xFFE8F0E1),
-    background = HuluwaColors.Paper, onBackground = HuluwaColors.Ink, surface = Color.White,
-    onSurface = HuluwaColors.Ink, surfaceVariant = Color(0xFFEEF3E9), onSurfaceVariant = HuluwaColors.Muted,
-    outline = Color(0xFF83917D), outlineVariant = HuluwaColors.Line, error = HuluwaColors.Danger,
-)
+
+/** 新皮肤叠加低浓度弥散光晕，原有皮肤继续使用原来的纯色背景。 */
+internal fun Modifier.skinBackground(base: Color = HuluwaColors.Paper): Modifier {
+    val skin = HuluwaColors.skin
+    val background = background(base)
+    if (skin == AppSkin.Pine) return background
+    val colors = skin.palette.previewColors
+    return background.drawWithCache {
+        val upperGlow = Brush.radialGradient(
+            colors = listOf(colors[0].copy(alpha = .12f), Color.Transparent),
+            center = Offset(size.width * .05f, size.height * .08f),
+            radius = size.maxDimension.coerceAtLeast(1f) * .78f,
+        )
+        val lowerGlow = Brush.radialGradient(
+            colors = listOf(colors[1].copy(alpha = .18f), Color.Transparent),
+            center = Offset(size.width * .95f, size.height * .72f),
+            radius = size.maxDimension.coerceAtLeast(1f) * .7f,
+        )
+        onDrawBehind {
+            drawRect(upperGlow)
+            drawRect(lowerGlow)
+        }
+    }
+}
+
 @Composable fun HuluwaTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Palette, shapes = Shapes(
+    val skin = HuluwaColors.skin
+    val palette = remember(skin) {
+        val colors = skin.palette
+        if (skin == AppSkin.Pine) lightColorScheme(
+            primary = colors.primary, onPrimary = Color.White, primaryContainer = colors.primarySoft,
+            onPrimaryContainer = colors.primaryDark, secondary = colors.secondary, secondaryContainer = colors.secondarySoft,
+            background = colors.background, onBackground = colors.ink, surface = Color.White,
+            onSurface = colors.ink, surfaceVariant = colors.surfaceVariant, onSurfaceVariant = colors.muted,
+            outline = colors.outline, outlineVariant = colors.line, error = HuluwaColors.Danger,
+        ) else lightColorScheme(
+            primary = colors.primary, onPrimary = Color.White, primaryContainer = colors.primarySoft,
+            onPrimaryContainer = colors.primaryDark, secondary = colors.secondary,
+            onSecondary = Color.White, secondaryContainer = colors.secondarySoft,
+            onSecondaryContainer = colors.ink,
+            tertiary = colors.secondary, onTertiary = Color.White,
+            tertiaryContainer = colors.secondarySoft, onTertiaryContainer = colors.ink,
+            background = colors.background, onBackground = colors.ink, surface = Color.White,
+            onSurface = colors.ink, surfaceVariant = colors.surfaceVariant, onSurfaceVariant = colors.muted,
+            outline = colors.outline, outlineVariant = colors.line, error = HuluwaColors.Danger,
+            surfaceTint = colors.primary,
+            surfaceDim = colors.line, surfaceBright = Color.White,
+            surfaceContainerLowest = Color.White, surfaceContainerLow = Color.White,
+            surfaceContainer = colors.background, surfaceContainerHigh = colors.surfaceVariant,
+            surfaceContainerHighest = colors.primarySoft,
+            inverseSurface = colors.ink, inverseOnSurface = Color.White, inversePrimary = colors.accent,
+        )
+    }
+    MaterialTheme(colorScheme = palette, shapes = Shapes(
         extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
         medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(21.dp), extraLarge = RoundedCornerShape(28.dp)),
         typography = Typography(

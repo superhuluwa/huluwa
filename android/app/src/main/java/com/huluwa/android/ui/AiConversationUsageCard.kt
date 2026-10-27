@@ -152,12 +152,12 @@ import kotlin.math.roundToInt
 /** 收起时悬浮在消息区右下角，不参与输入区域的高度分配。 */
 @Composable internal fun AiUsageExpandButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
-        modifier.size(48.dp), color = Color(0xFFF8FAF9), shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, Color(0xFFE3EAE0)), shadowElevation = 2.dp,
+        modifier.size(48.dp), color = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFF8FAF9) else HuluwaColors.Paper, shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, HuluwaColors.Line), shadowElevation = 2.dp,
     ) {
         IconButton(onClick = onClick, modifier = Modifier.fillMaxSize().semantics { stateDescription = "已收起模型与用量" }) {
             Icon(Icons.Outlined.KeyboardArrowDown, "展开模型与用量",
-                Modifier.size(20.dp).graphicsLayer { rotationZ = 180f }, tint = Color(0xFF206C54))
+                Modifier.size(20.dp).graphicsLayer { rotationZ = 180f }, tint = HuluwaColors.Pine)
         }
     }
 }

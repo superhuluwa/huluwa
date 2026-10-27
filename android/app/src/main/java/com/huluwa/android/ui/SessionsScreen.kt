@@ -39,15 +39,16 @@ import com.huluwa.android.data.Session
 import com.huluwa.android.data.isServerUnreachable
 import kotlin.math.roundToInt
 
-internal val SessionsBackground = Color(0xFFF9FBF8)
+internal val SessionsBackground: Color
+    get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFF9FBF8) else HuluwaColors.Paper
 
 private object SessionsColors {
-    val Ink = Color(0xFF20382C)
-    val Muted = Color(0xFF657367)
-    val Function = Color(0xFF2B6A49)
-    val System = Color(0xFF4B6A9A)
-    val SystemSoft = Color(0xFFEAF0FA)
-    val Line = Color(0xFFE9EEE7)
+    val Ink get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFF20382C) else HuluwaColors.Ink
+    val Muted get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFF657367) else HuluwaColors.Muted
+    val Function get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFF2B6A49) else HuluwaColors.Pine
+    val System get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFF4B6A9A) else HuluwaColors.Pine
+    val SystemSoft get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFEAF0FA) else HuluwaColors.SoftGreen
+    val Line get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFE9EEE7) else HuluwaColors.Line
 }
 
 @Composable fun SessionsScreen(ui: AppState, vm: HuluwaViewModel, system: Boolean = false) {
@@ -59,7 +60,7 @@ private object SessionsColors {
     }
     BackHandler(revealedSessionId != null) { revealedSessionId = null }
 
-    LazyColumn(Modifier.fillMaxSize().background(SessionsBackground), state = listState,
+    LazyColumn(Modifier.fillMaxSize().skinBackground(SessionsBackground), state = listState,
         overscrollEffect = rememberBounceOverscroll()) {
         // 加载状态显示在标题右侧，列表只保留错误反馈，避免切换标签时挤动内容。
         // 「无法连接服务器」由标题栏的「重连中」徽标统一承载，这里不再重复渲染成错误卡片。
@@ -178,7 +179,7 @@ private object SessionsColors {
     onClick: () -> Unit,
 ) {
     val tone = if (session.isSystemSession) SessionsColors.System else SessionsColors.Function
-    val background = if (pinned) tone.copy(alpha = 0.06f).compositeOver(SessionsBackground) else SessionsBackground
+    val background = if (pinned) tone.copy(alpha = 0.06f).compositeOver(SessionsBackground) else Color.Transparent
     Box(modifier.fillMaxWidth().background(background).clickable(role = Role.Button, onClick = onClick)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 66.4.dp).padding(horizontal = 21.dp, vertical = 9.2.dp),

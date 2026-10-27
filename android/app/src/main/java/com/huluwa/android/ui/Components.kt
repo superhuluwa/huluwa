@@ -325,7 +325,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
  */
 @Composable fun Poster(title: String, cover: String, modifier: Modifier = Modifier, size: DpSize = DpSize(70.dp, 100.dp)) {
     Box(modifier.size(size).clip(RoundedCornerShape(11.dp))
-        .background(Brush.linearGradient(listOf(Color(0xFFC7D6B7), Color(0xFF577A62)))), contentAlignment = Alignment.Center) {
+        .background(Brush.linearGradient(if (HuluwaColors.skin == AppSkin.Pine) listOf(Color(0xFFC7D6B7), Color(0xFF577A62)) else listOf(HuluwaColors.SoftGreen, HuluwaColors.Pine))), contentAlignment = Alignment.Center) {
         Text(title.take(8), Modifier.padding(8.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
         if (cover.isNotBlank()) AsyncImage(cover, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }

@@ -49,7 +49,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
 }
 private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
 
-@Composable fun HuluwaRoot(vm: HuluwaViewModel) {
+@Composable fun HuluwaRoot(vm: HuluwaViewModel, onSkinSelected: (AppSkin) -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val aiVm: AiViewModel = viewModel()
     val aiUi by aiVm.state.collectAsStateWithLifecycle()
@@ -101,8 +101,8 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                         else -> HuluwaColors.Paper
                     }
                     Scaffold(
-                        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-                        containerColor = homeBackground,
+                        modifier = Modifier.fillMaxSize().skinBackground(homeBackground).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                        containerColor = Color.Transparent,
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = {
                             // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
@@ -145,7 +145,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                                     MainTab.System -> SessionsScreen(ui, vm, system = true)
                                     MainTab.Downloads -> DownloadsScreen(ui, vm)
                                     MainTab.Ai -> AiScreen(aiUi, aiVm, onHeaderActions = { aiHeader = it })
-                                    MainTab.Mine -> MineScreen(ui, vm)
+                                    MainTab.Mine -> MineScreen(ui, vm, onSkinSelected)
                                 } }
                             }
                         }

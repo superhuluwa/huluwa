@@ -9,6 +9,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,7 +29,9 @@ import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.*
 
-@Composable fun MineScreen(ui: AppState, vm: HuluwaViewModel) {
+@Composable fun MineScreen(ui: AppState, vm: HuluwaViewModel, onSkinSelected: (AppSkin) -> Unit) {
+    var showSkinPicker by rememberSaveable { mutableStateOf(false) }
+    if (showSkinPicker) SkinPickerSheet(onDismiss = { showSkinPicker = false }, onSkinSelected = onSkinSelected)
     val reconnecting = rememberReconnecting(vm)
     val mine = ui.mine
     val largeFont = LocalDensity.current.fontScale >= 1.5f
@@ -53,6 +59,12 @@ import com.huluwa.android.data.*
                     FrpSummaryCard(mine.frp, reconnecting, Modifier.weight(1f)) { vm.openManagement(ManagementService.Frp) }
                     DockerSummaryCard(mine.docker, reconnecting, Modifier.weight(1f)) { vm.openManagement(ManagementService.Docker) }
                 }
+            }
+        }
+        item {
+            SectionTitle("外观")
+            Panel(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
+                MineEntry(Icons.Outlined.Palette, "皮肤切换", "${HuluwaColors.skin.title} · 共 5 款配色") { showSkinPicker = true }
             }
         }
         item {

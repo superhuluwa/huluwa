@@ -53,7 +53,7 @@ import kotlinx.coroutines.flow.first
         activeVideoId = null
     }
     // 整个聊天布局统一避让键盘，消息区与输入栏随系统键盘动画一起调整高度。
-    Scaffold(modifier = Modifier.fillMaxSize().imePadding(), containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
+    Scaffold(modifier = Modifier.fillMaxSize().skinBackground().imePadding(), containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Surface(color = Color.White) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -126,7 +126,7 @@ import kotlinx.coroutines.flow.first
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
-            Surface(color = if (message.mine) Color(0xFFDFEBD4) else Color.White,
+            Surface(color = if (message.mine) HuluwaColors.ChatBubble else Color.White,
                 shape = if (film != null) RoundedCornerShape(18.dp) else RoundedCornerShape(
                     topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp,
                     bottomStart = 17.dp, bottomEnd = 17.dp),

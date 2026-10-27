@@ -40,12 +40,12 @@ import com.huluwa.android.AiViewModel
 import com.huluwa.android.R
 import com.huluwa.android.data.AiSession
 
-/** 只作用于 AI 页，沿用松柏绿品牌色，不改变其他主页面的主题。 */
+/** 原有皮肤保留 AI 页的细分配色，新皮肤跟随全局外观。 */
 internal object AiColors {
-    val Background = Color(0xFFF5F7F3)
-    val SoftGreen = Color(0xFFE7EEE3)
-    val Muted = Color(0xFF5E6D63)
-    val Line = Color(0xFFE1E8DF)
+    val Background get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFF5F7F3) else HuluwaColors.Paper
+    val SoftGreen get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFE7EEE3) else HuluwaColors.SoftGreen
+    val Muted get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFF5E6D63) else HuluwaColors.Muted
+    val Line get() = if (HuluwaColors.skin == AppSkin.Pine) Color(0xFFE1E8DF) else HuluwaColors.Line
 }
 
 /** 首页交给根布局标题栏使用的操作；visible=false 时标题栏不显示任何 AI 操作。 */
