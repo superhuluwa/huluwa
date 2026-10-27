@@ -55,10 +55,11 @@ import java.util.regex.Pattern;
  *   <li>{@code GET /v1/playback/resolve/{该集token}} —— 播放解析，返回该集全部线路（{@code line_options}）。</li>
  * </ol>
  *
- * <p><b>只保留可直接播放的 m3u8</b>：{@code line_options} 里有两类线路——
- * 一类带真实 {@code url}（{@code resolved=true}，第三方资源站直链，占绝大多数，可直接播放 / 下载）；
- * 另一类 {@code resolve_required=true}、url 为 {@code resolve://…} 票据（需要登录额度兑换的官方线路，
- * 未登录时没有公开的兑换接口）。本站只取前者，与电影天堂「选定线路必须含 m3u8 直链」的约束一致。
+ * <p><b>线路形态</b>：{@code line_options} 中第三方资源站通常直接给出 m3u8；
+ * 官方线路则给出 {@code resolve_required=true}、url 为 {@code resolve://…} 的票据，
+ * 需要通过 {@code POST /v1/playback/resolve-line} 按集兑换。官方直链可能是 MP4 或没有扩展名，
+ * 甚至使用图片后缀，因此兑换结果按站点的 {@code resolved} 标记与 HTTP(S) 地址判断，不能仅认 m3u8。
+ * 播放与复制支持这些视频直链，离线下载仍只支持 m3u8。
  *
  * <p><b>线路按需解析</b>：每条线路的每一集都要单独请求一次 {@code /v1/playback/resolve}
  * （单次约 2-3 秒），一部 40 集的剧全量解析要 10 秒以上，长剧更久。因此
@@ -80,7 +81,7 @@ public class DongPianSearchService {
     private static final String API_SEARCH = "/v1/browse/catalog";
     private static final String API_CATALOG = "/v1/catalog/";
     private static final String API_RESOLVE = "/v1/playback/resolve/";
-    /** 官方线路兑换：POST {ticket, episode_token} → {line: {url}}，免费无需登录 */
+    /** 官方线路兑换：POST {ticket, episode_token} → {line: {resolved, url}}，是否需登录以站点响应为准 */
     private static final String API_RESOLVE_LINE = "/v1/playback/resolve-line";
 
     /** 懂片帝自己的一套消息载荷类型，安卓端据此走独立渲染，不与其他影视来源混用 */
@@ -116,7 +117,7 @@ public class DongPianSearchService {
     private static final int CACHE_MAX = 64;
     /** 作品缓存有效期：站点每集会更新，token 也会过期 */
     private static final long CACHE_TTL_MINUTES = 30;
-    /** 每集解析结果落库的有效期：官方线路地址是长签名直链，6 小时内可复用 */
+    /** 第三方直链解析结果落库的有效期；官方兑换地址只保留在作品内存缓存中 */
     private static final long EPISODE_CACHE_HOURS = 6;
     /** 数据库时间格式（与其它表保持一致） */
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -183,7 +184,7 @@ public class DongPianSearchService {
         private volatile Map<String, String> tickets = Map.of();
         /** 票据是否已取过（可能一条都没有，避免重复请求站点） */
         private volatile boolean ticketsLoaded;
-        /** 已兑换出的官方线路地址（线路名 → m3u8），重复点同一集不再兑换 */
+        /** 已兑换出的官方视频直链（线路名 → URL），重复点同一集不再兑换 */
         private final Map<String, String> redeemed = new ConcurrentHashMap<>();
         /** 已提交到后台队列：避免反复点同一线路时把同一集重复排队（解析本身靠 synchronized 去重） */
         private volatile boolean queued;
@@ -344,8 +345,7 @@ public class DongPianSearchService {
      * <ul>
      *   <li>直链线路：每集一次站点请求（约 1.6 秒），首屏同步解析前
      *       {@value #FIRST_SCREEN_EPISODES} 集，其余后台补；</li>
-     *   <li>官方线路：只有用户真正点开这条线路时，才为**首屏这几集**各兑换一次
-     *       （而不是整部剧全部集），看别的集时再按需兑换。</li>
+     *   <li>官方线路：点选线路时只兑换第一集，其余集在用户点开时按需兑换。</li>
      * </ul>
      *
      * @param catalog  作品详情
@@ -374,7 +374,7 @@ public class DongPianSearchService {
             }
             String first = resolveSingle(episodes.getFirst(), wanted);
             if (first == null) {
-                throw new DongPianException("线路「" + wanted + "」暂时没有可播放的地址（站点兑换配额已用完，稍后重试）", null);
+                throw new DongPianException("线路「" + wanted + "」暂未返回可播放的直链，请稍后重试或换一条线路", null);
             }
             items.set(0, new PlayItem(episodes.getFirst().title(), first));
             return items;
@@ -511,14 +511,14 @@ public class DongPianSearchService {
     }
 
     /**
-     * 解析一集：拿到该集全部线路的真实 m3u8 地址，结果写回该集缓存。
+     * 解析一集：缓存第三方 m3u8 直链与官方线路票据，官方视频直链在点播时兑换。
      *
      * <p>站点线路有两类：
      * <ul>
      *   <li>第三方资源站：`resolved=true`，`url` 本身就是直链，直接采用；</li>
      *   <li>官方线路（爱奇艺 / 优酷 / 4K 等）：只给 `resolve://` 票据，需要再调
-     *       {@code POST /v1/playback/resolve-line} 兑换成带签名的真实地址。
-     *       实测免费、无需登录，但**每集有专属票据**，必须用该集的票据兑换该集，
+     *       {@code POST /v1/playback/resolve-line} 兑换成带签名的真实视频地址。
+     *       站点可能按内容与账号状态限制兑换，且**每集有专属票据**，必须用该集的票据兑换该集，
      *       用别的集的票据会拿到别的集。</li>
      * </ul>
      */
@@ -661,7 +661,7 @@ public class DongPianSearchService {
      *
      * @param episode    目标集
      * @param lineName   线路显示名
-     * @return 该集在该线路上的 m3u8 地址；不可用返回 null
+     * @return 该集在该线路上的视频直链；不可用返回 null
      */
     private String resolveSingle(Episode episode, String lineName) {
         Map<String, RawLine> lines = resolve(episode);
@@ -794,7 +794,7 @@ public class DongPianSearchService {
      *
      * @param ticket       线路 url 里的 {@code resolve://} 票据
      * @param episodeToken 该集的 token（站点按它确定兑换哪一集）
-     * @return 兑换出的 m3u8 地址；失败返回 null（该线路直接跳过）
+     * @return 兑换出的视频直链；失败返回 null（该线路直接跳过）
      */
     private String redeemTicket(String ticket, String episodeToken) {
         if (!ticket.startsWith("resolve://")) {
@@ -816,9 +816,10 @@ public class DongPianSearchService {
                 try {
                     JsonNode root = postJson(API_RESOLVE_LINE,
                             Map.of("ticket", value, "episode_token", episodeToken));
-                    String url = text(root.path("line"), "url");
-                    // 官方线路可能是 m3u8，也可能是 MP4 直链，两者都能播
-                    if (isPlayableUrl(url)) {
+                    JsonNode line = root.path("line");
+                    String url = text(line, "url");
+                    // 官方 MP4 可能没有扩展名，甚至伪装为图片地址，按站点的已解析标记识别。
+                    if (line.path("resolved").asBoolean(false) && isPlayableUrl(url)) {
                         return url;
                     }
                     // 拿到了响应但没有可用地址，重试也没用
@@ -961,30 +962,18 @@ public class DongPianSearchService {
     }
 
     /**
-     * 官方线路兑换出的地址是否可用。
-     *
-     * <p>实测官方线路返回三种形态，都能直接播放：
-     * <ul>
-     *   <li>普通 m3u8（路径带 .m3u8）——1080P-官方R / 海外 / 4K海外 / 优酷；</li>
-     *   <li>隐藏 m3u8（路径没有 .m3u8 后缀，如 {@code /doapi/m3u8/xxx?auth_key=….m3u8}）
-     *       ——新4K-限时等级专属，只看路径会误判成无效；</li>
-     *   <li>MP4 直链（{@code video/mp4}）——高清-官方B / 1080P-官方S / Z / V，
-     *       播放器可以直接播，离线下载则需按 mp4 处理。</li>
-     * </ul>
-     * 因此这里放宽为「http(s) 且不是图片地址」。官方线路的 {@code url_kind} 一律是
-     * {@code m3u8} 或 {@code mp4}，不会混进海报之类的图片。
+     * 官方线路的已解析地址可能是 m3u8、MP4、无扩展名或伪装为图片的视频直链。
+     * 调用方先检查站点的 resolved 标记；这里只接受带主机名的绝对 HTTP(S) 地址。
      */
     static boolean isPlayableUrl(String url) {
-        if (url == null || !url.startsWith("http")) {
+        if (url == null) {
             return false;
         }
         try {
-            String path = URI.create(url).getPath();
-            String lower = path == null ? "" : path.toLowerCase();
-            // 图片是站点的海报资源，不属于播放地址
-            return !(lower.endsWith(".jpg") || lower.endsWith(".jpeg")
-                    || lower.endsWith(".png") || lower.endsWith(".webp") || lower.endsWith(".gif"));
-        } catch (Exception e) {
+            URI uri = URI.create(url);
+            return ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (IllegalArgumentException e) {
             return false;
         }
     }

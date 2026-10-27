@@ -46,7 +46,7 @@ import kotlinx.serialization.json.JsonObject
  *  - [DpdResultCard]：聊天里的作品卡，只有「资源列表」与「网站直达」两个入口，
  *    没有订阅按钮（站点按集下发 token，没有稳定地址可比对更新）；
  *  - [DpdSourceDialog]：线路弹框，线路分页签 + 点选后懒解析各集，
- *    每集可播放 / 复制 m3u8 直链 / 离线下载。
+ *    每集可播放 / 复制视频直链，m3u8 支持离线下载。
  *
  * 后端载荷用 kind=dpd-title / dpd-detail / dpd-line 区分，字段也不与其它来源重合。
  */
@@ -173,7 +173,7 @@ import kotlinx.serialization.json.JsonObject
                         }
                         if (detail.error != null && detail.data.isEmpty()) return@Column
                         if (lines.isEmpty()) {
-                            Text("该作品暂无可直接播放的 m3u8 线路", Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                            Text("该作品暂无可播放的线路", Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                 style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
                             return@Column
                         }
@@ -185,7 +185,7 @@ import kotlinx.serialization.json.JsonObject
                 HorizontalDivider(color = HuluwaColors.Line)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (sheet.busyLine.isNotBlank()) "正在解析「${sheet.busyLine}」…" else "点选线路后可播放、复制 m3u8 直链；离线任务在「下载 → 离线剧集」查看",
+                    Text(if (sheet.busyLine.isNotBlank()) "正在解析「${sheet.busyLine}」…" else "点选线路后可播放、复制直链；m3u8 支持离线下载",
                         Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     // 出问题时可把这里的日志复制出来定位（同时也会写到 Logcat）
@@ -293,8 +293,10 @@ import kotlinx.serialization.json.JsonObject
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (ready) {
                 DpdTinyButton("复制", Icons.Outlined.ContentCopy, primary = true) { onCopy(episode.url) }
-                DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
-                    vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: 1)
+                if (episode.canDownload) {
+                    DpdTinyButton("离线下载", Icons.Outlined.Download, primary = false, enabled = !busy) {
+                        vm.enqueueDpdEpisode(card, lineName, episode, defaultSeason ?: 1, episodeNumber(episode.title) ?: 1)
+                    }
                 }
             } else {
                 // 点一下才去兑换/解析这一集，省站点配额
