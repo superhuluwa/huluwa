@@ -13,7 +13,8 @@ class SessionListPreferences(context: Context) {
     fun pinnedSessions(server: String, username: String): List<String> = runCatching {
         val content = preferences.getString(key(server, username), null) ?: return@runCatching emptyList()
         val rows = ApiJson.parseToJsonElement(content) as? JsonArray ?: return@runCatching emptyList()
-        rows.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }.distinct()
+        rows.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+            .map { if (it == "movie-hls") "movie" else it }.distinct()
     }.getOrDefault(emptyList())
 
     fun savePinnedSessions(server: String, username: String, ids: List<String>) {

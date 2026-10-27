@@ -49,11 +49,22 @@ import kotlinx.serialization.json.*
 /**
  * 资源列表弹框（对齐网页端 MagnetListDialog / PlaySourceDialog）：
  *  - 居中卡片：图标 + 剧名 + 条数标题，正文区内滚动，底部固定「关闭」；
- *  - 电影港：磁力列表，按清晰度着色，每行「复制 / 下载」；
+ *  - 电影港：磁力 / 在线双标签，磁力优先，分别支持下载与分集播放；
  *  - 电影天堂：按线路分页签，每行「复制 / 离线下载」。
  */
 @Composable fun FilmResources(sheet: AppSheet.Films, busy: Boolean, actionError: String?, vm: HuluwaViewModel, onPlay: (String) -> Unit) {
     val card = sheet.card
+    var online by rememberSaveable(card.key()) { mutableStateOf(false) }
+    val magnetScroll = rememberScrollState()
+    val onlineScroll = rememberScrollState()
+    val scroll = if (card.isMovie && online) onlineScroll else magnetScroll
+    val resources = if (card.isMovie && online) sheet.onlineData else sheet.data
+    val isHls = if (card.isMovie) online else card.isHls
+    val resourceCard = if (card.isMovie) card.copy(
+        id = resources.data.text("id", fallback = card.id),
+        url = resources.data.text("url", fallback = card.url),
+        source = if (online) "movie-hls" else "movie",
+    ) else card
     val context = LocalContext.current
     // 复制反馈沿用全局 snackbar（vm.notify → 根界面 SnackbarHost）
     fun copy(text: String, label: String) {
@@ -66,41 +77,56 @@ import kotlinx.serialization.json.*
         Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp).heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .88f),
             shape = RoundedCornerShape(20.dp), color = HuluwaColors.White, border = BorderStroke(1.dp, HuluwaColors.Line)) {
             Column(Modifier.fillMaxWidth()) {
-                FilmDialogHeader(card, sheet.data.data, sheet.data.loading, vm)
+                FilmDialogHeader(card, resources.data, sheet.data.loading || sheet.onlineData.loading, isHls, vm)
                 HorizontalDivider(color = HuluwaColors.Line)
+                if (card.isMovie) {
+                    TabRow(selectedTabIndex = if (online) 1 else 0, containerColor = HuluwaColors.White,
+                        contentColor = HuluwaColors.Pine) {
+                        listOf("磁力", "在线").forEachIndexed { index, title ->
+                            val selected = online == (index == 1)
+                            Tab(selected = selected, onClick = { online = index == 1 }, text = {
+                                Text(title, color = if (selected) HuluwaColors.Pine else HuluwaColors.Muted)
+                            })
+                        }
+                    }
+                }
                 Box(Modifier.weight(1f, fill = false)) {
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 14.dp)) {
                         // 下载 / 提交失败在弹框内就地提示（共享的 actionError 会被底部弹层的错误区一起显示）
                         actionError?.takeUnless { it.isServerUnreachable() }?.let {
                             Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
                         }
-                        Feedback(sheet.data.error, { vm.reloadFilmResources(card) })
-                        if (!sheet.data.loaded || (sheet.data.error != null && sheet.data.data.isEmpty())) return@Column
-                        if (card.isHls) HlsSourceList(card, sheet.data.data, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
-                        else MagnetSourceList(card, sheet.data.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
+                        Feedback(resources.error, { vm.reloadFilmResources(card) })
+                        if (!resources.loaded) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+                            return@Column
+                        }
+                        if (resources.error != null && resources.data.isEmpty()) return@Column
+                        if (isHls) HlsSourceList(resourceCard, resources.data, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        else MagnetSourceList(resourceCard, resources.data, busy, vm) { magnet -> copy(magnet, "磁力链接") }
                     }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
-                FilmDialogFooter(!sheet.data.loaded, card.isMovieHls, vm)
+                FilmDialogFooter(!resources.loaded, card.isMovie && online, vm)
             }
         }
     }
 }
 
 /** 弹框标题：图标 + 剧名 + 条数，右侧「重新抓取」与关闭 */
-@Composable private fun FilmDialogHeader(card: FilmCard, data: JsonObject, loading: Boolean, vm: HuluwaViewModel) {
+@Composable private fun FilmDialogHeader(card: FilmCard, data: JsonObject, loading: Boolean, isHls: Boolean, vm: HuluwaViewModel) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(if (card.isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.CloudDownload, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
+        Icon(if (isHls) Icons.Outlined.PlayCircleOutline else Icons.Outlined.CloudDownload, null, Modifier.size(16.dp), tint = HuluwaColors.Pine)
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(data.text("title", fallback = card.title), Modifier.weight(1f, fill = false),
                 style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TitleReconnectBadge(rememberReconnecting(vm))
         }
         // 电影港按磁力条数、电影天堂按各线路可复制条目合计（与网页端「可复制 N 条」一致）
-        val count = if (card.isHls) data.rows("playSources").sumOf { source -> source.asObject().rows("items").size }
+        val count = if (isHls) data.rows("playSources").sumOf { source -> source.asObject().rows("items").size }
         else data.rows("magnets").size
-        if (count > 0) Text(if (card.isHls) "可复制 $count 条" else "$count 条", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+        if (count > 0) Text(if (isHls) "可复制 $count 条" else "$count 条", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
         IconButton(onClick = { vm.reloadFilmResources(card) }, enabled = !loading) { Icon(Icons.Outlined.Refresh, "重新抓取", Modifier.size(19.dp), tint = HuluwaColors.Pine) }
         IconButton(vm::dismissSheet) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
     }
@@ -120,6 +146,7 @@ import kotlinx.serialization.json.*
 
 @Composable private fun MagnetSourceList(card: FilmCard, data: JsonObject, busy: Boolean, vm: HuluwaViewModel, onCopy: (String) -> Unit) {
     val items = data.rows("magnets").map { it.asObject() }
+    if (items.isEmpty()) { EmptyHint("该作品暂无可用磁力资源，可切换「在线」查看"); return }
     // 保存目录与下载器：对应网页端「保存目录 / 使用 xx 下载」提示行
     val downloader = when (data.text("downloader")) {
         "xunlei-win" -> "迅雷【Win】"; "xunlei" -> "迅雷"; else -> "qBittorrent"
@@ -129,7 +156,6 @@ import kotlinx.serialization.json.*
         withStyle(SpanStyle(color = HuluwaColors.Pine, fontFamily = FontFamily.Monospace)) { append(data.text("savePath").ifBlank { "（未确定）" }) }
         withStyle(SpanStyle(color = HuluwaColors.Muted)) { append("　使用$downloader 下载，按剧名创建文件夹") }
     }, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 12.dp))
-    if (items.isEmpty()) { EmptyHint("该详情页没有解析到磁力链接"); return }
     items.forEach { item ->
         val downloaded = item.flag("downloaded")
         ResourceRow(downloaded = downloaded) {

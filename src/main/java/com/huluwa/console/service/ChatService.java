@@ -48,7 +48,7 @@ public class ChatService {
     public static final String SYSTEM_SESSION = "system";
     /** 电影港会话键（schema 内置） */
     public static final String MOVIE_SESSION = "movie";
-    /** 电影港在线视频会话键（与磁力会话独立） */
+    /** 旧电影港在线会话键，兼容旧客户端并统一映射到 movie。 */
     public static final String MOVIE_HLS_SESSION = "movie-hls";
     /** 电影天堂会话键（schema 内置） */
     public static final String DYTT_SESSION = "dytt";
@@ -97,9 +97,8 @@ public class ChatService {
     private final ChatTaskExecutor chatWorker = new ChatTaskExecutor();
 
     private final JdbcTemplate jdbcTemplate;
-    private final MovieSearchService movieSearchService;
     private final DyttSearchService dyttSearchService;
-    private final MovieHlsService movieHlsService;
+    private final MovieCatalogService movieCatalogService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
     private final MovieSubscriptionService movieSubscriptionService;
@@ -110,8 +109,8 @@ public class ChatService {
     private final ChatPushService chatPushService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ChatService(JdbcTemplate jdbcTemplate, MovieSearchService movieSearchService,
-                       DyttSearchService dyttSearchService, MovieHlsService movieHlsService,
+    public ChatService(JdbcTemplate jdbcTemplate, DyttSearchService dyttSearchService,
+                       MovieCatalogService movieCatalogService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
                        VideoParseService videoParseService, XunleiService xunleiService,
@@ -119,9 +118,8 @@ public class ChatService {
                        ChatRequestService chatRequestService,
                        ChatPushService chatPushService) {
         this.jdbcTemplate = jdbcTemplate;
-        this.movieSearchService = movieSearchService;
         this.dyttSearchService = dyttSearchService;
-        this.movieHlsService = movieHlsService;
+        this.movieCatalogService = movieCatalogService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
         this.movieSubscriptionService = movieSubscriptionService;
@@ -179,8 +177,13 @@ public class ChatService {
         return list;
     }
 
+    public static String canonicalSessionId(String sessionId) {
+        return MOVIE_HLS_SESSION.equals(sessionId) ? MOVIE_SESSION : sessionId;
+    }
+
     /** 会话存在性校验（系统通知为虚拟会话，不查表） */
     public void requireSession(String sessionId) {
+        sessionId = canonicalSessionId(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             return;
         }
@@ -192,6 +195,7 @@ public class ChatService {
     }
 
     public String sessionTitle(String sessionId) {
+        sessionId = canonicalSessionId(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             return "系统通知";
         }
@@ -257,6 +261,7 @@ public class ChatService {
      * @param limit    本页条数（1-200）
      */
     public List<ChatMessage> messages(String sessionId, Long beforeId, int limit) {
+        sessionId = canonicalSessionId(sessionId);
         requireSession(sessionId);
         int size = Math.max(1, Math.min(limit, 200));
         if (SYSTEM_SESSION.equals(sessionId)) {
@@ -340,7 +345,8 @@ public class ChatService {
      * 电影港搜索 / qB 提交 / 视频解析等耗时处理在 {@link #processRequest}（chat-worker 线程）执行，
      * 结果经 WebSocket 推送（或前端轮询）到达，HTTP/WS 两个入口共用本方法，天然幂等。
      */
-    public synchronized SubmitResult submit(String sessionId, String requestId, String content) {
+    public synchronized SubmitResult submit(String requestedSessionId, String requestId, String content) {
+        String sessionId = canonicalSessionId(requestedSessionId);
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             throw new BusinessException(400, "系统通知为只读会话，不支持发送消息");
@@ -378,8 +384,6 @@ public class ChatService {
             if ("movie".equals(kind)) {
                 // 站点关键字用归一化后的文本（用户气泡仍保留原始输入）
                 replies.addAll(runMovieSearch(sessionId, normalizeKeyword(text)));
-            } else if ("movie-hls".equals(kind)) {
-                replies.addAll(runMovieHlsSearch(sessionId, normalizeKeyword(text)));
             } else if ("dytt".equals(kind)) {
                 // 电影天堂（dyttzyw）搜索：只需要去掉可选的指令前缀，关键字保持原样
                 replies.addAll(runDyttSearch(sessionId, normalizeDyttKeyword(text)));
@@ -545,48 +549,39 @@ public class ChatService {
         return sb.toString();
     }
 
-    /** 新版电影港搜索仅返回轻量卡片，分集与直链由资源接口按需抓取。 */
-    private List<ChatMessage> runMovieHlsSearch(String sessionId, String keyword) {
-        List<MovieSearchService.MovieItem> found = movieHlsService.search(keyword);
-        if (found.isEmpty()) {
-            return List.of(append(sessionId, "bot", "error", "未搜索到「" + keyword + "」相关资源，换个片名试试。", null, null));
-        }
-        int shown = Math.min(found.size(), MOVIE_SHOW_MAX);
-        List<ChatMessage> replies = new ArrayList<>();
-        replies.add(append(sessionId, "bot", "text", "关键字「" + keyword + "」命中 " + found.size() + " 条，展示前 " + shown
-                + " 条：\n点击「资源列表」查看分集，可播放、复制 m3u8 直链或离线下载。", null, null));
-        for (int i = 0; i < shown; i++) {
-            var item = found.get(i);
-            String payload = toJson(movieHlsService.payload(item));
-            replies.add(item.cover() == null || item.cover().isBlank()
-                    ? append(sessionId, "bot", "text", caption(item), null, payload)
-                    : append(sessionId, "bot", "image", item.cover(), caption(item), payload));
-        }
-        return replies;
-    }
-
-    /** 电影港搜索：对齐参考脚本「摘要一条 + 每条结果一条气泡（封面+配文）」的回复形态 */
+    /** 统一搜索两个站点，磁力优先，同名作品合并为一张资源卡片。 */
     private List<ChatMessage> runMovieSearch(String sessionId, String keyword) {
-        List<ChatMessage> replies = new ArrayList<>();
-        List<MovieSearchService.MovieItem> found;
-        try {
-            found = movieSearchService.search(keyword);
-        } catch (Exception e) {
-            replies.add(append(sessionId, "bot", "error", "搜索失败：" + safeMessage(e), null, null));
-            return replies;
-        }
-
-        if (found.isEmpty()) {
+        MovieCatalogService.SearchResult result = movieCatalogService.search(keyword);
+        if (result.films().isEmpty()) {
+            if (!result.errors().isEmpty()) {
+                return List.of(append(sessionId, "bot", "error", String.join("\n", result.errors()), null, null));
+            }
             Map<String, Object> watchPayload = new LinkedHashMap<>();
             watchPayload.put("kind", "movie-search-watch");
             watchPayload.put("keyword", keyword);
             watchPayload.put("noResults", true);
-            replies.add(append(sessionId, "bot", "error",
+            return List.of(append(sessionId, "bot", "error",
                     "未搜索到「" + keyword + "」相关资源。可点击下方「监听」，后台会定期重新搜索，找到后发送系统通知。",
                     null, toJson(watchPayload)));
-            return replies;
         }
-        return movieSearchResults(sessionId, keyword, found, false);
+        int shown = Math.min(result.films().size(), MOVIE_SHOW_MAX);
+        List<ChatMessage> replies = new ArrayList<>();
+        String summary = "关键字「" + keyword + "」命中 " + result.films().size() + " 条，展示前 " + shown
+                + " 条：\n磁力资源优先，点击「资源列表」可切换磁力 / 在线资源。";
+        if (!result.errors().isEmpty()) summary += "\n" + String.join("\n", result.errors());
+        replies.add(append(sessionId, "bot", "text", summary, null, null));
+        Set<String> subscribed = movieSubscriptionService.subscribedUrls();
+        for (var film : result.films().subList(0, shown)) {
+            Map<String, Object> payload = new LinkedHashMap<>(film);
+            payload.put("subscribed", subscribed.contains(string(film.get("url"))));
+            var item = new MovieSearchService.MovieItem(string(film.get("id")), string(film.get("title")),
+                    string(film.get("year")), string(film.get("origin")), string(film.get("genre")),
+                    string(film.get("cover")), string(film.get("url")));
+            replies.add(notBlank(item.cover())
+                    ? append(sessionId, "bot", "image", item.cover(), caption(item), toJson(payload))
+                    : append(sessionId, "bot", "text", caption(item), null, toJson(payload)));
+        }
+        return replies;
     }
 
     /** 监听命中后的卡片复用普通搜索格式；调用方提交事务后再推送。 */
@@ -1243,6 +1238,7 @@ public class ChatService {
 
     /** 会话标记已读（系统通知同步推进既有 message 表，与「全部已读」同语义）；末尾推送列表快照同步其它标签页 */
     public void markRead(String sessionId) {
+        sessionId = canonicalSessionId(sessionId);
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             messageService.markAllRead();
@@ -1260,6 +1256,7 @@ public class ChatService {
 
     /** 清空会话消息（仅聊天会话；系统通知由消息中心原有删除/已读入口管理）；推送列表快照同步其它标签页 */
     public void clear(String sessionId) {
+        sessionId = canonicalSessionId(sessionId);
         requireSession(sessionId);
         if (SYSTEM_SESSION.equals(sessionId)) {
             throw new BusinessException(400, "系统通知不支持清空，请使用消息中心的消息管理入口");

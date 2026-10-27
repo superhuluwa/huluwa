@@ -27,7 +27,7 @@ class ChatServiceTest {
         JdbcTemplate jdbc = new JdbcTemplate(source);
         QBittorrentService qb = mock(QBittorrentService.class);
         when(qb.settings()).thenReturn(new QBittorrentService.Settings(null, null, null, null));
-        ChatService service = spy(new ChatService(jdbc, mock(MovieSearchService.class), mock(DyttSearchService.class), mock(MovieHlsService.class), qb,
+        ChatService service = spy(new ChatService(jdbc, mock(DyttSearchService.class), mock(MovieCatalogService.class), qb,
                 mock(MessageService.class), mock(MovieSubscriptionService.class), mock(VideoParseService.class),
                 mock(XunleiService.class), mock(XunleiWinService.class),
                 mock(ChatRequestService.class), mock(ChatPushService.class)));

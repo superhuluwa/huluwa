@@ -32,7 +32,7 @@ fun jsonBody(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(
     val compression: Boolean = false, val enabled: Boolean = true,
 )
 
-const val MOVIE_SESSION_TITLE = "电影港 ★ 磁力"
+const val MOVIE_SESSION_TITLE = "电影港"
 const val MOVIE_HLS_SESSION_TITLE = "电影港 ★ 在线"
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
@@ -67,15 +67,15 @@ data class Session(
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject): Session {
-            val id = raw.text("id")
+            val originalId = raw.text("id")
+            val id = if (originalId == "movie-hls") "movie" else originalId
             val title = raw.text("title").let {
                 when {
-                    id == "movie" && it == "电影港" -> MOVIE_SESSION_TITLE
-                    id == "movie-hls" && it == "电影港 ★ m3u8" -> MOVIE_HLS_SESSION_TITLE
+                    originalId == "movie-hls" || (id == "movie" && it in listOf("电影港", "电影港 ★ 磁力", "电影港 磁力")) -> MOVIE_SESSION_TITLE
                     else -> it
                 }
             }
-            return Session(id, title, raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
+            return Session(id, title, if (id == "movie") "movie" else raw.text("kind"), raw.number("unread")?.toInt() ?: 0,
                 (raw["last"] as? JsonObject)?.let(ChatMessage::from), updatedAt = raw.text("updatedAt"))
         }
     }
@@ -130,8 +130,9 @@ data class NotifyMessage(
 data class FilmCard(
     val id: String, val title: String, val cover: String, val url: String, val source: String,
     val year: String, val genre: String, val origin: String, val apiUrl: String,
-    val sources: List<PlaySource>, val subscribed: Boolean,
+    val sources: List<PlaySource>, val subscribed: Boolean, val onlineUrl: String = "",
 ) {
+    val isMovie get() = source != "dytt"
     val isMovieHls get() = source == "movie-hls"
     val isHls get() = source == "dytt" || isMovieHls
     val sourceTitle get() = when { isMovieHls -> MOVIE_HLS_SESSION_TITLE; isHls -> "电影天堂"; else -> "电影港" }
@@ -149,7 +150,7 @@ data class FilmCard(
     fun key(): String = "$source:$id"
     companion object {
         fun from(raw: JsonObject) = FilmCard(raw.text("id", "resId"), raw.text("title"), raw.text("cover"), raw.text("url"), raw.text("source"),
-            raw.text("year"), raw.text("genre"), raw.text("origin"), raw.text("apiUrl"), raw.rows("playSources").map { PlaySource.from(it.asObject()) }, raw.flag("subscribed"))
+            raw.text("year"), raw.text("genre"), raw.text("origin"), raw.text("apiUrl"), raw.rows("playSources").map { PlaySource.from(it.asObject()) }, raw.flag("subscribed"), raw.text("onlineUrl"))
     }
 }
 

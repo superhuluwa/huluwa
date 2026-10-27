@@ -76,15 +76,15 @@ public class MovieHlsService {
                 .filter(item -> websiteTitleKey(item.title()).equals(key)).toList();
         if (matches.size() == 1) return matches.getFirst().url();
         throw new BusinessException(400, matches.isEmpty()
-                ? "没有找到该影片对应的电影港手机页面，可在电影港在线会话中搜索"
-                : "电影港手机站有多个同名影片，请在电影港在线会话中选择对应结果");
+                ? "没有找到该影片对应的电影港手机页面，可在电影港会话中搜索"
+                : "电影港手机站有多个同名影片，请在电影港会话中选择对应结果");
     }
 
-    private static String websiteSearchTitle(String title) {
+    static String websiteSearchTitle(String title) {
         return title.replaceAll("[\\[（(【]\\s*(?:全集|完结|更新(?:至|到)\\s*\\d+\\s*集)\\s*[\\]）)】]", "").trim();
     }
 
-    private static String websiteTitleKey(String title) {
+    static String websiteTitleKey(String title) {
         return websiteSearchTitle(title).replaceAll("[\\p{P}\\p{Z}\\s]", "").toLowerCase(Locale.ROOT);
     }
 
@@ -162,7 +162,7 @@ public class MovieHlsService {
         return BASE_URL + uri.getPath();
     }
 
-    private static boolean isDetailUrl(String value) {
+    static boolean isDetailUrl(String value) {
         try { detailUrl(value); return true; }
         catch (BusinessException e) { return false; }
     }

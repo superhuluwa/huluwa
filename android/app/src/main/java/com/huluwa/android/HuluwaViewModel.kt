@@ -20,7 +20,8 @@ sealed interface AppSheet {
     data class TunnelEdit(val tunnel: Tunnel? = null) : AppSheet
     data class Settings(val kind: String, val data: LoadState<JsonObject>) : AppSheet
     /** defaultSeason 非空时使用订阅季号直接下载，省略参数配置。 */
-    data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null) : AppSheet
+    data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
+        val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
     data class Text(val title: String, val data: LoadState<String>, val onSave: ((String) -> Unit)? = null) : AppSheet
     data class ContainerDetail(val container: DockerContainer, val data: LoadState<JsonObject>) : AppSheet
@@ -138,6 +139,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
         val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
         val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
+            .groupBy { it.id }.values.map { rows ->
+                rows.maxBy { it.updatedAt }.copy(unread = rows.sumOf { it.unread })
+            }
         // 最新置顶的会话排在最前，其余仍按更新时间排序；管理会话无消息时间，按最旧处理。
         val pinOrder = value.pinnedSessionIds.withIndex().associate { it.value to it.index }
         val sortedSessions = (remoteSessions + managementSessions + upgradeSession).sortedWith(
@@ -988,24 +992,42 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
-        val sheet = AppSheet.Films(card, LoadState(JsonObject(emptyMap()), loading = true), defaultSeason)
-        showSheet(sheet); val current = sheetGeneration
-        sheetJob = viewModelScope.launch { try { val result = repository.filmResources(card); if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = LoadState(result, loaded = true))) } }
-            catch (error: CancellationException) { throw error }
-            catch (error: Throwable) { if (current == sheetGeneration) { mutable.update { it.copy(sheet = sheet.copy(data = LoadState(JsonObject(emptyMap()), error = error.userMessage(), loaded = true))) }; if (error is ApiException && error.code == 401) handleError(error) } } }
+        showSheet(AppSheet.Films(card, LoadState(JsonObject(emptyMap())), defaultSeason))
+        reloadFilmResources(card)
     }
-    /** 弹框标题上的「重新抓取」：保留当前数据，后台静默更新。 */
+    /** 两个来源并行抓取，各自保留数据、加载和错误状态。 */
     fun reloadFilmResources(card: FilmCard) {
         val sheet = mutable.value.sheet as? AppSheet.Films ?: return
         if (sheet.card.key() != card.key() || sheetJob?.isActive == true) return
-        mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = !sheet.data.loaded))) }
         val current = sheetGeneration
-        sheetJob?.cancel()
-        sheetJob = viewModelScope.launch { try {
-            val result = repository.filmResources(card)
-            if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = LoadState(result, loaded = true))) }
-        } catch (error: CancellationException) { throw error }
-        catch (error: Throwable) { if (current == sheetGeneration) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(loading = false, error = error.userMessage(), loaded = true))) } } }
+        mutable.update { it.copy(sheet = sheet.copy(
+            data = sheet.data.copy(loading = true, error = null),
+            onlineData = if (card.isMovie) sheet.onlineData.copy(loading = true, error = null) else sheet.onlineData,
+        )) }
+        sheetJob = viewModelScope.launch {
+            val sources = if (card.isMovie) listOf(false, true) else listOf(false)
+            sources.forEach { online -> launch {
+                try {
+                    val result = repository.filmResources(card, online)
+                    if (current == sheetGeneration) mutable.update { old ->
+                        val active = old.sheet as? AppSheet.Films ?: return@update old
+                        val loaded = LoadState(result, loaded = true)
+                        old.copy(sheet = if (online) active.copy(onlineData = loaded) else active.copy(data = loaded))
+                    }
+                } catch (error: CancellationException) { throw error }
+                catch (error: Throwable) {
+                    if (current == sheetGeneration) {
+                        mutable.update { old ->
+                            val active = old.sheet as? AppSheet.Films ?: return@update old
+                            val failed = (if (online) active.onlineData else active.data).copy(
+                                loading = false, error = error.userMessage(), loaded = true)
+                            old.copy(sheet = if (online) active.copy(onlineData = failed) else active.copy(data = failed))
+                        }
+                        if (error is ApiException && error.code == 401) handleError(error)
+                    }
+                }
+            } }
+        }
     }
     fun resolveMovieHls(item: PlayItem, onResolved: (String) -> Unit) {
         val current = sheetGeneration
@@ -1028,7 +1050,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     /** 提交成功后把弹框里的这一行标成「已下载」，与网页端弹框一致，不必等重新抓取 */
     private fun markMagnetDownloaded(card: FilmCard, item: JsonObject) {
         val sheet = mutable.value.sheet as? AppSheet.Films ?: return
-        if (sheet.card.key() != card.key()) return
+        if (sheet.card.key() != card.key() && sheet.data.data.text("url") != card.url) return
         val marked = sheet.data.data.markDownloaded(item.text("hash").ifBlank { item.text("magnet") })
         if (marked !== sheet.data.data) mutable.update { it.copy(sheet = sheet.copy(data = sheet.data.copy(data = marked))) }
     }

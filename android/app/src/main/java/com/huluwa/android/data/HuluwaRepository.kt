@@ -146,14 +146,24 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         }).requireSuccess()
         return Subscription.from(response.asObject().child("subscription"), card.subscriptionSource)
     }
-    /** 电影港在线视频读取分集播放页，其余来源沿用原来的资源接口。 */
-    suspend fun filmResources(card: FilmCard): JsonObject = if (card.isMovieHls)
-        api.get("chat", "movie-hls", "detail", query = mapOf("url" to card.url)).asObject()
-    else if (card.isHls) api.get("hls", "detail", query = buildMap {
-        put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
-    }).asObject() else api.get("chat", "subscriptions", "magnets", "preview", query = mapOf("url" to card.url, "title" to card.title)).asObject()
-    /** 已知详情页直接打开，电影港磁力来源仍需匹配手机站地址。 */
-    fun knownFilmWebsite(card: FilmCard): String? = if (card.isHls) BrowserAddress.normalize(card.url) else null
+    /** 电影港磁力 / 在线标签独立请求，老卡片缺少另一来源地址时由后端按片名匹配。 */
+    suspend fun filmResources(card: FilmCard, online: Boolean = false): JsonObject {
+        if (!card.isMovie) return api.get("hls", "detail", query = buildMap {
+            put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
+        }).asObject()
+        val url = if (online) {
+            if (card.isMovieHls) card.url else card.onlineUrl
+        } else if (card.isMovieHls) "" else card.url
+        return api.get("chat", "movie", "resources", query = mapOf(
+            "type" to if (online) "online" else "magnet", "url" to url, "title" to card.title, "year" to card.year,
+        )).asObject()
+    }
+    /** 已知详情页或已匹配的在线地址直接打开，其余磁力卡片按需匹配手机站。 */
+    fun knownFilmWebsite(card: FilmCard): String? = when {
+        card.isHls -> BrowserAddress.normalize(card.url)
+        card.onlineUrl.isNotBlank() -> BrowserAddress.normalize(card.onlineUrl)
+        else -> null
+    }
 
     suspend fun filmWebsite(card: FilmCard): String {
         knownFilmWebsite(card)?.let { return it }

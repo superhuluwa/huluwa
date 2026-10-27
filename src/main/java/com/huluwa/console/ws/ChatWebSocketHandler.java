@@ -87,7 +87,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             // 幂等命中（processing/done/failed）只回 ack，在途请求已有 worker 在跑、历史请求无后续
             chatPushService.ack(session, result.requestId(), result.status(), result.userMessage());
             if ("received".equals(result.status())) {
-                chatPushService.processing(session, result.requestId(), sessionId);
+                chatPushService.processing(session, result.requestId(), result.userMessage().sessionId());
             }
         } catch (BusinessException e) {
             chatPushService.error(session, e.getCode(), e.getMessage(), requestId);

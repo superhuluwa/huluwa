@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.huluwa.android.*
 import com.huluwa.android.data.isServerUnreachable
+import com.huluwa.android.data.text
 
 @Composable fun AppSheets(ui: AppState, vm: HuluwaViewModel) {
     val sheet = ui.sheet ?: return
@@ -31,7 +32,8 @@ import com.huluwa.android.data.isServerUnreachable
     if (sheet is AppSheet.Films) {
         FilmResources(sheet, ui.busy != null, ui.actionError, vm, onPlay = { media = it })
         media?.let { url ->
-            if (sheet.card.isMovieHls) MovieVideoViewer(url, sheet.card.title, sheet.card.url) { media = null }
+            if (sheet.card.isMovie) MovieVideoViewer(url, sheet.card.title,
+                sheet.onlineData.data.text("url", fallback = sheet.card.url)) { media = null }
             else MediaViewer(url, true) { media = null }
         }
         return
