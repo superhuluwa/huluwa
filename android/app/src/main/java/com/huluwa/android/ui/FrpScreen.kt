@@ -40,8 +40,9 @@ import com.huluwa.android.data.*
         !ui.runtime.running -> "frpc 未运行"
         else -> "frpc 运行中"
     }
+    // 关闭边缘拉伸回弹，避免隧道列表触底时反复晃动。
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        verticalArrangement = Arrangement.spacedBy(12.dp), overscrollEffect = null) {
         if (reconnecting || tunnels.error != null) item {
             StatusNotice(if (reconnecting) "暂时连不上服务器" else "无法获取 FRP 状态",
                 if (snapshot) "保留上次数据 · ${statusTime(tunnels.updatedAt)}" else tunnels.error,
