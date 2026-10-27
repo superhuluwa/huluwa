@@ -176,7 +176,8 @@ import kotlinx.serialization.json.JsonObject
                             return@Column
                         }
                         DpdLineTabs(lines, selected, { selected = it })
-                        DpdEpisodeList(card, current, lineState, sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                        // 懂片帝不是订阅来源，没有订阅季号，固定按第 1 季归档
+                        DpdEpisodeList(card, current, lineState, null, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                     }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
