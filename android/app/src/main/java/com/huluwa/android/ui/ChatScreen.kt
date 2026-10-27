@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -226,24 +227,12 @@ import kotlinx.coroutines.flow.first
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button({ vm.filmResources(card) }, Modifier.weight(1.2f).heightIn(min = 44.dp),
-                shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = HuluwaColors.Pine, contentColor = Color.White)) {
-                Icon(Icons.Outlined.FormatListBulleted, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("资源列表", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            FilmActionButton("资源列表", Icons.Outlined.FormatListBulleted, outlined = true) {
+                vm.filmResources(card)
             }
-            Button({ vm.openFilmWebsite(card) }, Modifier.weight(1f).heightIn(min = 44.dp),
-                enabled = ui.busy == null, shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = HuluwaColors.SoftGreen, contentColor = HuluwaColors.Pine,
-                    disabledContainerColor = HuluwaColors.SoftGreen, disabledContentColor = HuluwaColors.Muted,
-                )) {
-                if (websiteBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
-                else Icon(Icons.Outlined.OpenInNew, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(if (websiteBusy) "正在打开…" else "网站直达", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            FilmActionButton(if (websiteBusy) "正在打开…" else "网站直达", Icons.Outlined.OpenInNew,
+                busy = websiteBusy, enabled = ui.busy == null) {
+                vm.openFilmWebsite(card)
             }
         }
     }
@@ -269,22 +258,41 @@ import kotlinx.coroutines.flow.first
     }
 }
 
+/** 小号图文操作按内容宽度排列，避免大面积实色按钮占满卡片底部。 */
+@Composable private fun FilmActionButton(
+    text: String, icon: ImageVector, outlined: Boolean = false, busy: Boolean = false,
+    enabled: Boolean = true, onClick: () -> Unit,
+) {
+    val contentColor = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted
+    val shape = RoundedCornerShape(8.dp)
+    Row(Modifier.heightIn(min = 28.dp).clip(shape)
+        .then(if (outlined) Modifier.border(1.dp, HuluwaColors.Line, shape) else Modifier)
+        .clickable(enabled = enabled && !busy, role = Role.Button, onClickLabel = text, onClick = onClick)
+        .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (busy) CircularProgressIndicator(Modifier.size(14.dp), color = contentColor, strokeWidth = 1.5.dp)
+        else Icon(icon, null, Modifier.size(14.dp), tint = contentColor)
+        Text(text, color = contentColor, style = MaterialTheme.typography.labelMedium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 /** 紧凑订阅胶囊不引入 Material 按钮的最小布局高度，避免把标题与简介撑开。 */
 @Composable private fun FilmFollowButton(subscribed: Boolean, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val contentColor = if (enabled) HuluwaColors.Pine else HuluwaColors.Muted
-    Row(Modifier.widthIn(min = 68.dp).heightIn(min = 30.dp)
+    Row(Modifier.widthIn(min = 56.dp).heightIn(min = 24.dp)
         .clip(CircleShape)
         .background(if (subscribed) HuluwaColors.SoftGreen else Color.White)
         .border(1.dp, if (subscribed) HuluwaColors.Pine else HuluwaColors.Line, CircleShape)
         .clickable(enabled = enabled && !busy, role = Role.Button,
             onClickLabel = if (subscribed) "取消订阅" else "订阅", onClick = onClick)
-        .padding(horizontal = 8.dp, vertical = 5.dp),
+        .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        if (busy) CircularProgressIndicator(Modifier.size(14.dp), color = contentColor, strokeWidth = 1.5.dp)
+        if (busy) CircularProgressIndicator(Modifier.size(12.dp), color = contentColor, strokeWidth = 1.5.dp)
         else Icon(if (subscribed) Icons.Outlined.NotificationsActive else Icons.Outlined.AddAlert,
-            null, Modifier.size(14.dp), tint = contentColor)
-        Spacer(Modifier.width(4.dp))
-        Text(if (subscribed) "已订阅" else "订阅", color = contentColor,
+            null, Modifier.size(12.dp), tint = contentColor)
+        Spacer(Modifier.width(3.dp))
+        Text(if (subscribed) "取消订阅" else "订阅", color = contentColor,
             style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
