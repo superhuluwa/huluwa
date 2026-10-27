@@ -150,7 +150,7 @@ import kotlin.math.abs
                 TextButton({ vm.selectMetric(false) }) { Text("播放量", color = if (!ui.shareMetric) HuluwaColors.Pine else HuluwaColors.Muted, fontWeight = FontWeight.SemiBold) }
                 TextButton({ vm.selectMetric(true) }) { Text("播放市占", color = if (ui.shareMetric) HuluwaColors.Pine else HuluwaColors.Muted) }
                 Spacer(Modifier.weight(1f))
-                DengtaDropdown(ui.platform, listOf("全部平台", "优酷", "爱奇艺", "腾讯视频", "芒果TV", "哔哩哔哩"), vm::selectPlatform)
+                DengtaPlatformDropdown(ui.platform, vm::selectPlatform)
             }
             ui.ranking.error?.let { StatusNotice(it, if (data.rows.isNotEmpty()) "正在显示上次获取的数据" else null, onRetry = vm::refreshRanking) }
             if (ui.ranking.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp), color = HuluwaColors.Pine)
@@ -174,7 +174,7 @@ import kotlin.math.abs
                     DengtaPoster(row.media.poster, row.media.name, Modifier.size(42.dp, 62.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(row.media.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp)
-                        Text(row.media.platforms.ifBlank { "平台待公布" }, color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        DengtaPlatformLogos(row.platformCode, row.media.platforms)
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(row.openDay, color = HuluwaColors.Muted, fontSize = 10.sp, maxLines = 1)
                             if (row.playStateImage.isNotBlank()) AsyncImage(row.playStateImage, "播出状态", Modifier.size(36.dp, 16.dp), contentScale = ContentScale.Fit)
