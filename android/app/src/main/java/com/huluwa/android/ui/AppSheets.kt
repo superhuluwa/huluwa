@@ -30,7 +30,10 @@ import com.huluwa.android.data.isServerUnreachable
     // 资源列表（对齐网页端 n-modal）：独立居中弹框，不再套底部弹层
     if (sheet is AppSheet.Films) {
         FilmResources(sheet, ui.busy != null, ui.actionError, vm, onPlay = { media = it })
-        media?.let { MediaViewer(it, true) { media = null } }
+        media?.let { url ->
+            if (sheet.card.isMovieHls) MovieVideoViewer(url, sheet.card.title, sheet.card.url) { media = null }
+            else MediaViewer(url, true) { media = null }
+        }
         return
     }
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)

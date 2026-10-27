@@ -11,6 +11,7 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -25,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Cast
+import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.*
@@ -46,8 +49,15 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.huluwa.android.HuluwaViewModel
-import com.huluwa.android.data.BrowserAddress
+import com.huluwa.android.VideoCastViewModel
+import com.huluwa.android.data.*
+import kotlinx.coroutines.Job
+import kotlinx.serialization.json.JsonPrimitive
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 应用内无痕浏览器：支持隐藏入口与影视卡片的「网站直达」，可传入初始页面。
@@ -66,6 +76,32 @@ import com.huluwa.android.data.BrowserAddress
     var editing by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<String?>(null) }
+    val castVm: VideoCastViewModel = viewModel()
+    val cast by castVm.state.collectAsStateWithLifecycle()
+    var detectedVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
+    var nativeVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
+    var castVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
+    var showCast by remember { mutableStateOf(false) }
+    var resolving by remember { mutableStateOf(false) }
+    var resolutionJob by remember { mutableStateOf<Job?>(null) }
+    var pageTitle by remember { mutableStateOf("电影港在线视频") }
+    val currentPage = remember(initialUrl) { AtomicReference(initialUrl) }
+    val pageSequence = remember(initialUrl) { AtomicLong(0) }
+    val nativeActive by rememberUpdatedState(nativeVideo != null)
+    val castActive by rememberUpdatedState(cast.selected != null && cast.playing)
+
+    fun capture(value: String, page: String, userAgent: String, positionMs: Long = 0, referer: String = page) {
+        if (!MovieWebVideo.isM3u8(value)) return
+        detectedVideo = BrowserVideo(value, pageTitle, referer, userAgent,
+            CookieManager.getInstance().getCookie(value).orEmpty(), positionMs.coerceAtLeast(0))
+    }
+    fun captureDom(result: String?, page: String, userAgent: String) {
+        runCatching {
+            val encoded = ApiJson.parseToJsonElement(result.orEmpty()) as? JsonPrimitive ?: return@runCatching
+            val raw = ApiJson.parseToJsonElement(encoded.content).asObject()
+            capture(raw.text("url"), page, userAgent, raw.number("positionMs")?.toLong() ?: 0)
+        }
+    }
     // 网页视频全屏：WebView 不自带全屏能力，需由宿主把网页提供的视频视图挂到窗口上。
     val fullscreenHost = remember(activity) { WebFullscreenHost(activity) }
     val webView = remember(initialUrl) {
@@ -86,7 +122,14 @@ import com.huluwa.android.data.BrowserAddress
                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                     failure = null
                     progress = 1
-                    if (!url.isNullOrBlank() && url != "about:blank") loadedUrl = url
+                    pageSequence.incrementAndGet()
+                    resolutionJob?.cancel()
+                    resolving = false
+                    detectedVideo = null
+                    if (!url.isNullOrBlank() && url != "about:blank") {
+                        loadedUrl = url
+                        currentPage.set(url)
+                    }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
                     progress = 0
@@ -94,7 +137,27 @@ import com.huluwa.android.data.BrowserAddress
                     if (actual.isNotBlank() && actual != "about:blank") {
                         loadedUrl = actual
                         if (!editing) address = actual
+                        if (MovieWebVideo.isMoviePage(actual)) {
+                            val sequence = pageSequence.get()
+                            view.evaluateJavascript(MovieWebVideo.captureScript) { result ->
+                                if (sequence == pageSequence.get()) captureDom(result, actual, view.settings.userAgentString)
+                            }
+                        }
                     }
+                }
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    val page = currentPage.get()
+                    val sequence = pageSequence.get()
+                    val url = request.url.toString()
+                    if (MovieWebVideo.isMoviePage(page) && MovieWebVideo.isM3u8(url)) {
+                        val referer = request.requestHeaders.entries.firstOrNull { it.key.equals("Referer", true) }?.value ?: page
+                        view.post {
+                            if (sequence == pageSequence.get() && detectedVideo == null) {
+                                capture(url, page, view.settings.userAgentString, referer = referer)
+                            }
+                        }
+                    }
+                    return null
                 }
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                     if (request.isForMainFrame) {
@@ -105,6 +168,9 @@ import com.huluwa.android.data.BrowserAddress
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
+                override fun onReceivedTitle(view: WebView, title: String?) {
+                    if (!title.isNullOrBlank()) pageTitle = title
+                }
                 // 网页视频点全屏时由宿主接管：把视频视图铺满窗口并切到横屏沉浸式。
                 // 不覆写这两个回调时，WebView 会直接告诉网页「不支持全屏」，点击就毫无反应。
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) {
@@ -128,12 +194,15 @@ import com.huluwa.android.data.BrowserAddress
     DisposableEffect(lifecycle, webView) {
         val observer = LifecycleEventObserver { _, event -> when (event) {
             Lifecycle.Event.ON_STOP -> webView.onPause()
-            Lifecycle.Event.ON_START -> webView.onResume()
+            Lifecycle.Event.ON_START -> if (!nativeActive && !castActive) webView.onResume()
             else -> Unit
         } }
         lifecycle.lifecycle.addObserver(observer)
         onDispose {
             lifecycle.lifecycle.removeObserver(observer)
+            pageSequence.incrementAndGet()
+            resolutionJob?.cancel()
+            castVm.cancelScan()
             // 全屏中直接退出浏览页时也要先收起全屏视图，否则窗口会停留在横屏。
             fullscreenHost.hide(callPage = false)
             clearPrivateData()
@@ -155,6 +224,50 @@ import com.huluwa.android.data.BrowserAddress
         failure = null
         keyboard?.hide()
         webView.loadUrl(url)
+    }
+    fun pauseWebVideo() {
+        webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
+        webView.onPause()
+    }
+    fun openVideo(forCast: Boolean) {
+        if (resolving) return
+        val page = currentPage.get()
+        val sequence = pageSequence.get()
+        resolving = true
+        failure = null
+        fun resolved(media: BrowserVideo) {
+            if (sequence != pageSequence.get()) return
+            resolving = false
+            if (forCast) {
+                castVideo = media
+                showCast = true
+                castVm.scan()
+            } else {
+                pauseWebVideo()
+                nativeVideo = media
+            }
+        }
+        fun failed(message: String) {
+            if (sequence == pageSequence.get()) { resolving = false; failure = message }
+        }
+        // 点击时重读进度；blob 视频通过请求捕获或本站分集解析接口取得真实地址。
+        webView.evaluateJavascript(MovieWebVideo.captureScript) { result ->
+            if (sequence == pageSequence.get()) {
+                captureDom(result, page, webView.settings.userAgentString)
+                if (MovieWebVideo.canResolve(page)) {
+                    resolutionJob = vm.resolveBrowserVideo(page, onResolved = { url ->
+                        resolved(BrowserVideo(url, pageTitle, page, webView.settings.userAgentString,
+                            CookieManager.getInstance().getCookie(url).orEmpty(), detectedVideo?.positionMs ?: 0))
+                    }, onFailure = ::failed)
+                } else detectedVideo?.let(::resolved) ?: failed("请先在网页中选择并播放一个分集")
+            }
+        }
+    }
+    LaunchedEffect(cast.selected, nativeVideo) {
+        if (cast.selected == null && nativeVideo == null) {
+            webView.evaluateJavascript(MovieWebVideo.resumeScript, null)
+            webView.onResume()
+        }
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
@@ -185,6 +298,29 @@ import com.huluwa.android.data.BrowserAddress
                             ),
                         )
                         IconButton({ webView.reload() }, enabled = loadedUrl.isNotBlank()) { Icon(Icons.Outlined.Refresh, "刷新网页") }
+                    }
+                    if (MovieWebVideo.isMoviePage(loadedUrl)) {
+                        val available = detectedVideo != null || MovieWebVideo.canResolve(loadedUrl)
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton({ openVideo(false) }, enabled = available && !resolving) {
+                                Icon(Icons.Outlined.Fullscreen, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp)); Text("全屏播放")
+                            }
+                            TextButton({ openVideo(true) }, enabled = available && !resolving) {
+                                Icon(Icons.Outlined.Cast, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp)); Text("投屏")
+                            }
+                            if (resolving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else if (!available) Text("请先选择分集", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                        }
+                    }
+                    cast.selected?.let { device ->
+                        TextButton({ castVideo = cast.media; showCast = true; castVm.scan() }, Modifier.fillMaxWidth()) {
+                            Icon(Icons.Outlined.Cast, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("${if (cast.playing) "投屏中" else "已暂停"} · ${device.name}", maxLines = 1)
+                        }
                     }
                     if (progress in 1..99) Box(Modifier.fillMaxWidth().height(2.dp).background(HuluwaColors.SoftGreen)) {
                         Box(Modifier.fillMaxWidth(progress / 100f).fillMaxHeight().background(HuluwaColors.Pine))
@@ -221,6 +357,16 @@ import com.huluwa.android.data.BrowserAddress
             }
         }
     }
+    nativeVideo?.let { media ->
+        BrowserVideoPlayer(media, onCast = { castVideo = media; showCast = true; castVm.scan() }) {
+            nativeVideo = null
+            if (cast.selected == null) webView.onResume()
+        }
+    }
+    if (showCast) VideoCastDialog(castVideo, cast, castVm, onStarted = {
+        pauseWebVideo()
+        nativeVideo = null
+    }, dismiss = { showCast = false; castVm.cancelScan() })
 }
 
 /** 清除 WebView 全局的会话数据；应用内没有其他 WebView，可以直接整库清理。 */
@@ -248,6 +394,7 @@ private fun Context.findActivity(): Activity? {
 private class WebFullscreenHost(private val activity: Activity?) {
     private var container: FrameLayout? = null
     private var callback: WebChromeClient.CustomViewCallback? = null
+    private var originalOrientation: Int? = null
 
     /** 是否处于全屏播放中。 */
     val isActive: Boolean get() = container != null
@@ -264,6 +411,7 @@ private class WebFullscreenHost(private val activity: Activity?) {
         }
         val box = FrameLayout(target).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
+            keepScreenOn = true
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         (view.parent as? ViewGroup)?.removeView(view)
@@ -271,6 +419,7 @@ private class WebFullscreenHost(private val activity: Activity?) {
         root.addView(box)
         container = box
         this.callback = callback
+        originalOrientation = target.requestedOrientation
         enterImmersive(target, box)
     }
 
@@ -300,7 +449,7 @@ private class WebFullscreenHost(private val activity: Activity?) {
     private fun exitImmersive(target: Activity) {
         val controller = WindowCompat.getInsetsController(target.window, target.window.decorView)
         controller.show(WindowInsetsCompat.Type.systemBars())
-        // 恢复成跟随传感器，回到浏览器页面后仍可正常旋转。
-        target.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        target.requestedOrientation = originalOrientation ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        originalOrientation = null
     }
 }

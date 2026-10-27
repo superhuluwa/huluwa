@@ -1003,6 +1003,15 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             if (current == sheetGeneration) onResolved(url)
         }
     }
+    /** 浏览器解析任务由页面持有，离开当前网页时可取消，不依赖资源弹框。 */
+    fun resolveBrowserVideo(url: String, onResolved: (String) -> Unit, onFailure: (String) -> Unit): Job = viewModelScope.launch {
+        try { onResolved(repository.movieHlsUrl(PlayItem("", url))) }
+        catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            onFailure(error.userMessage())
+            if (error is ApiException && error.code == 401) handleError(error)
+        }
+    }
     fun enqueueEpisode(card: FilmCard, source: String, item: PlayItem, season: Int, episode: Int) = perform("episode", "已加入离线下载", close = mutable.value.sheet !is AppSheet.Films, after = { refreshDownloads() }) { repository.enqueueEpisode(card, source, item, season, episode) }
     fun enqueueMagnet(card: FilmCard, item: JsonObject) = perform("magnet", "下载任务已提交", after = { markMagnetDownloaded(card, item); refreshDownloads() }) { repository.enqueueMagnet(card, item) }
     /** 提交成功后把弹框里的这一行标成「已下载」，与网页端弹框一致，不必等重新抓取 */
