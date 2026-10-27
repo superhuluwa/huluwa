@@ -55,16 +55,12 @@ import kotlin.math.roundToInt
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(detail?.rankNo?.let { "${detail?.rankName.orEmpty().ifBlank { "全网日榜" }} 第${it}名" } ?: media.typeName.ifBlank { "影视作品" },
                         Modifier.weight(1f), color = HuluwaColors.Lime, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    FilledTonalButton({ vm.toggleFollow(media) }, enabled = !ui.journalBusy && !ui.journalLoading,
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.White.copy(alpha = .15f), contentColor = Color.White)) {
-                        Icon(if (ui.selectedFollow?.following == true) Icons.Outlined.BookmarkAdded else Icons.Outlined.BookmarkAdd, null, Modifier.size(17.dp))
-                        Spacer(Modifier.width(6.dp)); Text(if (ui.selectedFollow?.following == true) "已追剧" else "加入追剧", fontSize = 12.sp)
-                    }
                 }
             }
         }
         item {
             Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (ui.detail.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
                 ui.detail.error?.let { StatusNotice(it, if (detail != null) "正在显示上次获取的数据" else null, onRetry = vm::refreshDetail) }
                 ui.journalError?.let { StatusNotice(it, onRetry = vm::loadJournal) }
                 if (detail != null) {
@@ -163,6 +159,7 @@ import kotlin.math.roundToInt
     if (ui.detail.data?.hasPlayRule != true) return
     Panel(Modifier.fillMaxWidth()) {
         Text("平台更新规则", style = MaterialTheme.typography.titleMedium)
+        if (ui.rules.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = HuluwaColors.Pine)
         ui.rules.error?.let { StatusNotice(it, onRetry = vm::retryRules) }
         ui.rules.data.forEach { rule ->
             Text("${rule.platform} · ${rule.update}", Modifier.padding(top = 14.dp), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
