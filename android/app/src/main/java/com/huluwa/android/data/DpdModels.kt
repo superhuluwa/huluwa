@@ -52,7 +52,8 @@ data class DpdLine(val name: String, val total: Int) {
             val item = element.asObject()
             val name = item.text("name")
             if (name.isBlank()) null else DpdLine(name, item.number("total")?.toInt() ?: 0)
-        }
+        // 稳定排序：4K 线路优先，同组内保留站点原有顺序；默认打开第一条线路。
+        }.sortedBy { if (it.name.contains("4K", ignoreCase = true)) 0 else 1 }
     }
 }
 
