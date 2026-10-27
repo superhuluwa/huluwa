@@ -404,7 +404,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     refreshSubscriptions(silent)
                 }
             }
-            MainTab.Ai -> Unit // AI 使用独立服务连接与生命周期。
             MainTab.Downloads -> refreshDownloads(silent)
             // 自动刷新由可见性轮询负责；手动刷新独立重取三个模块。
             MainTab.Mine -> if (!silent) refreshMine()

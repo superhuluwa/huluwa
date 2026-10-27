@@ -44,28 +44,20 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Functions -> Icons.Outlined.GridView
     MainTab.System -> Icons.Outlined.VerifiedUser
     MainTab.Downloads -> Icons.Outlined.FileDownload
-    MainTab.Ai -> Icons.Outlined.AutoAwesome
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
-private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
+private enum class RootPage { Home, Chat, ServerStatus }
 
 @Composable fun HuluwaRoot(vm: HuluwaViewModel, onSkinSelected: (AppSkin) -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
-    val aiVm: AiViewModel = viewModel()
-    val aiUi by aiVm.state.collectAsStateWithLifecycle()
-    val aiActive = ui.auth.loggedIn && ui.tab == MainTab.Ai && !ui.browserVisible
     val reconnecting = rememberReconnecting(vm)
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
-    // AI 首页把更多菜单交给统一标题栏；不在 AI 标签页时保持不可见。
-    var aiHeader by remember { mutableStateOf<AiHeaderActionsState?>(null) }
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
-    LifecycleStartEffect(aiActive) { aiVm.setVisible(aiActive); onStopOrDispose { aiVm.setVisible(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(ui.chat.session != null && ui.sheet == null && !ui.browserVisible) { vm.closeChat() }
     BackHandler(ui.serverStatusVisible && ui.sheet == null) { vm.closeServerStatus() }
-    BackHandler(aiActive && aiUi.authenticated && aiUi.selected != null) { aiVm.closeSession() }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else if (ui.browserVisible) {
@@ -75,12 +67,8 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
         val page = when {
             ui.serverStatusVisible -> RootPage.ServerStatus
             activeSession != null -> RootPage.Chat
-            aiActive && aiUi.authenticated && aiUi.selected != null -> RootPage.AiConversation
             else -> RootPage.Home
         }
-        val aiSnapshot = remember { mutableStateOf(aiUi) }
-        SideEffect { if (aiUi.selected != null) aiSnapshot.value = aiUi }
-        val pageAiUi = if (aiUi.selected != null) aiUi else aiSnapshot.value
         // 退场动画期间 closeChat() 已经清空 ui.chat，直接读 ui 会让正在滑出的二级页先变成空白。
         // 这里保留最后一次有效会话的快照，专门供退场那一层绘制。
         val chatSnapshot = remember { mutableStateOf(ui.chat) }
@@ -95,11 +83,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
             if (destination == RootPage.Home) {
                 // 列表层始终在二级页下方：返回时二级页从列表上方滑出，与微信一致
                 Box(Modifier.fillMaxSize().zIndex(0f)) {
-                    val homeBackground = when {
-                        ui.tab.isSessionTab -> SessionsBackground
-                        ui.tab == MainTab.Ai -> AiColors.Background
-                        else -> HuluwaColors.Paper
-                    }
+                    val homeBackground = if (ui.tab.isSessionTab) SessionsBackground else HuluwaColors.Paper
                     Scaffold(
                         modifier = Modifier.fillMaxSize().skinBackground(homeBackground).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
                         containerColor = Color.Transparent,
@@ -107,23 +91,20 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                         topBar = {
                             // 隐藏入口：在「我的」页连续点击标题 10 次进入无痕浏览器。
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
-                            val activeAiHeader = aiHeader?.takeIf { it.visible }
                             key(ui.tab) {
-                                PageHeader(if (ui.tab == MainTab.Ai) "AI 工作台" else ui.tab.title,
+                                PageHeader(ui.tab.title,
                                     onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
-                                    reconnecting = if (ui.tab == MainTab.Ai) activeAiHeader?.reconnecting == true else reconnecting) {
+                                    reconnecting = reconnecting) {
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
                                     if (ui.tab == MainTab.Mine) {
                                         HeaderAction(Icons.Outlined.Settings, "连接与账户", { vm.showSheet(AppSheet.Account) })
                                     }
-                                    // AI 首页的「账号切换 / 服务连接 / 退出」菜单收在标题栏右侧。
-                                    if (ui.tab == MainTab.Ai) aiHeader?.let { AiHeaderActions(it) }
                                 }
                             }
                         },
                         bottomBar = {
                             NavigationBar(Modifier.navigationBarsPadding(), containerColor = Color.White, tonalElevation = 0.dp) {
-                                MainTab.entries.filterNot { it == MainTab.Ai }.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
+                                MainTab.entries.forEach { tab -> NavigationBarItem(ui.tab == tab, { vm.selectTab(tab) },
                                     icon = { BadgedBox(badge = {
                                         val unread = when (tab) {
                                             MainTab.Functions -> ui.sessions.data.filterNot { it.isSystemSession }.sumOf { it.unread }
@@ -132,7 +113,7 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                                         }
                                         if (unread > 0) Badge(containerColor = HuluwaColors.Pine, contentColor = Color.White) { Text(if (unread > 99) "99+" else unread.toString()) }
                                     }) { Icon(tabIcon(tab), null) } },
-                                    label = { Text(if (tab == MainTab.Ai) "AI" else tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    label = { Text(tab.title, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     colors = NavigationBarItemDefaults.colors(selectedIconColor = HuluwaColors.Pine, selectedTextColor = HuluwaColors.Pine,
                                         indicatorColor = HuluwaColors.SoftGreen, unselectedIconColor = HuluwaColors.Muted, unselectedTextColor = HuluwaColors.Muted)) }
                             }
@@ -144,7 +125,6 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                                     MainTab.Functions -> SessionsScreen(ui, vm)
                                     MainTab.System -> SessionsScreen(ui, vm, system = true)
                                     MainTab.Downloads -> DownloadsScreen(ui, vm)
-                                    MainTab.Ai -> AiScreen(aiUi, aiVm, onHeaderActions = { aiHeader = it })
                                     MainTab.Mine -> MineScreen(ui, vm, onSkinSelected)
                                 } }
                             }
@@ -155,8 +135,6 @@ private enum class RootPage { Home, Chat, AiConversation, ServerStatus }
                 when {
                     destination == RootPage.ServerStatus ->
                         holder.SaveableStateProvider("server-status") { ServerStatusScreen(ui, vm, snackbar) }
-                    destination == RootPage.AiConversation ->
-                        holder.SaveableStateProvider("ai-session:${pageAiUi.activeAccountId}:${pageAiUi.selected?.id}") { AiConversationScreen(pageAiUi, aiVm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
                     pageUi.chat.session?.kind == DENGTA_SESSION_KIND ->
                         holder.SaveableStateProvider("dengta:${pageUi.auth.server}:${pageUi.auth.username}") {

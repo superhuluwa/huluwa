@@ -11,8 +11,9 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** 只保存服务器、用户名和加密令牌；不保存密码。密钥留在 Android Keystore。 */
-class SessionStore(context: Context, namespace: String = "huluwa_connection", private val keyAlias: String = "huluwa_session_v1") {
-    private val preferences = context.getSharedPreferences(namespace, Context.MODE_PRIVATE)
+class SessionStore(context: Context) {
+    private val keyAlias = "huluwa_session_v1"
+    private val preferences = context.getSharedPreferences("huluwa_connection", Context.MODE_PRIVATE)
     @Volatile var server: String = preferences.getString("server", "").orEmpty(); private set
     @Volatile var username: String = preferences.getString("username", "admin").orEmpty(); private set
     @Volatile var token: String = readToken(); private set

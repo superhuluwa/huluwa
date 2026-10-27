@@ -36,7 +36,7 @@ const val MOVIE_SESSION_TITLE = "电影港"
 const val MOVIE_HLS_SESSION_TITLE = "电影港 ★ 在线"
 
 enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
-    Functions("功能", true), System("系统", true), Ai("Ai"), Downloads("下载"), Mine("我的")
+    Functions("功能", true), System("系统", true), Downloads("下载"), Mine("我的")
 }
 enum class AndroidBuildProject(val id: String, val title: String, val apiPath: List<String>) {
     Huluwa("huluwa", "葫芦娃", listOf("android")),

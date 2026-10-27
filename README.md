@@ -51,7 +51,7 @@
 
 ## 原生安卓客户端
 
-安卓源码位于同一 Git 仓库的 [`android/`](android/README.md) 目录，使用 Kotlin + Jetpack Compose 实现独立的手机界面，通过现有后端接口管理会话、下载、订阅、Frp、Docker、巡检记录与剧集，默认首页为“功能”会话列表。安卓端另有 **Ai** 标签，独立登录 TerminalBuddy 服务，通过原生消息列表与输入框收发 Claude / Codex 消息，支持执行日志、中断和断线恢复；详见 [Ai 接入说明](android/docs/Ai原生会话接入.md)。
+安卓源码位于同一 Git 仓库的 [`android/`](android/README.md) 目录，使用 Kotlin + Jetpack Compose 实现独立的手机界面，通过现有后端接口管理会话、下载、订阅、Frp、Docker、巡检记录与剧集，默认首页为“功能”会话列表。底部导航为“功能 / 系统 / 下载 / 我的”。
 
 网页「系统 → App 构建管理」可更新源码、编译签名 Release APK、查看日志并下载安装包。独立构建服务位于 [`android-builder/`](android-builder/README.md)，首次部署需导入已有 Release 签名。
 
