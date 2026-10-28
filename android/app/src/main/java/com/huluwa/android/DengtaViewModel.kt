@@ -27,8 +27,9 @@ import kotlin.math.roundToLong
 
 enum class DengtaPage { Ranking, Detail, Journal }
 data class DengtaState(
-    val page: DengtaPage = DengtaPage.Ranking, val type: String = "1", val date: String = "",
-    val shareMetric: Boolean = false, val platform: String = "全部平台",
+    val page: DengtaPage = DengtaPage.Ranking, val category: String = "1", val typeCode: String = "",
+    val date: String = "", val metricCode: String = "",
+    val config: LoadState<DengtaRankConfig?> = LoadState(null),
     val ranking: LoadState<DengtaRanking> = LoadState(DengtaRanking()),
     val marketIncrement: Long = 0L, val rowIncrements: Map<String, Long> = emptyMap(), val rankingUpdateId: Long = 0L,
     val selected: DengtaMedia? = null, val detail: LoadState<DengtaDetail?> = LoadState(null),
@@ -75,9 +76,20 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun selectType(type: String) {
-        if (type == mutable.value.type || type !in setOf("1", "2", "3")) return
-        mutable.update { it.copy(type = type, platform = "全部平台", ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap()) }
+    fun selectType(typeCode: String) {
+        if (typeCode == mutable.value.typeCode) return
+        mutable.update { ui ->
+            // 子类不同时指标 tab 可能不通用，切不过去就回落到该子类的默认指标。
+            val metrics = ui.config.data?.type(typeCode)?.metrics.orEmpty()
+            ui.copy(typeCode = typeCode, metricCode = metrics.firstOrNull { it.code == ui.metricCode }?.code
+                ?: metrics.firstOrNull { it.default }?.code ?: metrics.firstOrNull()?.code.orEmpty(),
+                ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap())
+        }
+        refreshRanking()
+    }
+    fun selectMetric(metricCode: String) {
+        if (metricCode == mutable.value.metricCode) return
+        mutable.update { it.copy(metricCode = metricCode, ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap()) }
         refreshRanking()
     }
     fun selectDate(date: String) {
@@ -85,8 +97,34 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(date = date, ranking = LoadState(DengtaRanking()), marketIncrement = 0L, rowIncrements = emptyMap()) }
         refreshRanking()
     }
-    fun selectPlatform(platform: String) { mutable.update { it.copy(platform = platform) } }
-    fun selectMetric(share: Boolean) { mutable.update { it.copy(shareMetric = share) } }
+    /** 分类切换后重新拉配置，因为三个分类的子类与指标 tab 完全不同。 */
+    fun selectCategory(category: String) {
+        if (category == mutable.value.category || category !in setOf("1", "2", "3")) return
+        mutable.update { it.copy(category = category, typeCode = "", metricCode = "", ranking = LoadState(DengtaRanking()),
+            marketIncrement = 0L, rowIncrements = emptyMap(), config = LoadState(null)) }
+        refreshRanking()
+    }
+
+    /** 首次进入或分类变化时读取配置，返回可用状态；已缓存的配置不重复请求。 */
+    private suspend fun ensureConfig(): DengtaRankConfig? {
+        val current = mutable.value
+        current.config.data?.takeIf { it.code == current.category }?.let { return it }
+        if (!current.config.loading) mutable.update { it.copy(config = it.config.copy(loading = true, error = null)) }
+        return try {
+            val config = repository.rankConfig(current.category)
+            mutable.update { if (it.category == config.code) {
+                val type = config.type(it.typeCode) ?: config.defaultType
+                it.copy(config = LoadState(config, loaded = true), typeCode = type?.code.orEmpty(),
+                    metricCode = it.metricCode.takeIf { code -> type?.metrics?.any { m -> m.code == code } == true }
+                        ?: type?.metrics?.firstOrNull { m -> m.default }?.code ?: type?.metrics?.firstOrNull()?.code.orEmpty())
+            } else it }
+            config
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            mutable.update { if (it.category == current.category) it.copy(config = it.config.copy(loading = false, error = error.dengtaMessage())) else it }
+            null
+        }
+    }
 
     fun refreshRanking() {
         rankJob?.cancel()
@@ -96,6 +134,8 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
             while (currentCoroutineContext().isActive && rankingVisible && mutable.value.page == DengtaPage.Ranking) {
                 val startedAt = SystemClock.elapsedRealtime()
                 fetchRanking(loop = loop && isTodayRanking(mutable.value.date))
+                // 配置读取失败时停止自动轮询，等用户点重试再恢复。
+                if (mutable.value.config.error != null) break
                 if (!isTodayRanking(mutable.value.date)) break
                 loop = true
                 // 请求串行执行，耗时超过周期时也不叠加请求。
@@ -107,18 +147,25 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
     private fun isTodayRanking(date: String): Boolean = date.isBlank() || dengtaDate(date) == LocalDate.now(ZoneId.of("Asia/Shanghai"))
 
     private suspend fun fetchRanking(loop: Boolean) {
-        val type = mutable.value.type
+        // 配置失败时不进入轮询循环，避免每 3 秒重复打配置接口。
+        if (ensureConfig() == null) return
+        val category = mutable.value.category
+        val typeCode = mutable.value.typeCode
+        val metricCode = mutable.value.metricCode
+        if (typeCode.isBlank() || metricCode.isBlank()) return
         val date = mutable.value.date
         if (!mutable.value.ranking.loaded) mutable.update { it.copy(ranking = it.ranking.copy(loading = true, error = null)) }
         try {
-            val data = repository.ranking(type, date, loop)
+            val data = repository.ranking(category, typeCode, metricCode, date, loop)
             mutable.update { ui ->
-                if (ui.type != type || ui.date != date || !rankingVisible || ui.page != DengtaPage.Ranking) return@update ui
+                if (ui.category != category || ui.typeCode != typeCode || ui.metricCode != metricCode || ui.date != date ||
+                    !rankingVisible || ui.page != DengtaPage.Ranking) return@update ui
                 val previous = ui.ranking.data
                 val comparable = ui.ranking.loaded && dengtaDate(previous.date) != null &&
                     dengtaDate(previous.date) == dengtaDate(data.date) && isTodayRanking(data.date)
                 val oldRows = if (comparable) previous.rows.associateBy { it.media.id } else emptyMap()
-                val increments = data.rows.mapNotNull { row ->
+                // 只有正片播放榜的 vvCnt 是持续累加的播放次数，其它指标做差不具备可比性。
+                val increments = if (data.metricCode != DENGTA_METRIC_PLAY) emptyMap() else data.rows.mapNotNull { row ->
                     val old = oldRows[row.media.id]?.plays?.raw
                     val now = row.plays.raw
                     if (old == null || now == null) null else (now - old).roundToLong().takeIf { it != 0L }?.let { row.media.id to it }
@@ -131,7 +178,8 @@ class DengtaViewModel(application: Application) : AndroidViewModel(application) 
             }
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) {
-            mutable.update { if (it.type == type && it.date == date && rankingVisible && it.page == DengtaPage.Ranking)
+            mutable.update { if (it.category == category && it.typeCode == typeCode && it.metricCode == metricCode && it.date == date &&
+                rankingVisible && it.page == DengtaPage.Ranking)
                 it.copy(ranking = it.ranking.copy(loading = false, error = error.dengtaMessage()), marketIncrement = 0L, rowIncrements = emptyMap()) else it }
         }
     }

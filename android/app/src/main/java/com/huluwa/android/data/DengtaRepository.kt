@@ -22,14 +22,24 @@ class DengtaRepository {
         .readTimeout(25, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
 
-    suspend fun ranking(type: String, date: String, loop: Boolean = false): DengtaRanking {
-        require(type in setOf("1", "2", "3")) { "不支持的榜单类型" }
+    /** 榜单分类与指标 tab 由灯塔配置下发，和网页版共用同一套 code。 */
+    suspend fun rankConfig(category: String): DengtaRankConfig {
+        require(category in setOf("1", "2", "3")) { "不支持的榜单分类" }
+        return DengtaRankConfig.from(category,
+            request("mtop.alipictures.gravitywave.media.config.get", "3.0", buildJsonObject { put("configCode", category) }).child("data"))
+    }
+
+    suspend fun ranking(category: String, typeCode: String, metricCode: String, date: String, loop: Boolean = false): DengtaRanking {
+        require(category in setOf("1", "2", "3")) { "不支持的榜单分类" }
+        require(typeCode.matches(Regex("\\d+"))) { "不支持的榜单类型" }
+        require(metricCode.isNotBlank()) { "请选择榜单指标" }
         require(date.isEmpty() || date.matches(Regex("\\d{8}"))) { "榜单日期格式不正确" }
         val payload = buildJsonObject {
-            put("configCode", "1"); put("typeCode", type); put("platformCode", "beaconmarketshare_play_vv")
+            put("configCode", category); put("typeCode", typeCode)
+            put("platformCode", metricCode)
             put("showDate", date); put("dateType", "0"); put("marketShareType", "2"); put("isLoop", loop)
         }
-        return DengtaRanking.from(request("mtop.alipictures.gravitywave.media.rank.list", "3.0", payload).child("data"))
+        return DengtaRanking.from(request("mtop.alipictures.gravitywave.media.rank.list", "3.0", payload).child("data"), metricCode)
     }
 
     suspend fun detail(id: String): DengtaDetail {

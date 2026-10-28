@@ -30,37 +30,67 @@ data class DengtaValue(val value: String = "", val unit: String = "", val raw: D
     val typeName: String = "", val episodeCount: Int? = null, val updatedEpisodes: Int? = null,
     val updateText: String = "",
 )
+/** 榜单指标 tab，与灯塔网页版的 platformCode 一一对应：正片播放、集均播放、播放市占和各家平台热度。 */
+data class DengtaRankMetric(val code: String, val title: String, val default: Boolean = false)
+data class DengtaRankType(val code: String, val title: String, val metrics: List<DengtaRankMetric> = emptyList(), val visible: Boolean = true)
+data class DengtaRankConfig(
+    val code: String, val title: String, val types: List<DengtaRankType> = emptyList(),
+) {
+    /** 网页版默认停在第一个可见子类，例如剧集的「全部」。 */
+    val defaultType: DengtaRankType? get() = types.firstOrNull { it.visible } ?: types.firstOrNull()
+    fun type(code: String): DengtaRankType? = types.firstOrNull { it.code == code } ?: defaultType
+    companion object {
+        fun from(code: String, data: JsonObject): DengtaRankConfig {
+            val config = data.child("rankConfigVO")
+            return DengtaRankConfig(config.text("code", fallback = code), config.text("title", fallback = dengtaCategoryName(code)),
+                config.rows("type").map { item ->
+                    val type = item.asObject()
+                    DengtaRankType(type.text("code"), type.text("title"), type.rows("platform").map { platform ->
+                        val metric = platform.asObject()
+                        DengtaRankMetric(metric.text("code"), metric.text("title"), metric.text("selected") == "1")
+                    }, type.flag("show", fallback = true))
+                }.filter { it.code.isNotBlank() },
+            )
+        }
+    }
+}
+
 data class DengtaRankRow(
-    val media: DengtaMedia, val rank: Int, val rankChange: Int, val plays: DengtaValue,
-    val share: String, val platformCode: String, val openDay: String, val playStateImage: String,
+    val media: DengtaMedia, val rank: Int, val rankChange: Int, val value: DengtaValue,
+    val note: String, val percent: Double?, val plays: DengtaValue,
+    val platformCode: String, val openDay: String, val playStateImage: String,
     val modifiedTime: String,
 )
 data class DengtaRanking(
-    val title: String = "全网正片播放量", val column: String = "正片播放量", val date: String = "",
+    val title: String = "全网正片播放量", val rightTitle: String = "正片播放量", val date: String = "",
     val firstDate: String = "", val lastDate: String = "", val market: DengtaValue = DengtaValue(),
-    val rows: List<DengtaRankRow> = emptyList(),
+    val metricCode: String = "", val rows: List<DengtaRankRow> = emptyList(),
 ) {
     companion object {
-        fun from(data: JsonObject): DengtaRanking {
+        fun from(data: JsonObject, metricCode: String): DengtaRanking {
             require(data["rankMap"] is JsonObject) { "灯塔返回的榜单数据格式不完整" }
             val rank = data.child("rankMap")
+            val info = rank.child("titleInfo")
             val calendar = data.child("calendarMap")
+            val percentColumn = info.text("columnName1").contains("市占率")
+            val list = rank.rows("rankList").map { it.asObject() }.filter { it.text("mediaId").isNotBlank() }
+            val maxCount = list.mapNotNull { it.number("cnt") }.filter { it > 0 }.maxOrNull()
             return DengtaRanking(
-                title = rank.child("titleInfo").text("title", fallback = "全网正片播放量"),
-                column = rank.child("titleInfo").text("columnName1", fallback = "正片播放量"),
+                title = info.text("title", fallback = "全网正片播放量"),
+                rightTitle = info.text("columnName1", fallback = "正片播放量"),
                 date = calendar.text("showDate"), firstDate = calendar.text("startDate"), lastDate = calendar.text("endDate"),
                 market = DengtaValue.from(rank.child("market").child("vvCntWithUnit"), rank.child("market").number("vvCnt")),
-                rows = rank.rows("rankList").mapIndexedNotNull { index, item ->
-                    val row = item.asObject()
-                    val id = row.text("mediaId")
-                    if (id.isBlank()) return@mapIndexedNotNull null
+                metricCode = metricCode,
+                rows = list.mapIndexed { index, row ->
+                    val count = row.number("cnt")
                     DengtaRankRow(
-                        DengtaMedia(id, row.text("mediaName", fallback = "未命名作品"), dengtaImageUrl(row.text("poster")),
+                        DengtaMedia(row.text("mediaId"), row.text("mediaName", fallback = "未命名作品"), dengtaImageUrl(row.text("poster")),
                             row.text("platforms"), row.text("mediaTypeName")),
                         row.number("rankNo")?.toInt()?.takeIf { it > 0 } ?: (index + 1),
                         row.number("rankChange")?.toInt() ?: 0,
+                        rankValue(row, metricCode, percentColumn), rankNote(row, metricCode),
+                        if (count != null && maxCount != null && maxCount > 0) (count / maxCount).coerceIn(0.0, 1.0) else null,
                         DengtaValue.from(row.child("vvCntWithUnit"), row.number("vvCnt")),
-                        row.text("columnValue1").let { if (it.isBlank() || it.endsWith("%")) it else "$it%" },
                         row.text("platformCode"), row.text("openDayStr"), dengtaImageUrl(row.text("playState")), row.text("modifiedTime"),
                     )
                 },
@@ -68,6 +98,41 @@ data class DengtaRanking(
         }
     }
 }
+
+/** 播放量与集均播放有独立字段；播放市占、平台热度只有 columnValue1，单位按列名判断。 */
+private fun rankValue(row: JsonObject, metricCode: String, percentColumn: Boolean): DengtaValue = when (metricCode) {
+    DENGTA_METRIC_PLAY -> DengtaValue.from(row.child("vvCntWithUnit"), row.number("vvCnt"))
+    DENGTA_METRIC_AVERAGE -> DengtaValue.from(row.child("averageCntWithUnit"), row.number("averageCnt"))
+    // 市占率列给百分比数字，raw 存比例；平台热度列给整数热度，单位取接口下发值。
+    else -> if (percentColumn) {
+        val percent = row.text("columnValue1")
+        DengtaValue(percent, "%", percent.toDoubleOrNull()?.div(100))
+    } else {
+        val hot = row.text("columnValue1")
+        DengtaValue(hot, row.child("cntWithUnit").text("unit"), row.number("cnt") ?: hot.toDoubleOrNull())
+    }
+}
+
+/** 副标题对齐网页版：播放榜给市占率，集均榜给更新进度；平台热度榜主值是热度，不再重复副标题。 */
+private fun rankNote(row: JsonObject, metricCode: String): String = when (metricCode) {
+    DENGTA_METRIC_PLAY -> row.text("columnValue1").takeIf(String::isNotBlank)?.let { "市占率：$it%" }.orEmpty()
+    DENGTA_METRIC_AVERAGE -> {
+        val total = row.number("totalEpisodes")?.toInt()
+        val updated = row.number("updateEpisodes")?.toInt()
+        val fixed = row.text("fixedDateStr")
+        when {
+            updated != null && total != null && updated == total -> "${total}集全${if (fixed.isBlank()) "" else " · $fixed"}"
+            updated != null && total != null -> "已更${updated}集 / 共${total}集"
+            total != null -> "${total}集全"
+            else -> fixed
+        }
+    }
+    else -> ""
+}
+
+const val DENGTA_METRIC_PLAY = "beaconmarketshare_play_vv"
+const val DENGTA_METRIC_AVERAGE = "episodeaverageplay_vv"
+fun dengtaCategoryName(code: String): String = when (code) { "2" -> "综艺"; "3" -> "动漫"; else -> "剧集" }
 
 data class DengtaPoint(val date: String, val value: DengtaValue)
 data class DengtaSeries(val name: String, val points: List<DengtaPoint>)
