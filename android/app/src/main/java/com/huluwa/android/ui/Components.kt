@@ -94,11 +94,12 @@ fun sessionColor(kind: String): Color = when (kind) {
     else -> HuluwaColors.Pine
 }
 
-/** 会话品牌图标与网页版 SessionIcon.vue 保持一致；无品牌图标的会话返回 null。 */
+/** 会话使用随应用打包的品牌图标；无品牌图标的会话返回 null。 */
 private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     DENGTA_SESSION_KIND -> R.drawable.session_icon_dengta
     "movie", "movie-hls" -> R.drawable.session_icon_movie
     "dytt" -> R.drawable.session_icon_dytt
+    "dpd" -> R.drawable.session_icon_dpd
     "magnet" -> R.drawable.session_icon_magnet
     "video" -> R.drawable.session_icon_video
     "xunlei", "xunlei-win" -> R.drawable.session_icon_xunlei
