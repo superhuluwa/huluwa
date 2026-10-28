@@ -38,6 +38,9 @@ spring:
 
 huluwa:
   data-dir: ./data
+  terminalbuddy-public:
+    # 只开放 TerminalBuddy 构建、日志和下载，不签发后台登录令牌。
+    enabled: ${TERMINALBUDDY_PUBLIC_ENABLED:true}
   android-build:
     enabled: ${HULUWA_ANDROID_BUILD_ENABLED:false}
     directory: ${HULUWA_ANDROID_BUILD_DIR:/app/android-build}

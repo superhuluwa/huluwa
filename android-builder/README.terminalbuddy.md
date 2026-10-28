@@ -10,6 +10,26 @@ TerminalBuddy 安卓源码来自 `https://gitee.com/updateme/terminal-buddy.git`
 
 TerminalBuddy 版本号独立递增，首次自动分配 `1001 / 1.0.1`，按 `major × 1000 + minor × 100 + patch` 生成版本名；已有源码或历史更高时继续向上分配。失败和取消也不回收编号。
 
+## 供 TerminalBuddy 使用的免登录接口
+
+新增独立入口 `/api/public/terminalbuddy/android`，供 TerminalBuddy 的「我的 → 在线更新」使用，只需服务地址，不需要葫芦娃账号密码，不签发或复用后台令牌。原 `/api/terminalbuddy/android` 管理员入口和葫芦娃其他后台功能继续要求登录。
+
+当前可分享的接口地址（部署包含本改动的后端后生效）：`http://taihe.678120.cn:8086/api/public/terminalbuddy/android`。已有 `frpc-caiji` 仍将公网 8086 映射至 `192.168.3.77:8000`，无需修改打包节点和端口映射。
+
+| 方法与相对路径 | 共享能力 |
+| --- | --- |
+| `GET /`、`GET /status`、`GET /servers` | 服务标识、构建状态和节点列表 |
+| `GET /releases/latest` | 最新 TerminalBuddy Release 元数据 |
+| `GET /tasks`、`GET /tasks/{id}`、`GET /tasks/{id}/logs` | 历史任务和增量日志 |
+| `POST /build` | 更新源码后编译 TerminalBuddy APK |
+| `POST /tasks/{id}/cancel` | 仅取消本设备发起的任务 |
+| `POST /tasks/{id}/download-ticket` | 申请 TerminalBuddy APK 或完整日志的短时票据 |
+| `GET /downloads/{ticket}` | 只兑换 TerminalBuddy 项目的票据 |
+
+提交和取消使用客户端自动生成的 `X-TerminalBuddy-Client` 随机设备标识，无需用户输入。标识按服务地址隔离；任务发起者保存 SHA-256 摘要，公开历史只显示「共享更新用户」或「管理员」，并返回 `canCancel` 控制取消按钮。不能取消管理员或其他设备发起的任务；共享接口不开放节点创建/删除、节点密钥、代理上传、源码独立更新或葫芦娃 App 构建。公开编译提交间隔为全局 30 秒，继续通过原协调器与葫芦娃构建串行执行。
+
+环境变量 `TERMINALBUDDY_PUBLIC_ENABLED` 默认 `true`，改为 `false` 并重启主服务可关闭该入口。部署时先更新葫芦娃后端，再通过原管理员入口打包和安装新版 TerminalBuddy，然后可将 APK 和接口地址分享给别人。葫芦娃安卓 App、Debian 节点及节点密钥无需更新。
+
 ## 葫芦娃后端与 App 更新
 
 新增接口需要部署包含本次改动的葫芦娃后端，系统会话入口需要安装包含本次改动的葫芦娃安卓 App。后端专用 `Dockerfile.backend` 从当前运行镜像复制已归档网页资源，仅打包 Java 后端；不运行网页构建。编译和 APK 生成遵循项目的当次授权规则。
