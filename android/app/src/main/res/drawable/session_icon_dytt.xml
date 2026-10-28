@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 沿用原站点图标的蓝、绿、黄播放标识，矢量重绘以适配不同尺寸的会话头像。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path android:pathData="M31,5 C49,5 76,9 89,23 C100,35 91,54 76,70 C59,88 39,97 24,88 C11,80 9,57 13,36 C17,15 21,5 31,5 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="35"
+                android:startY="5"
+                android:endX="67"
+                android:endY="90">
+                <item android:offset="0" android:color="#32D5FF" />
+                <item android:offset="1" android:color="#0086E8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M20,8 C34,7 58,24 80,43 C91,53 92,63 79,73 C63,87 41,92 30,83 C18,73 7,44 6,27 C5,15 10,9 20,8 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="16"
+                android:startY="8"
+                android:endX="55"
+                android:endY="87">
+                <item android:offset="0" android:color="#D4F236" />
+                <item android:offset="0.48" android:color="#58D94C" />
+                <item android:offset="1" android:color="#0CBD9D" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M31,26 C34,24 38,25 42,28 L64,45 C72,50 72,55 65,60 L45,73 C39,77 34,74 32,68 L24,40 C22,33 25,28 31,26 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="30"
+                android:startY="26"
+                android:endX="55"
+                android:endY="73">
+                <item android:offset="0" android:color="#FFEC83" />
+                <item android:offset="1" android:color="#FFB51F" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
