@@ -61,6 +61,8 @@ data class AppState(
     val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
     val library: LibraryState = LibraryState(),
     val browserVisible: Boolean = false, val browserUrl: String = "",
+    /** 收藏菜单只在「我的」页连点标题的隐藏入口进入时显示，「网站直达」不显示。 */
+    val browserBookmarksEnabled: Boolean = false,
     val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
 ) {
     fun build(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) androidBuild else terminalBuddyBuild
@@ -380,8 +382,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false) }; refreshCurrent(false) }
 
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", serverStatusVisible = false) } }
-    fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "") }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false) } }
+    fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "", browserBookmarksEnabled = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
         if (current.serverStatusVisible) { refreshServer(silent); return }
@@ -990,7 +992,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (knownUrl != null) {
             dismissSheet()
-            mutable.update { it.copy(browserVisible = true, browserUrl = knownUrl, serverStatusVisible = false, actionError = null) }
+            mutable.update { it.copy(browserVisible = true, browserUrl = knownUrl, browserBookmarksEnabled = false, serverStatusVisible = false, actionError = null) }
             return
         }
         val epoch = generation
@@ -999,7 +1001,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             val url = repository.filmWebsite(card)
             if (epoch == generation && mutable.value.chat.session?.id == sessionId) {
                 dismissSheet()
-                mutable.update { it.copy(browserVisible = true, browserUrl = url, serverStatusVisible = false) }
+                mutable.update { it.copy(browserVisible = true, browserUrl = url, browserBookmarksEnabled = false, serverStatusVisible = false) }
             }
         }
     }

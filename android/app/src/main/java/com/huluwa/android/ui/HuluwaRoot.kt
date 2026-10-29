@@ -61,7 +61,7 @@ private enum class RootPage { Home, Chat, ServerStatus }
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else if (ui.browserVisible) {
-        HiddenBrowserScreen(vm, initialUrl = ui.browserUrl)
+        HiddenBrowserScreen(vm, initialUrl = ui.browserUrl, bookmarksEnabled = ui.browserBookmarksEnabled)
     } else {
         val activeSession = ui.chat.session
         val page = when {

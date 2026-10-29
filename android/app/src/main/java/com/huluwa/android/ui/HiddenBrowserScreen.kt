@@ -72,12 +72,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 应用内无痕浏览器：支持隐藏入口与影视卡片的「网站直达」，可传入初始页面。
+ * 收藏相关菜单（收藏当前网页 / 我的收藏）只在隐藏入口进入时显示。
  *
  * 无痕做法：禁用文件访问与混合内容；进入和退出时清除 Cookie、WebStorage 与磁盘缓存；
  * 关闭页面时销毁 WebView；主动收藏的网址单独保存在 App 本地，关闭后仍保留。
  */
 @SuppressLint("SetJavaScriptEnabled")
-@Composable fun HiddenBrowserScreen(vm: HuluwaViewModel, initialUrl: String = "") {
+@Composable fun HiddenBrowserScreen(vm: HuluwaViewModel, initialUrl: String = "", bookmarksEnabled: Boolean = false) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -362,7 +363,8 @@ import java.util.concurrent.atomic.AtomicReference
                             ),
                         )
                         IconButton({ webView.reload() }, enabled = loadedUrl.isNotBlank()) { Icon(Icons.Outlined.Refresh, "刷新网页") }
-                        Box {
+                        // 菜单里只有收藏相关两项，非隐藏入口时整组隐藏。
+                        if (bookmarksEnabled) Box {
                             IconButton({ browserMenu = true }) { Icon(Icons.Outlined.MoreVert, "浏览器菜单") }
                             DropdownMenu(browserMenu, { browserMenu = false }) {
                                 DropdownMenuItem(
@@ -418,7 +420,7 @@ import java.util.concurrent.atomic.AtomicReference
                     RoundIcon(Icons.Outlined.Shield, modifier = Modifier.size(60.dp))
                     Text("无痕浏览", style = MaterialTheme.typography.titleMedium)
                     Text("输入网址开始浏览，关闭后清除浏览记录，收藏会保留", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                    TextButton({ keyboard?.hide(); showBookmarks = true }) {
+                    if (bookmarksEnabled) TextButton({ keyboard?.hide(); showBookmarks = true }) {
                         Icon(Icons.Outlined.Bookmarks, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("我的收藏（${bookmarks.size}）")
