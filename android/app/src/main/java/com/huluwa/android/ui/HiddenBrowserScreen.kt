@@ -240,7 +240,12 @@ import java.util.concurrent.atomic.AtomicReference
     }
     /** 返回统一走网页历史；没有可回退的网页时返回原入口。 */
     fun goBackOrExit() {
-        if (webView.canGoBack()) webView.goBack() else vm.closeHiddenBrowser()
+        if (webView.canGoBack()) {
+            // 跨域 iframe 播放器（如电影港）不随后退导航停止，先主动停掉，否则返回后声音会残留。
+            // 不调 webView.onPause()：返回落在上一页后仍需正常浏览，只执行 JS 暂停即可。
+            webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
+            webView.goBack()
+        } else vm.closeHiddenBrowser()
     }
     // 系统返回键：全屏播放时先退出全屏；否则与标题栏返回一致，先网页回退，退无可退再返回原入口。
     BackHandler { if (fullscreenHost.isActive) fullscreenHost.hide(callPage = true) else goBackOrExit() }
