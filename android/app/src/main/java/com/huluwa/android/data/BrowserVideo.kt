@@ -51,29 +51,59 @@ object MovieWebVideo {
         })();
     """.trimIndent()
 
-    val pauseScript = """
-        (function pausePage(win, depth) {
-          try {
-            win.document.querySelectorAll('video').forEach(function(video) { video.pause(); });
-            if (depth < 3) Array.from(win.frames).forEach(function(frame) { pausePage(frame, depth + 1); });
-          } catch (ignored) {}
-        })(window, 0);
-        document.querySelectorAll('.playering .video iframe').forEach(function(frame) {
-          try { void frame.contentWindow.document; }
-          catch (ignored) {
-            if (!frame.dataset.huluwaResumeSrc && frame.src !== 'about:blank') {
-              frame.dataset.huluwaResumeSrc = frame.src;
-              frame.src = 'about:blank';
-            }
-          }
-        });
+    val pauseScript = pausePageScript(release = false)
+    val stopScript = pausePageScript(release = true)
+
+    // 回退可能只切换网页路由，不会销毁文档；离开前主动释放媒体源。
+    // 跨域 frame 无法访问媒体元素，用 replace 卸载，避免额外增加回退记录。
+    private fun pausePageScript(release: Boolean) = """
+        (function pausePage(win) {
+          var doc;
+          try { doc = win.document; } catch (ignored) { return false; }
+          if (!doc) return false;
+          doc.querySelectorAll('video,audio').forEach(function(media) {
+            try {
+              media.pause();
+              if ($release) {
+                media.removeAttribute('autoplay');
+                if (media.srcObject) {
+                  if (media.srcObject.getTracks) media.srcObject.getTracks().forEach(function(track) { track.stop(); });
+                  media.srcObject = null;
+                }
+                media.removeAttribute('src');
+                media.querySelectorAll('source').forEach(function(source) { source.removeAttribute('src'); });
+                media.load();
+              }
+            } catch (ignored) {}
+          });
+          doc.querySelectorAll('iframe,frame').forEach(function(frame) {
+            if ($release) frame.removeAttribute('data-huluwa-resume-src');
+            if (pausePage(frame.contentWindow)) return;
+            try {
+              if (!$release && !frame.hasAttribute('data-huluwa-resume-src') && frame.src) {
+                frame.setAttribute('data-huluwa-resume-src', frame.src);
+              }
+              frame.contentWindow.location.replace('about:blank');
+            } catch (ignored) {}
+          });
+          return true;
+        })(window);
     """.trimIndent()
 
     val resumeScript = """
-        document.querySelectorAll('iframe[data-huluwa-resume-src]').forEach(function(frame) {
-          var source = frame.dataset.huluwaResumeSrc;
-          delete frame.dataset.huluwaResumeSrc;
-          frame.src = source;
-        });
+        (function resumePage(win) {
+          var doc;
+          try { doc = win.document; } catch (ignored) { return; }
+          if (!doc) return;
+          doc.querySelectorAll('iframe,frame').forEach(function(frame) {
+            var source = frame.getAttribute('data-huluwa-resume-src');
+            if (source !== null) {
+              try {
+                frame.contentWindow.location.replace(source);
+                frame.removeAttribute('data-huluwa-resume-src');
+              } catch (ignored) {}
+            } else resumePage(frame.contentWindow);
+          });
+        })(window);
     """.trimIndent()
 }

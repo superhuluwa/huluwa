@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
+import android.view.MotionEvent
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -99,6 +100,8 @@ import java.util.concurrent.atomic.AtomicReference
     var editing by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
     var failure by remember { mutableStateOf<String?>(null) }
+    var backPending by remember(initialUrl) { mutableStateOf(false) }
+    var restoreFramesOnTouch by remember(initialUrl) { mutableStateOf(false) }
     val castVm: VideoCastViewModel = viewModel()
     val cast by castVm.state.collectAsStateWithLifecycle()
     var detectedVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
@@ -168,6 +171,15 @@ import java.util.concurrent.atomic.AtomicReference
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            // 返回退出全屏后，跨域播放器等用户再次操作网页时才恢复加载。
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN && restoreFramesOnTouch &&
+                    !backPending && !nativeActive && !castActive) {
+                    restoreFramesOnTouch = false
+                    evaluateJavascript(MovieWebVideo.resumeScript, null)
+                }
+                false
+            }
             webViewClient = object : WebViewClient() {
                 /** 只允许在浏览器内打开网页，禁止网页通过自定义 scheme 唤起外部应用。 */
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
@@ -177,6 +189,7 @@ import java.util.concurrent.atomic.AtomicReference
                     progress = 1
                     pageTitle = ""
                     pageSequence.incrementAndGet()
+                    backPending = false
                     resolutionJob?.cancel()
                     resolving = false
                     detectedVideo = null
@@ -238,17 +251,45 @@ import java.util.concurrent.atomic.AtomicReference
             if (loadedUrl.isNotBlank()) loadUrl(loadedUrl)
         }
     }
-    /** 返回统一走网页历史；没有可回退的网页时返回原入口。 */
+    /** 回退前先停止旧页面媒体，兼容不会卸载文档的网页路由。 */
     fun goBackOrExit() {
-        if (webView.canGoBack()) {
-            // 跨域 iframe 播放器（如电影港）不随后退导航停止，先主动停掉，否则返回后声音会残留。
-            // 不调 webView.onPause()：返回落在上一页后仍需正常浏览，只执行 JS 暂停即可。
-            webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
-            webView.goBack()
-        } else vm.closeHiddenBrowser()
+        if (backPending) return
+        restoreFramesOnTouch = false
+        if (!webView.canGoBack()) {
+            webView.onPause()
+            vm.closeHiddenBrowser()
+            return
+        }
+        backPending = true
+        val sequence = pageSequence.incrementAndGet()
+        resolutionJob?.cancel()
+        resolving = false
+        detectedVideo = null
+        webView.stopLoading()
+        webView.evaluateJavascript(MovieWebVideo.stopScript) {
+            // 清理期间可能已跳转或关闭，不能再操作旧页面或已销毁的 WebView。
+            if (sequence == pageSequence.get()) {
+                backPending = false
+                if (webView.canGoBack()) webView.goBack() else vm.closeHiddenBrowser()
+            }
+        }
     }
-    // 系统返回键：全屏播放时先退出全屏；否则与标题栏返回一致，先网页回退，退无可退再返回原入口。
-    BackHandler { if (fullscreenHost.isActive) fullscreenHost.hide(callPage = true) else goBackOrExit() }
+    // 系统返回退出全屏时也先暂停；网页自己的全屏切换仍由播放器处理。
+    BackHandler {
+        if (!backPending) {
+            if (fullscreenHost.isActive) {
+                backPending = true
+                val sequence = pageSequence.get()
+                webView.evaluateJavascript(MovieWebVideo.pauseScript) {
+                    if (sequence == pageSequence.get()) {
+                        backPending = false
+                        restoreFramesOnTouch = true
+                        fullscreenHost.hide(callPage = true)
+                    }
+                }
+            } else goBackOrExit()
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current
     DisposableEffect(lifecycle, webView) {
         val observer = LifecycleEventObserver { _, event -> when (event) {
@@ -265,6 +306,7 @@ import java.util.concurrent.atomic.AtomicReference
             // 全屏中直接退出浏览页时也要先收起全屏视图，否则窗口会停留在横屏。
             fullscreenHost.hide(callPage = false)
             clearPrivateData()
+            webView.onPause()
             webView.stopLoading()
             webView.loadUrl("about:blank")
             webView.clearHistory()
