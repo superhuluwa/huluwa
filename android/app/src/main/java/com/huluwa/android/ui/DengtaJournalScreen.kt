@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -149,14 +150,22 @@ import java.time.format.DateTimeFormatter
     val valid = number != null && number > 0 && (media.episodeCount == null || number <= media.episodeCount)
     AlertDialog(onDismissRequest = { if (!ui.journalBusy) onDismiss() }, title = { Text("记录这一次追剧") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(media.name, color = HuluwaColors.Muted)
-                OutlinedTextField(episode, { episode = it.filter(Char::isDigit).take(9) }, label = { Text("看到第几集") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), isError = episode.isNotBlank() && !valid,
-                    supportingText = { Text(media.episodeCount?.let { "共${it}集，请填写实际观看进度" } ?: "请填写正整数集数") })
-                OutlinedTextField(note, { note = it.take(160) }, label = { Text("观剧感受（选填）") }, minLines = 3,
-                    supportingText = { Text("${note.length}/160") })
-                ui.journalError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .6f)) {
+                HuluwaDialogList(contentPadding = PaddingValues(0.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    item(key = "media") { Text(media.name, color = HuluwaColors.Muted) }
+                    item(key = "episode") {
+                        OutlinedTextField(episode, { episode = it.filter(Char::isDigit).take(9) }, label = { Text("看到第几集") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), isError = episode.isNotBlank() && !valid,
+                            supportingText = { Text(media.episodeCount?.let { "共${it}集，请填写实际观看进度" } ?: "请填写正整数集数") })
+                    }
+                    item(key = "note") {
+                        OutlinedTextField(note, { note = it.take(160) }, label = { Text("观剧感受（选填）") }, minLines = 3,
+                            supportingText = { Text("${note.length}/160") })
+                    }
+                    ui.journalError?.let { error ->
+                        item(key = "error") { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
             }
         }, confirmButton = {
             TextButton({ number?.let { vm.record(it, note, onDismiss) } }, enabled = valid && !ui.journalBusy && !ui.journalLoading) {

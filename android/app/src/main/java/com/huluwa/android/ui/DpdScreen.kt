@@ -8,10 +8,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
@@ -140,6 +141,7 @@ import kotlinx.serialization.json.JsonObject
     // 选中线路后按需解析；解析过的线路由 ViewModel 缓存，不会重复请求
     LaunchedEffect(current) { if (current.isNotBlank()) vm.loadDpdLine(card, current) }
     val lineState = sheet.lines[current]
+    val episodes = remember(lineState?.data) { lineState?.data?.let { DpdEpisode.rows(it) }.orEmpty() }
 
     Dialog(onDismissRequest = vm::dismissDpdSources, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp).heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .88f),
@@ -163,30 +165,34 @@ import kotlinx.serialization.json.JsonObject
                     IconButton(vm::dismissDpdSources) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
-                Box(Modifier.weight(1f, fill = false)) {
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        actionError?.takeUnless { it.isServerUnreachable() }?.let {
-                            Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+                HuluwaDialogList(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+                    item(key = "status") {
+                        Column {
+                            actionError?.takeUnless { it.isServerUnreachable() }?.let {
+                                Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Feedback(detail.error, { vm.reloadDpdSources(card) })
+                            if (!detail.loaded) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
                         }
-                        Feedback(detail.error, { vm.reloadDpdSources(card) })
-                        if (!detail.loaded) {
-                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
-                            return@Column
-                        }
-                        if (detail.error != null && detail.data.isEmpty()) return@Column
-                        if (lines.isEmpty()) {
+                    }
+                    if (detail.loaded && !(detail.error != null && detail.data.isEmpty())) {
+                        if (lines.isEmpty()) item(key = "empty") {
                             val emptyMessage = if (detail.data.number("updatedEpisodeCount")?.toInt() == 0)
                                 "该作品暂无已更新的剧集" else "该作品暂无可播放的线路"
                             Text(emptyMessage, Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                 style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                            return@Column
+                        } else {
+                            item(key = "lines") {
+                                Column {
+                                    DpdLineTabs(lines, selected, { selected = it })
+                                    val total = lines.firstOrNull { it.name == current }?.total ?: 0
+                                    Text("已更新 $total 集", Modifier.padding(bottom = 10.dp),
+                                        style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                                }
+                            }
+                            // 懂片帝不是订阅来源，没有订阅季号，固定按第 1 季归档。
+                            dpdEpisodeItems(card, current, lineState, episodes, null, sheet.downloads, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                         }
-                        DpdLineTabs(lines, selected, { selected = it })
-                        val total = lines.firstOrNull { it.name == current }?.total ?: 0
-                        Text("已更新 $total 集", Modifier.padding(bottom = 10.dp),
-                            style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-                        // 懂片帝不是订阅来源，没有订阅季号，固定按第 1 季归档
-                        DpdEpisodeList(card, current, lineState, null, sheet.downloads, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                     }
                 }
                 // Dialog 属于独立窗口，主页面的提示会被遮住；在当前弹框内承载同一条提示。
@@ -233,11 +239,12 @@ import kotlinx.serialization.json.JsonObject
                     IconButton(onDismiss) { Icon(Icons.Outlined.Close, "关闭", Modifier.size(20.dp), tint = HuluwaColors.Muted) }
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
-                Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    SelectionContainer {
-                        Text(text, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                            color = HuluwaColors.Ink)
+                HuluwaDialogList(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+                    item(key = "log") {
+                        SelectionContainer {
+                            Text(text, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = HuluwaColors.Ink)
+                        }
                     }
                 }
             }
@@ -266,31 +273,32 @@ import kotlinx.serialization.json.JsonObject
 }
 
 /** 某条线路的分集列表：加载中 / 失败 / 空 / 各集 */
-@Composable private fun DpdEpisodeList(card: DpdCard, lineName: String, state: LoadState<JsonObject>?, defaultSeason: Int?,
+private fun LazyListScope.dpdEpisodeItems(card: DpdCard, lineName: String, state: LoadState<JsonObject>?,
+                                       episodes: List<DpdEpisode>, defaultSeason: Int?,
                                        downloads: Map<DpdDownloadKey, DpdDownloadState>, busy: Boolean,
                                        vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
     when {
-        state == null || state.loading -> Row(Modifier.fillMaxWidth().padding(vertical = 26.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CircularProgressIndicator(Modifier.size(16.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
-            Text("正在加载「$lineName」的剧集列表…", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-        }
-        state.error != null -> Feedback(state.error, { vm.loadDpdLine(card, lineName) })
-        else -> {
-            val episodes = remember(state.data) { DpdEpisode.rows(state.data) }
-            if (episodes.isEmpty()) {
-                Text("该线路没有可播放的地址，换一条试试", Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                return
+        state == null || state.loading -> item(key = "episode-loading") {
+            Row(Modifier.fillMaxWidth().padding(vertical = 26.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(16.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
+                Text("正在加载「$lineName」的剧集列表…", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
             }
-            // 新集在前，与电影天堂弹层的排序一致；识别不出集号的条目按原顺序排在最后
-            episodes.withIndex()
+        }
+        state.error != null -> item(key = "episode-error") { Feedback(state.error, { vm.loadDpdLine(card, lineName) }) }
+        episodes.isEmpty() -> item(key = "episode-empty") {
+            Text("该线路没有可播放的地址，换一条试试", Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+        }
+        else -> {
+            // 新集在前；保留原始序号，无法识别集号时仍沿用原来的下载编号。
+            val sorted = episodes.withIndex()
                 .sortedWith(compareByDescending<IndexedValue<DpdEpisode>> { episodeNumber(it.value.title) ?: -1 }.thenBy { it.index })
-                .forEach { (index, episode) ->
-                    val episodeNo = episodeNumber(episode.title) ?: (index + 1)
-                    val download = downloads[DpdDownloadKey(defaultSeason ?: 1, episodeNo)]
-                    DpdEpisodeRow(card, lineName, episode, defaultSeason, download, busy, vm, onPlay, onCopy, episodeNo)
-                }
+            items(sorted, key = { "episode:$lineName:${it.index}" }) { (index, episode) ->
+                val episodeNo = episodeNumber(episode.title) ?: (index + 1)
+                val download = downloads[DpdDownloadKey(defaultSeason ?: 1, episodeNo)]
+                DpdEpisodeRow(card, lineName, episode, defaultSeason, download, busy, vm, onPlay, onCopy, episodeNo)
+            }
         }
     }
 }

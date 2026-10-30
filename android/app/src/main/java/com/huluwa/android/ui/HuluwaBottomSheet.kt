@@ -2,7 +2,6 @@
 package com.huluwa.android.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
@@ -48,8 +47,7 @@ import androidx.compose.ui.unit.dp
 
 /** 正文只占标题之外的剩余高度，不让表单滚动参与弹层外框的尺寸计算。 */
 @Composable internal fun ColumnScope.HuluwaSheetForm(content: @Composable ColumnScope.() -> Unit) {
-    LazyColumn(
-        Modifier.fillMaxWidth().weight(1f, fill = false),
+    HuluwaDialogList(
         contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 13.dp, bottom = 22.dp),
     ) {
         item {
