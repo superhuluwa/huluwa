@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatListBulleted
@@ -59,7 +61,7 @@ import com.huluwa.android.data.*
     }
 }
 
-/** 分辨率优先；同一季和集数下的不同版本放在一起，磁力只在点击复制时读取。 */
+/** 分辨率优先；最新单集在前，分包和全集靠后；复制与下载共用按需获取的磁力。 */
 @Composable fun BtbtlaResources(sheet: AppSheet.Btbtla, ui: AppState, vm: HuluwaViewModel) {
     val context = LocalContext.current
     val groups = remember(sheet.detail.data) { BtbtlaQuality.rows(sheet.detail.data) }
@@ -113,26 +115,38 @@ import com.huluwa.android.data.*
                                     modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                             }
                             items(resources, key = { it.id }) { resource ->
-                                val busy = ui.busy == "btbtla-magnet:${resource.id}"
-                                Surface(shape = RoundedCornerShape(12.dp), color = HuluwaColors.Paper,
+                                val copying = ui.busy == "btbtla-magnet:${resource.id}"
+                                val downloading = ui.busy == "btbtla-download:${resource.id}"
+                                val downloaded = resource.id in sheet.downloaded
+                                Surface(shape = RoundedCornerShape(12.dp), color = if (downloaded) HuluwaColors.SoftGreen else HuluwaColors.Paper,
                                     border = BorderStroke(1.dp, HuluwaColors.Line)) {
                                     Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text((resource.tags + resource.size).filter(String::isNotBlank).joinToString(" · ").ifBlank { "普通版" },
+                                            style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine)
+                                        SelectionContainer { Text(resource.title, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted) }
                                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text((resource.tags + resource.size).filter(String::isNotBlank).joinToString(" · ").ifBlank { "普通版" },
-                                                Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Pine)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
                                             TextButton({
                                                 vm.copyBtbtlaMagnet(sheet.card, resource) { magnet ->
                                                     context.getSystemService(ClipboardManager::class.java)
                                                         ?.setPrimaryClip(ClipData.newPlainText("磁力链接", magnet))
                                                 }
-                                            }, enabled = ui.busy == null, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                                                if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                            }, enabled = ui.busy == null, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                                if (copying) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                                                 else Icon(Icons.Outlined.ContentCopy, null, Modifier.size(14.dp))
-                                                Spacer(Modifier.width(4.dp)); Text(if (busy) "获取中" else "复制磁力", style = MaterialTheme.typography.labelMedium)
+                                                Spacer(Modifier.width(4.dp)); Text(if (copying) "获取中" else "复制磁力", style = MaterialTheme.typography.labelMedium)
+                                            }
+                                            TextButton({ vm.downloadBtbtlaMagnet(sheet.card, resource, selected.resolution) },
+                                                enabled = ui.busy == null && !downloaded, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                                when {
+                                                    downloading -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                                    downloaded -> Icon(Icons.Outlined.Check, null, Modifier.size(14.dp))
+                                                    else -> Icon(Icons.Outlined.Download, null, Modifier.size(14.dp))
+                                                }
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(when { downloading -> "提交中"; downloaded -> "已提交"; else -> "下载" }, style = MaterialTheme.typography.labelMedium)
                                             }
                                         }
-                                        SelectionContainer { Text(resource.title, style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted) }
                                         sheet.magnets[resource.id]?.let { magnet ->
                                             SelectionContainer { Text(magnet, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Pine) }
                                         }
@@ -144,7 +158,10 @@ import com.huluwa.android.data.*
                 }
                 HorizontalDivider(color = HuluwaColors.Line)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("最高清晰度优先 · 同集版本集中展示", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                    Column(Modifier.weight(1f)) {
+                        Text("最新单集优先 · 全集合集靠后", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                        Text("下载任务可在「下载」查看", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
                     TextButton(vm::dismissSheet) { Text("关闭") }
                 }
             }

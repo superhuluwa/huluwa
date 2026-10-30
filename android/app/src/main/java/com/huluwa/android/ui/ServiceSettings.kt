@@ -20,6 +20,7 @@ fun settingsTitle(kind: String) = when (kind) {
     "xunlei" -> "迅雷【飞牛】连接设置"
     "xunlei-win" -> "迅雷【Win】连接设置"
     "movie" -> "$MOVIE_SESSION_TITLE 下载设置"
+    "btbtla" -> "BT影视 下载设置"
     else -> "离线下载设置"
 }
 private data class SettingField(val key: String, val label: String, val secret: Boolean = false)
@@ -30,13 +31,13 @@ private data class SettingField(val key: String, val label: String, val secret: 
     val settings = (raw["settings"] as? JsonObject) ?: raw
     var error by remember(sheet.kind, settings) { mutableStateOf<String?>(null) }
     when (sheet.kind) {
-        "movie" -> {
+        "movie", "btbtla" -> {
             val tools = listOf("qb", "xunlei", "xunlei-win")
             var tool by remember(settings) { mutableStateOf(settings.text("downloader", fallback = "qb")) }
             Text("默认下载器", style = MaterialTheme.typography.titleMedium)
             FilterRow(listOf("qBittorrent", "迅雷【飞牛】", "迅雷【Win】"), tools.indexOf(tool), { tool = tools[it] })
             LabelValue("服务器下载根目录", settings.text("saveRoot"))
-            Text("此设置用于新建电影港订阅和手动磁力下载，已有订阅保留各自的下载器。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
+            Text("电影港与BT影视共用此默认下载器；新建电影港订阅也使用此设置，已有订阅保留各自的下载器。", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
             Button({ vm.saveSettings(sheet.kind, jsonBody { put("downloader", tool) }) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !busy) { Text("保存设置") }
         }
         "dytt", "movie-hls" -> HlsSettings(settings, busy, vm)

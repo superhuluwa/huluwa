@@ -71,7 +71,7 @@ import kotlinx.coroutines.flow.first
                     Box {
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "会话操作") }
                         DropdownMenu(menu, { menu = false }) {
-                            if (session.kind !in listOf("system", "btbtla")) DropdownMenuItem(text = { Text("服务设置") }, onClick = { menu = false; vm.showSettings(session.kind) })
+                            if (session.kind != "system") DropdownMenuItem(text = { Text("服务设置") }, onClick = { menu = false; vm.showSettings(session.kind) })
                             if (session.kind != "system") DropdownMenuItem(text = { Text("清空会话") }, onClick = { menu = false; vm.clearChat() })
                         }
                     }

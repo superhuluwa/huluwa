@@ -23,7 +23,7 @@ sealed interface AppSheet {
     data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
         val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
     data class Btbtla(val card: BtbtlaCard, val detail: LoadState<JsonObject>,
-        val magnets: Map<String, String> = emptyMap()) : AppSheet
+        val magnets: Map<String, String> = emptyMap(), val downloaded: Set<String> = emptySet()) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
     /** 懂片帝资源弹框：独立于 Films（电影港 / 电影天堂），各线路按需解析 */
     data class Dpd(
@@ -1219,6 +1219,30 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 onResolved(magnet)
                 notify("磁力链接已复制")
             }
+        }
+    }
+
+    fun downloadBtbtlaMagnet(card: BtbtlaCard, item: BtbtlaResource, resolution: Int) {
+        val sheet = mutable.value.sheet as? AppSheet.Btbtla ?: return
+        if (sheet.card.id != card.id || item.id in sheet.downloaded) return
+        val current = sheetGeneration
+        var submittedMessage = ""
+        perform("btbtla-download:${item.id}", "", close = false, after = {
+            refreshDownloads()
+            if (submittedMessage.isNotBlank()) notify(submittedMessage)
+        }) {
+            val magnet = sheet.magnets[item.id] ?: repository.btbtlaMagnet(item.id)
+            if (current == sheetGeneration) mutable.update { old ->
+                val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                old.copy(sheet = active.copy(magnets = active.magnets + (item.id to magnet)))
+            }
+            val result = repository.enqueueBtbtlaMagnet(card, item, magnet, resolution)
+            // 只有后端确认提交成功或已存在才标记；失败留在弹框内，按钮恢复后可重试。
+            if (current == sheetGeneration) mutable.update { old ->
+                val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                old.copy(sheet = active.copy(downloaded = active.downloaded + item.id))
+            }
+            submittedMessage = result.text("message").ifBlank { "下载任务已提交" }
         }
     }
 

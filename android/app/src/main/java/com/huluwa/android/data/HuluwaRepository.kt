@@ -168,6 +168,14 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             require(it.startsWith("magnet:?xt=urn:btih:")) { "该资源没有返回有效磁力链接" }
         }
 
+    /** 复用电影港的手动磁力下载接口、默认下载器、保存目录、任务记录及通知。 */
+    suspend fun enqueueBtbtlaMagnet(card: BtbtlaCard, item: BtbtlaResource, magnet: String, resolution: Int): JsonObject =
+        api.post("chat", "subscriptions", "magnets", "download", body = jsonBody {
+            put("url", card.pageUrl); put("title", card.title); put("magnet", magnet)
+            put("quality", if (resolution > 0) "${resolution}P" else "OTHER")
+            put("episode", item.episodeKey)
+        }).requireSuccess().asObject()
+
     // ------------------------------------------------------------------ 懂片帝
     // 独立接口：不复用 hls/detail 或 hls/downloads，与电影港、电影天堂完全隔开。
 
@@ -318,7 +326,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         "video" -> api.get("video", "settings").asObject()
         "xunlei" -> api.get("xunlei", "settings").asObject()
         "xunlei-win" -> api.get("xunlei-win", "settings").asObject()
-        "movie" -> api.get("chat", "subscriptions", "settings").asObject()
+        "movie", "btbtla" -> api.get("chat", "subscriptions", "settings").asObject()
         else -> api.get("hls", "settings").asObject()
     }
     suspend fun saveSettings(kind: String, body: JsonObject) {
@@ -327,7 +335,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             "video" -> api.post("video", "settings", body = body)
             "xunlei" -> api.post("xunlei", "settings", body = body)
             "xunlei-win" -> api.post("xunlei-win", "settings", body = body)
-            "movie" -> api.post("chat", "subscriptions", "settings", body = body)
+            "movie", "btbtla" -> api.post("chat", "subscriptions", "settings", body = body)
             else -> api.post("hls", "settings", body = body)
         }.requireSuccess()
     }

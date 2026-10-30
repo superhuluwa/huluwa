@@ -34,6 +34,7 @@ public class BtbtlaSearchService {
     private static final Pattern EN_EPISODE = Pattern.compile("(?i)\\bS(\\d{1,2})E(\\d{1,4})(?:\\s*[-~～－—–至到]\\s*(?:S\\d{1,2})?E?(\\d{1,4}))?(?!\\d)");
     private static final Pattern EP_EPISODE = Pattern.compile("(?i)\\bEP?(\\d{1,4})(?:\\s*[-~～－—–至到]\\s*E?P?(\\d{1,4}))?\\b");
     private static final Pattern MAGNET = Pattern.compile("(?i)magnet:\\?xt=urn:btih:([a-f0-9]{40}|[a-z2-7]{32})(?![a-z0-9])(?:&[^\\s\"'<>]*)?");
+    private static final Pattern COLLECTION = Pattern.compile("(?i)全集|合集|打包|整季|全\\s*[0-9一二三四五六七八九十百]+\\s*集|\\b(?:complete[ ._-]*(?:series|season)|full[ ._-]*season|season[ ._-]*pack)\\b");
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER).build();
     // 下载 ID 对应固定种子；只缓存成功结果，避免每次复制重复请求。目录刷新始终重新抓取。
@@ -42,7 +43,7 @@ public class BtbtlaSearchService {
     public record SearchItem(String id, String title, String cover, String year, String genre, String origin,
                              String pageUrl) { }
     public record Resource(String id, String title, String size, String pageUrl, int resolution, String quality,
-                           int season, int episodeStart, int episodeEnd, String episodeLabel, List<String> tags) { }
+                           int season, int episodeStart, int episodeEnd, String episodeLabel, List<String> tags, boolean collection) { }
     public record QualityGroup(String quality, int resolution, List<Resource> items) { }
     public record Detail(String id, String title, String pageUrl, String cover, int totalEpisodes,
                          int resourceCount, List<QualityGroup> groups) { }
@@ -114,16 +115,22 @@ public class BtbtlaSearchService {
             if (name.isBlank()) continue;
             int resolution = resolution(name);
             int[] episode = episode(name);
-            String label = episode[1] == 0 ? (name.contains("全集") ? "全集 / 合集" : "未标集数")
+            boolean collection = COLLECTION.matcher(name).find()
+                    || (total > 1 && episode[1] == 1 && episode[2] >= total)
+                    || (episode[1] != episode[2] || episode[1] == 0)
+                        && Pattern.compile("(?i)\\bCOMPLETE\\b").matcher(name).find();
+            String label = episode[1] == 0 ? "未标集数"
                     : "第 " + episode[1] + (episode[2] > episode[1] ? "–" + episode[2] : "") + " 集";
+            if (collection) label = "全集 / 合集" + (episode[1] > 0 ? " · " + label : "");
             unique.putIfAbsent(download.group(1), new Resource(download.group(1), name, size,
-                    BASE_URL + download.group(), resolution, quality(resolution), episode[0], episode[1], episode[2], label, tags(name)));
+                    BASE_URL + download.group(), resolution, quality(resolution), episode[0], episode[1], episode[2], label, tags(name), collection));
         }
         if (unique.isEmpty() && !page.contains("资源下载")) throw new BusinessException(502, "BT影视资源列表暂时无法识别，请稍后重试");
         List<Resource> sorted = unique.values().stream().sorted(Comparator.comparingInt(Resource::resolution).reversed()
-                .thenComparingInt(Resource::season)
-                .thenComparingInt(item -> item.episodeStart() == 0 ? Integer.MAX_VALUE : item.episodeStart())
-                .thenComparingInt(Resource::episodeEnd)
+                .thenComparingInt(BtbtlaSearchService::resourceOrder)
+                .thenComparing(Comparator.comparingInt(Resource::season).reversed())
+                .thenComparing(Comparator.comparingInt(Resource::episodeEnd).reversed())
+                .thenComparing(Comparator.comparingInt(Resource::episodeStart).reversed())
                 .thenComparing(Comparator.comparingInt(BtbtlaSearchService::versionScore).reversed())
                 .thenComparing(Resource::id)).toList();
         Map<Integer, List<Resource>> byQuality = new LinkedHashMap<>();
@@ -225,6 +232,12 @@ public class BtbtlaSearchService {
         if (Pattern.compile("(?i)60帧|60fps").matcher(title).find()) tags.add("60帧");
         if (Pattern.compile("(?i)\\bNF\\b").matcher(title).find()) tags.add("Netflix");
         return List.copyOf(tags);
+    }
+    /** 单集优先于分包，全集 / 合集与未知集数排后；同类资源按季集倒序。 */
+    private static int resourceOrder(Resource resource) {
+        if (resource.collection()) return 2;
+        if (resource.episodeStart() <= 0) return 3;
+        return resource.episodeStart() == resource.episodeEnd() ? 0 : 1;
     }
     private static int versionScore(Resource resource) {
         return (resource.tags().contains("杜比视界") ? 8 : resource.tags().contains("HDR") ? 4 : 0)
