@@ -119,6 +119,7 @@ public class ChatService {
 
     public ChatService(JdbcTemplate jdbcTemplate, DyttSearchService dyttSearchService,
                        DongPianSearchService dongPianSearchService,
+                       BtbtlaSearchService btbtlaSearchService,
                        MovieCatalogService movieCatalogService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
