@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -23,7 +22,6 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -33,25 +31,15 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun SkinPickerSheet(onDismiss: () -> Unit, onSkinSelected: (AppSkin) -> Unit) {
     val selected = HuluwaColors.skin
-    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * .78f
     val largeFont = LocalDensity.current.fontScale >= 1.3f
-    HuluwaBottomSheet(onDismissRequest = onDismiss) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+    HuluwaBottomSheet(title = "选择你的配色", onDismissRequest = onDismiss, subtitle = "当前使用 · ${selected.title}") {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f, fill = false)) {
             val columns = if (maxWidth < 360.dp || largeFont) 1 else 2
             LazyColumn(
-                Modifier.fillMaxWidth().heightIn(max = maxHeight).selectableGroup(),
+                Modifier.fillMaxWidth().selectableGroup(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("选择你的配色", color = HuluwaColors.Ink, style = MaterialTheme.typography.titleLarge)
-                            Text("当前使用 · ${selected.title}", color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall)
-                        }
-                        IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "关闭皮肤选择") }
-                    }
-                }
                 item {
                     SkinOption(AppSkin.Pine, selected == AppSkin.Pine, { onSkinSelected(AppSkin.Pine) }, compact = true)
                 }
