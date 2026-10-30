@@ -102,6 +102,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     "movie", "movie-hls" -> R.drawable.session_icon_movie
     "dytt" -> R.drawable.session_icon_dytt
     "dpd" -> R.drawable.session_icon_dpd
+    "btbtla" -> R.drawable.session_icon_btbtla
     "magnet" -> R.drawable.session_icon_magnet
     "video" -> R.drawable.session_icon_video
     "xunlei", "xunlei-win" -> R.drawable.session_icon_xunlei
