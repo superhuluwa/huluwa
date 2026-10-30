@@ -54,6 +54,8 @@ public class ChatService {
     public static final String DYTT_SESSION = "dytt";
     /** 懂片帝会话键（schema 内置） */
     public static final String DPD_SESSION = "dpd";
+    /** BT影视磁力搜索会话键。 */
+    public static final String BTBTLA_SESSION = "btbtla";
     /** 磁力下载会话键（schema 内置） */
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
@@ -103,6 +105,7 @@ public class ChatService {
     private final JdbcTemplate jdbcTemplate;
     private final DyttSearchService dyttSearchService;
     private final DongPianSearchService dongPianSearchService;
+    private final BtbtlaSearchService btbtlaSearchService;
     private final MovieCatalogService movieCatalogService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
@@ -126,6 +129,7 @@ public class ChatService {
         this.jdbcTemplate = jdbcTemplate;
         this.dyttSearchService = dyttSearchService;
         this.dongPianSearchService = dongPianSearchService;
+        this.btbtlaSearchService = btbtlaSearchService;
         this.movieCatalogService = movieCatalogService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
@@ -397,6 +401,8 @@ public class ChatService {
             } else if ("dpd".equals(kind)) {
                 // 懂片帝搜索：与电影天堂同一套指令前缀归一化规则
                 replies.addAll(runDpdSearch(sessionId, normalizeDpdKeyword(text)));
+            } else if ("btbtla".equals(kind)) {
+                replies.addAll(runBtbtlaSearch(sessionId, text));
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runMagnetTask(sessionId, text));
@@ -554,6 +560,29 @@ public class ChatService {
             } else {
                 replies.add(append(sessionId, "bot", "image", item.cover(), caption, payload));
             }
+        }
+        return replies;
+    }
+
+    /** BT影视只在聊天里抓搜索目录，点开作品后再读取全部版本，磁力按条获取。 */
+    private List<ChatMessage> runBtbtlaSearch(String sessionId, String text) {
+        String keyword = text.replaceFirst("(?i)^(?:BT影视搜索|BT影视|btbtla搜索|btbtla)\\s+", "").trim();
+        List<BtbtlaSearchService.SearchItem> found = btbtlaSearchService.search(keyword);
+        List<ChatMessage> replies = new ArrayList<>();
+        if (found.isEmpty()) {
+            replies.add(append(sessionId, "bot", "text", "未搜索到「" + keyword + "」相关资源，换个片名试试。", null, null));
+            return replies;
+        }
+        int shown = Math.min(found.size(), BtbtlaSearchService.DEFAULT_MAX);
+        replies.add(append(sessionId, "bot", "text", "关键字「" + keyword + "」找到 " + found.size()
+                + " 部作品，展示前 " + shown + " 部。点「资源列表」按清晰度、集数查看磁力，最高清晰度优先。", null, null));
+        for (var item : found.subList(0, shown)) {
+            String caption = item.title() + "（" + String.join(" / ", List.of(item.year(), item.genre(), item.origin())
+                    .stream().filter(value -> !value.isBlank()).toList()) + "）\n详情：" + item.pageUrl();
+            String payload = toJson(btbtlaSearchService.payload(item));
+            replies.add(item.cover().isBlank()
+                    ? append(sessionId, "bot", "text", caption, null, payload)
+                    : append(sessionId, "bot", "image", item.cover(), caption, payload));
         }
         return replies;
     }

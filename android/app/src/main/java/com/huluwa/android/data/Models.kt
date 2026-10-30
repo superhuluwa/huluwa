@@ -99,6 +99,7 @@ data class ChatMessage(
     val film: FilmCard? get() = payload.takeIf { it.text("title").isNotBlank() && it.containsKey("cover") && it.containsKey("url") && it.text("kind") != "video" }?.let(FilmCard::from)
     /** 懂片帝作品卡（kind=dpd-title）：与 [film] 互斥，渲染走独立分支 */
     val dpd: DpdCard? get() = DpdCard.from(payload)
+    val btbtla: BtbtlaCard? get() = BtbtlaCard.from(payload)
     companion object {
         fun from(raw: JsonObject): ChatMessage {
             val payload = when (val value = raw["payload"]) {

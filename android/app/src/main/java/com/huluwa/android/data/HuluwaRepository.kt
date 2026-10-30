@@ -160,6 +160,14 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             "type" to if (online) "online" else "magnet", "url" to url, "title" to card.title, "year" to card.year,
         )).asObject()
     }
+    suspend fun btbtlaDetail(id: String): JsonObject =
+        api.get("btbtla", "detail", query = mapOf("id" to id)).asObject()
+
+    suspend fun btbtlaMagnet(id: String): String =
+        api.get("btbtla", "magnet", query = mapOf("id" to id)).asObject().text("magnet").also {
+            require(it.startsWith("magnet:?xt=urn:btih:")) { "该资源没有返回有效磁力链接" }
+        }
+
     // ------------------------------------------------------------------ 懂片帝
     // 独立接口：不复用 hls/detail 或 hls/downloads，与电影港、电影天堂完全隔开。
 

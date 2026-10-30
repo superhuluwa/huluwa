@@ -36,6 +36,10 @@ import com.huluwa.android.data.text
         media?.let { url -> MediaViewer(url, true) { media = null } }
         return
     }
+    if (sheet is AppSheet.Btbtla) {
+        BtbtlaResources(sheet, ui, vm)
+        return
+    }
     val title = when (sheet) {
         AppSheet.Account -> "连接配置"
         AppSheet.NewDownload -> "新建下载"

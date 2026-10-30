@@ -85,7 +85,7 @@ VALUES (1, datetime('now', 'localtime'));
 CREATE TABLE IF NOT EXISTS chat_session (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
-    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | movie-hls | dytt | dpd | magnet | video | xunlei | xunlei-win | system
+    kind        TEXT NOT NULL DEFAULT 'chat',  -- chat | movie | movie-hls | dytt | dpd | btbtla | magnet | video | xunlei | xunlei-win | system
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -139,6 +139,10 @@ VALUES ('dytt', '电影天堂', 'dytt', datetime('now', 'localtime'), datetime('
 -- 内置会话：懂片帝搜索（逆向站点私有 JSON 接口；在线 m3u8 资源，不参与磁力订阅链路，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('dpd', '懂片帝', 'dpd', datetime('now', 'localtime'), datetime('now', 'localtime'));
+
+-- 内置会话：BT影视磁力搜索，清晰度降序、集数分组，重复启动保持原有会话消息。
+INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
+VALUES ('btbtla', 'BT影视', 'btbtla', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
 -- 内置会话：qBittorrent 下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)

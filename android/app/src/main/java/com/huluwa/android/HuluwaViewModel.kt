@@ -22,6 +22,8 @@ sealed interface AppSheet {
     /** defaultSeason 非空时使用订阅季号直接下载，省略参数配置。 */
     data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
         val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
+    data class Btbtla(val card: BtbtlaCard, val detail: LoadState<JsonObject>,
+        val magnets: Map<String, String> = emptyMap()) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
     /** 懂片帝资源弹框：独立于 Films（电影港 / 电影天堂），各线路按需解析 */
     data class Dpd(
@@ -1173,6 +1175,57 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 updateDownload(if (added) DpdDownloadState.Added else null)
             }
         }
+    }
+
+    fun openBtbtlaResources(card: BtbtlaCard) {
+        showSheet(AppSheet.Btbtla(card, LoadState(JsonObject(emptyMap()))))
+        reloadBtbtlaResources(card)
+    }
+
+    fun reloadBtbtlaResources(card: BtbtlaCard) {
+        val sheet = mutable.value.sheet as? AppSheet.Btbtla ?: return
+        if (sheet.card.id != card.id || sheetJob?.isActive == true) return
+        val current = sheetGeneration
+        mutable.update { it.copy(sheet = sheet.copy(detail = sheet.detail.copy(loading = true, error = null))) }
+        sheetJob = viewModelScope.launch {
+            try {
+                val detail = repository.btbtlaDetail(card.id)
+                if (current == sheetGeneration) mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                    old.copy(sheet = active.copy(detail = LoadState(detail, loaded = true)))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (current == sheetGeneration) mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                    old.copy(sheet = active.copy(detail = active.detail.copy(loading = false, loaded = true, error = error.userMessage())))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun copyBtbtlaMagnet(card: BtbtlaCard, item: BtbtlaResource, onResolved: (String) -> Unit) {
+        val sheet = mutable.value.sheet as? AppSheet.Btbtla ?: return
+        if (sheet.card.id != card.id) return
+        val current = sheetGeneration
+        perform("btbtla-magnet:${item.id}", "", close = false) {
+            val magnet = sheet.magnets[item.id] ?: repository.btbtlaMagnet(item.id)
+            if (current == sheetGeneration) {
+                mutable.update { old ->
+                    val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                    old.copy(sheet = active.copy(magnets = active.magnets + (item.id to magnet)))
+                }
+                onResolved(magnet)
+                notify("磁力链接已复制")
+            }
+        }
+    }
+
+    fun openBtbtlaWebsite(card: BtbtlaCard) {
+        val url = card.pageUrl.takeIf { it.startsWith("https://www.btbtla.com/detail/") } ?: return
+        dismissSheet()
+        mutable.update { it.copy(browserVisible = true, browserUrl = url, serverStatusVisible = false, actionError = null) }
     }
 
     fun filmResources(card: FilmCard, defaultSeason: Int? = null) {
