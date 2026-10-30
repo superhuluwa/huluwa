@@ -1,4 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.huluwa.android.ui
 
 import androidx.compose.foundation.layout.*
@@ -44,8 +43,7 @@ import com.huluwa.android.data.text
         media?.let { url -> MediaViewer(url, true) { media = null } }
         return
     }
-    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = vm::dismissSheet, sheetState = state, containerColor = HuluwaColors.Paper) {
+    HuluwaBottomSheet(onDismissRequest = vm::dismissSheet) {
         val maxHeight = LocalConfiguration.current.screenHeightDp.dp * .86f
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(13.dp)) {

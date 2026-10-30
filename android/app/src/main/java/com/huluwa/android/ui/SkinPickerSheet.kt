@@ -1,4 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.huluwa.android.ui
 
 import androidx.compose.foundation.BorderStroke
@@ -36,11 +35,7 @@ import androidx.compose.ui.unit.dp
     val selected = HuluwaColors.skin
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * .78f
     val largeFont = LocalDensity.current.fontScale >= 1.3f
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = HuluwaColors.Paper,
-    ) {
+    HuluwaBottomSheet(onDismissRequest = onDismiss) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val columns = if (maxWidth < 360.dp || largeFont) 1 else 2
             LazyColumn(
