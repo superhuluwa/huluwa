@@ -3,6 +3,7 @@ package com.huluwa.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,8 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.FormatListBulleted
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
@@ -27,6 +30,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -67,6 +73,8 @@ import com.huluwa.android.data.*
     val groups = remember(sheet.detail.data) { BtbtlaQuality.rows(sheet.detail.data) }
     var selectedResolution by rememberSaveable(sheet.card.id) { mutableStateOf<Int?>(null) }
     val selected = groups.firstOrNull { it.resolution == selectedResolution } ?: groups.firstOrNull()
+    // 打开作品、切换清晰度时全部折叠；复制、下载和刷新时保留当前展开状态。
+    var expandedEpisodes by rememberSaveable(sheet.card.id, selected?.resolution) { mutableStateOf(listOf<String>()) }
     val list = rememberLazyListState()
     LaunchedEffect(selected?.resolution) { list.scrollToItem(0) }
     Dialog(onDismissRequest = vm::dismissSheet, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -110,11 +118,22 @@ import com.huluwa.android.data.*
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         selected.items.groupBy { it.section }.forEach { (episode, resources) ->
+                            val expanded = episode in expandedEpisodes
                             item(key = "section:$episode") {
-                                Text(episode, style = MaterialTheme.typography.titleSmall, color = HuluwaColors.Ink,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    .clickable(role = Role.Button, onClickLabel = if (expanded) "收起资源" else "展开资源") {
+                                        expandedEpisodes = if (expanded) expandedEpisodes - episode else expandedEpisodes + episode
+                                    }
+                                    .semantics(mergeDescendants = true) { stateDescription = if (expanded) "已展开" else "已折叠" }
+                                    .padding(horizontal = 4.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(episode, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = HuluwaColors.Ink)
+                                    Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                        null, Modifier.size(20.dp), tint = HuluwaColors.Muted)
+                                }
                             }
-                            items(resources, key = { it.id }) { resource ->
+                            if (expanded) items(resources, key = { it.id }) { resource ->
                                 val copying = ui.busy == "btbtla-magnet:${resource.id}"
                                 val downloading = ui.busy == "btbtla-download:${resource.id}"
                                 val downloaded = resource.id in sheet.downloaded
