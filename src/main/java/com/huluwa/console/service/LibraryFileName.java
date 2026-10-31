@@ -12,11 +12,13 @@ final class LibraryFileName {
     record Identity(String title, String showKey, int season, boolean seasonExplicit,
                     int episode, int episodeEnd, boolean seriesRecognized) { }
     private static final String NUMBER = "[0-9零〇一二两三四五六七八九十百千]+";
-    private static final Pattern STANDARD = Pattern.compile("(?i)(?<![a-z0-9])S(\\d{1,3})[ ._-]*E(\\d{1,4})(?!\\d)");
+    private static final Pattern STANDARD = Pattern.compile("(?i)S(\\d{1,3})[ ._-]*E[ ._-]*(\\d{1,4})(?!\\d)");
     private static final Pattern CHINESE_EPISODE = Pattern.compile(
             "第\\s*(" + NUMBER + ")(?:\\s*[-~～至到]\\s*(" + NUMBER + "))?\\s*[集话期]");
-    private static final Pattern EXPLICIT_EPISODE = Pattern.compile("(?i)(?<![a-z0-9])EP?[ ._-]*(\\d{1,4})(?![a-z0-9])");
+    private static final Pattern EXPLICIT_EPISODE = Pattern.compile("(?i)(?<![a-z0-9])(?:EP(?:ISODE)?|E)[ ._-]*(\\d{1,4})(?![a-z0-9])");
     private static final Pattern DOTTED = Pattern.compile("(?i)(?<![a-z0-9])S(\\d{1,3})[ ._-]+(\\d{1,4})(?![a-z0-9])");
+    private static final Pattern CROSS = Pattern.compile("(?i)(?<![a-z0-9])(\\d{1,2})x(\\d{1,4})(?![a-z0-9])");
+    private static final Pattern SUFFIX = Pattern.compile("(?<![A-Za-z0-9])(\\d{1,4})(?:\\s*[-~～－—–至到]\\s*(\\d{1,4}))?\\s*[集话期回]");
     private static final Pattern COMPACT = Pattern.compile("(?<=[\\p{IsHan}])(\\d{2,4})(?=$|[ ._\\-\\[【])");
     private static final Pattern BRACKETED = Pattern.compile("[\\[【]\\s*(\\d{1,4})(?:\\s*[-~～至到]\\s*(\\d{1,4}))?\\s*[\\]】]");
     private static final Pattern SEPARATED = Pattern.compile("(?:^|[ ._-])(\\d{1,4})(?=$|[ ._\\-\\[\\]【】()（）])");
@@ -33,7 +35,9 @@ final class LibraryFileName {
 
     static Identity parse(Path root, Path file) {
         String fileName = file.getFileName().toString();
-        String base = stripLeadingNoise(fileName.substring(0, fileName.lastIndexOf('.')));
+        String base = stripLeadingNoise(MovieEpisodeParser.withoutCollectionCounts(
+                Normalizer.normalize(baseNameOf(fileName), Normalizer.Form.NFKC)
+                        .replaceAll("[\\u200B-\\u200D\\uFEFF]", "")));
         Integer season = seasonOf(base);
         int episode = 0, end = 0, titleEnd = base.length();
         Matcher match = STANDARD.matcher(base);
@@ -103,12 +107,24 @@ final class LibraryFileName {
         // 同名翻拍保留父目录给出的年份，避免两个版本因清理文件名而被合并。
         if (!parentTitle.isBlank() && !YEAR.matcher(title).find() && YEAR.matcher(parentTitle).find()
                 && key(title).equals(key(YEAR.matcher(parentTitle).replaceAll("")))) title = parentTitle;
+        // 与电影港资源列表共用最终集号规则，避免同一文件在两个入口出现不同集号。
+        String identified = MovieEpisodeParser.parse(base, parentTitle);
+        if (identified == null) { episode = 0; end = 0; }
+        else {
+            String[] range = identified.split("-", 2);
+            episode = number(range[0]);
+            end = range.length > 1 ? number(range[1]) : episode;
+        }
         boolean recognized = usefulTitle(title);
         if (!recognized) title = "待归类";
         if (episode <= 0 || episode > 9999) episode = 0;
         end = end >= episode && end <= 9999 ? end : episode;
         return new Identity(title, recognized ? "show:" + key(title) : "unclassified",
                 season == null ? 1 : season, season != null, episode, end, recognized);
+    }
+
+    private static String baseNameOf(String fileName) {
+        return fileName.substring(0, fileName.lastIndexOf('.'));
     }
 
     private static boolean seasonNumber(String value, int offset) {
@@ -123,7 +139,7 @@ final class LibraryFileName {
     }
 
     private static boolean plausibleEpisode(int value) {
-        return value > 0 && value <= 999 && !List.of(264, 265, 480, 576, 720).contains(value);
+        return value > 0 && value <= 9999 && !(value >= 1900 && value <= 2099);
     }
 
     private static String stripLeadingNoise(String value) {
@@ -136,10 +152,10 @@ final class LibraryFileName {
     }
 
     private static String clean(String value) {
-        String result = stripLeadingNoise(value).trim();
+        String result = MovieEpisodeParser.withoutCollectionCounts(stripLeadingNoise(value)).trim();
         // 目录也可能是「剧名.01-14.1080p」，不能将分集范围保留在外层剧名中。
         int boundary = result.length();
-        for (Pattern marker : List.of(STANDARD, CHINESE_EPISODE, EXPLICIT_EPISODE, DOTTED, BRACKETED, COMPACT)) {
+        for (Pattern marker : List.of(STANDARD, CHINESE_EPISODE, EXPLICIT_EPISODE, DOTTED, BRACKETED, COMPACT, CROSS, SUFFIX)) {
             Matcher episode = marker.matcher(result);
             while (episode.find()) {
                 if ((marker == BRACKETED || marker == COMPACT) && !plausibleEpisode(number(episode.group(1)))) continue;
@@ -183,6 +199,8 @@ final class LibraryFileName {
         Matcher match = CHINESE_SEASON.matcher(value);
         if (match.find()) return positive(number(match.group(1)));
         match = ENGLISH_SEASON.matcher(value);
+        if (match.find()) return positive(number(match.group(1)));
+        match = CROSS.matcher(value);
         return match.find() ? positive(number(match.group(1))) : null;
     }
     private static Integer positive(int value) { return value > 0 && value <= 999 ? value : null; }

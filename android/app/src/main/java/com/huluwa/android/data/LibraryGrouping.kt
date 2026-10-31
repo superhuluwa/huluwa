@@ -6,13 +6,18 @@ import java.util.Locale
 /** 客户端统一旧、新接口的文件命名，作品身份不依赖服务端曾经生成的分组键。 */
 private object LibraryNames {
     private const val number = "[0-9零〇一二两三四五六七八九十百千]+"
-    private val standard = Regex("(?i)(?<![a-z0-9])S(\\d{1,3})[ ._-]*E(\\d{1,4})(?!\\d)")
+    private val standard = Regex("(?i)S(\\d{1,3})[ ._-]*E[ ._-]*(\\d{1,4})(?!\\d)")
     private val chineseEpisode = Regex("第\\s*($number)(?:\\s*[-~～至到]\\s*($number))?\\s*[集话期]")
-    private val explicit = Regex("(?i)(?<![a-z0-9])EP?[ ._-]*(\\d{1,4})(?![a-z0-9])")
+    private val explicit = Regex("(?i)(?<![a-z0-9])(?:EP(?:ISODE)?|E)[ ._-]*(\\d{1,4})(?![a-z0-9])")
+    private val cross = Regex("(?i)(?<![a-z0-9])(\\d{1,2})x(\\d{1,4})(?![a-z0-9])")
+    private val suffix = Regex("(?<![A-Za-z0-9])(\\d{1,4})(?:\\s*[-~～－—–至到]\\s*(\\d{1,4}))?\\s*[集话期回]")
+    private val collectionCount = Regex("(?:全|共|总计|总|更新至|更新到)\\s*(?:第\\s*)?$number\\s*[集话期回](?:全|完)?|$number\\s*[集话期回]\\s*(?:全|完)")
+    private val episodePrefixTail = Regex("[-~～－—–至到第]\\s*$")
+    private val invisible = Regex("[\\u200B-\\u200D\\uFEFF]")
     private val compact = Regex("(?<=[\\u3400-\\u9fff])(\\d{2,4})(?=$|[ ._\\-\\[【])")
     private val bracketed = Regex("[\\[【]\\s*(\\d{1,4})(?:\\s*[-~～至到]\\s*(\\d{1,4}))?\\s*[\\]】]")
     private val separated = Regex("(?:^|[ ._-])(\\d{1,4})(?=$|[ ._\\-\\[\\]【】()（）])")
-    private val rangeEnd = Regex("(?i)^[ ._]*[-~～至到][ ._]*(?:EP?|第)?\\s*($number)(?![a-z0-9])")
+    private val rangeEnd = Regex("(?i)^[ ._]*[-~～至到][ ._]*(?:EP(?:ISODE)?|E|第)?[ ._-]*(?:\\d{1,2}x)?($number)(?![a-z0-9])")
     private val chineseSeason = Regex("第\\s*($number)\\s*季")
     private val englishSeason = Regex("(?i)(?<![a-z0-9])(?:Season[ ._-]*|S)(\\d{1,3})(?!\\d)")
     private val quality = Regex("(?i)(?:^|[\\s\\p{P}]|(?<=[\\u3400-\\u9fff]))(?:4320p|2160p|1440p|1080[pi]|720p|576p|480p|[48]k|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|bd(?:rip|remux)|remux|hdtv|[hx][ ._-]?26[45]|hevc|avc|av1|hdr(?:10\\+?)?|dovi|dv|dolby[ ._-]*vision|杜比视界|aac|ddp?(?:[ .]?\\d)?|atmos|\\d+bit|\\d+fps)(?=$|[^a-z0-9])")
@@ -53,24 +58,26 @@ private object LibraryNames {
     fun episode(value: String): Episode? {
         fun hint(match: MatchResult, first: String, last: String = ""): Episode? {
             val start = chineseNumber(first)
-            if (start !in 1..9999) return null
+            if (start !in 1..9999 || collectionCount.findAll(value).any { match.range.first in it.range && !episodePrefixTail.containsMatchIn(value.substring(0, it.range.first)) }) return null
             val end = if (last.isNotBlank()) chineseNumber(last) else rangeEnd.find(value.substring(match.range.last + 1))
                 ?.groupValues?.get(1)?.let(::chineseNumber) ?: start
             return Episode(start, end.takeIf { it in start..9999 } ?: start, match.range.first)
         }
-        standard.find(value)?.let { return hint(it, it.groupValues[2]) }
-        chineseEpisode.find(value)?.let { return hint(it, it.groupValues[1], it.groupValues[2]) }
-        explicit.find(value)?.let { return hint(it, it.groupValues[1]) }
-        bracketed.findAll(value).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 0) in 1..999 }?.let {
+        standard.findAll(value).firstNotNullOfOrNull { hint(it, it.groupValues[2]) }?.let { return it }
+        chineseEpisode.findAll(value).firstNotNullOfOrNull { hint(it, it.groupValues[1], it.groupValues[2]) }?.let { return it }
+        explicit.findAll(value).firstNotNullOfOrNull { hint(it, it.groupValues[1]) }?.let { return it }
+        cross.findAll(value).firstNotNullOfOrNull { hint(it, it.groupValues[2]) }?.let { return it }
+        suffix.findAll(value).firstNotNullOfOrNull { hint(it, it.groupValues[1], it.groupValues[2]) }?.let { return it }
+        bracketed.findAll(value).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 0).let { n -> n in 1..9999 && n !in 1900..2099 } }?.let {
             return hint(it, it.groupValues[1], it.groupValues[2])
         }
         compact.findAll(value).firstOrNull {
             val value = it.groupValues[1].toIntOrNull() ?: 0
-            value in 1..999 && value !in setOf(264, 265, 480, 576, 720)
+            value in 1..9999 && value !in 1900..2099
         }?.let { return hint(it, it.groupValues[1]) }
         for (match in separated.findAll(value)) {
             val candidate = match.groupValues[1].toIntOrNull() ?: continue
-            if (candidate !in 1..999 || candidate in setOf(264, 265, 480, 576, 720)) continue
+            if (candidate !in 1..9999 || candidate in 1900..2099) continue
             val offset = match.groups[1]!!.range.first
             if (englishSeason.findAll(value).any { offset in it.groups[1]!!.range }) continue
             val prefix = value.substring(0, offset)
@@ -84,9 +91,14 @@ private object LibraryNames {
 
     fun season(value: String): Int? = chineseSeason.find(value)?.groupValues?.get(1)?.let(::chineseNumber)
         ?: englishSeason.find(value)?.groupValues?.get(1)?.toIntOrNull()
+        ?: cross.find(value)?.groupValues?.get(1)?.toIntOrNull()
+
+    private fun withoutCollectionCounts(value: String): String = collectionCount.replace(value) { match ->
+        if (episodePrefixTail.containsMatchIn(value.substring(0, match.range.first))) match.value else " "
+    }
 
     fun title(raw: String): Title {
-        var value = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
+        var value = withoutCollectionCounts(invisible.replace(Normalizer.normalize(raw, Normalizer.Form.NFKC), "")).trim()
         while (true) {
             val next = leadingNoise.replaceFirst(value, "")
             if (next == value) break
@@ -127,7 +139,8 @@ private object LibraryNames {
     }
 
     fun resolve(entry: LibraryEntry): Resolved {
-        val base = entry.fileName.substringBeforeLast('.')
+        val rawBase = invisible.replace(Normalizer.normalize(entry.fileName.substringBeforeLast('.'), Normalizer.Form.NFKC), "")
+        val base = withoutCollectionCounts(rawBase)
         val fileTitle = title(base)
         val reported = title(entry.seriesTitle)
         val directories = entry.relativePath.replace('\\', '/').split('/').dropLast(1).asReversed()
@@ -147,13 +160,14 @@ private object LibraryNames {
         val matchedParent = parents.firstOrNull { key(it.text) == key(chosen.text) }
         if (chosen.year.isBlank()) chosen = chosen.copy(year = matchedParent?.year.orEmpty())
         val episode = episode(base)
+        val countOnly = episode == null && collectionCount.containsMatchIn(rawBase)
         val explicitSeason = (listOf(base) + directories).firstNotNullOfOrNull { season(it)?.takeIf { n -> n > 0 } }
         val normalized = entry.copy(
             season = explicitSeason ?: entry.season,
             seasonExplicit = explicitSeason != null || entry.seasonExplicit,
-            episode = episode?.start ?: entry.episode,
-            episodeEnd = episode?.end ?: entry.episodeEnd,
-            episodeRecognized = episode != null || entry.episodeRecognized,
+            episode = episode?.start ?: if (countOnly) 0 else entry.episode,
+            episodeEnd = episode?.end ?: if (countOnly) 0 else entry.episodeEnd,
+            episodeRecognized = episode != null || !countOnly && entry.episodeRecognized,
             videoInfo = videoInfo(entry),
         )
         return Resolved(normalized, chosen, useful(chosen.text))

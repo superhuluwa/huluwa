@@ -84,20 +84,24 @@ public class DatabaseInitializer implements ApplicationRunner {
 
     /**
      * 历史基线里剧集号可能是旧规则误判的（「…全集.1080p.mp4」把扩展名 mp4 里的 4 当成第 4 集）。
-     * 每次启动按当前规则重算一遍：不清空记录、不动基线时间，只把错的集号改对 / 置空。
+     * 每次启动结合资源标题、所属剧名与磁力 dn 按当前规则重算，不清空记录、不动基线时间。
      * 记录数只有订阅量级（数百条），一次性全表重算即可。
      */
     private void refreshMovieMagnetEpisodes() {
         var rows = jdbcTemplate.queryForList(
-                "SELECT id, title, episode FROM movie_subscription_magnet");
+                """
+                SELECT m.id, m.title, m.magnet, m.episode, s.title AS series_title
+                  FROM movie_subscription_magnet m
+                  LEFT JOIN movie_subscription s ON s.id = m.subscription_id
+                """);
         int fixed = 0;
         for (var row : rows) {
             String title = String.valueOf(row.get("title") == null ? "" : row.get("title")).trim();
-            if (title.isEmpty()) {
-                continue;  // 没有标题就无从重算，保留原值避免误清
-            }
+            String magnet = java.util.Objects.toString(row.get("magnet"), "");
+            String seriesTitle = java.util.Objects.toString(row.get("series_title"), "");
+            if (title.isEmpty() && magnet.isEmpty()) continue;
             String current = row.get("episode") == null ? null : String.valueOf(row.get("episode"));
-            String recalculated = com.huluwa.console.service.MovieSearchService.episodeOf(title);
+            String recalculated = com.huluwa.console.service.MovieSearchService.episodeOf(title, seriesTitle, magnet);
             if (!java.util.Objects.equals(current, recalculated)) {
                 jdbcTemplate.update("UPDATE movie_subscription_magnet SET episode = ? WHERE id = ?",
                         recalculated, row.get("id"));

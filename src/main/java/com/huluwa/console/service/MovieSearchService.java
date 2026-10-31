@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -72,37 +73,8 @@ public class MovieSearchService {
             Pattern.CASE_INSENSITIVE);
     /** 剧集里的清晰度标识：2160P / 4K / 1080P / 720P / 480P（含 1080i 等写法） */
     private static final Pattern QUALITY = Pattern.compile("(?i)(2160P|4K|1080[PI]|720[PI]|480[PI]|360[PI])");
-    /** 分辨率字样（抽集号前先剔除，避免把「1080P / 4K / 720P」当集号） */
-    private static final Pattern QUALITY_TOKEN = Pattern.compile(
-            "(?i)\\b(?:2160P|1080[PI]|720[PI]|480[PI]|360[PI]|4K)\\b");
-    /** 媒体扩展名（抽集号前先剔除，避免把「.mp4 / .mkv」里的数字当集号） */
-    private static final Pattern MEDIA_EXTENSION = Pattern.compile(
-            "(?i)\\.(?:mp4|m4v|mkv|avi|rmvb|rm|ts|m2ts|mts|mov|flv|wmv|webm|mpg|mpeg|iso|3gp|vob|asf|f4v|ogv)\\s*$");
-    /** 合并集号的范围分隔符，兼容半角 / 全角横线、波浪线与「至 / 到」 */
-    private static final String EPISODE_RANGE_SEPARATOR = "\\s*[-~～－—–至到]\\s*";
-    /**
-     * 独立数字段：左右不能紧贴字母数字（避免「x264 / 10bit」），前后也不能构成「数字.数字」
-     * （避免把「5.1 / 7.1」声道记号当集号）。裸数字集号（212 / 04）与合并集号（208-209）走这里。
-     */
-    private static final Pattern STANDALONE_DIGITS = Pattern.compile(
-            "(?<![0-9A-Za-z])(?<!\\d\\.)(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
-                    + "(\\d{1,4}))?(?![0-9A-Za-z])(?!\\.\\d)");
-    /** 年份不是集号（如「某电影.2024.1080p.mkv」没有集号） */
-    private static final Pattern RELEASE_YEAR = Pattern.compile("^(?:19|20)\\d{2}$");
-    /** SxxExx 写法（英美剧） */
-    private static final Pattern SXXEXX = Pattern.compile(
-            "(?i)S\\d{1,2}E(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
-                    + "(?:S\\d{1,2})?E?(\\d{1,4}))?(?!\\d)");
-    /** 「第 xx 集」显式集号写法（必须带「集」，避免与「第 N 季」混淆） */
-    private static final Pattern CN_EPISODE = Pattern.compile(
-            "第\\s*(\\d{1,4})(?:\\s*集)?(?:" + EPISODE_RANGE_SEPARATOR
-                    + "(?:第\\s*)?(\\d{1,4}))?\\s*集");
-    /** 「EPxx」/「E12」显式集号写法 */
-    private static final Pattern EN_EPISODE = Pattern.compile(
-            "(?i)\\b(?:EP|E)(\\d{1,4})(?:" + EPISODE_RANGE_SEPARATOR
-                    + "(?:EP|E)?(\\d{1,4}))?\\b");
-    /** 「第 N 季」分隔符 */
-    private static final Pattern SEASON = Pattern.compile("第\\s*\\d+\\s*季");
+    private static final Pattern RESOURCE_LABEL = Pattern.compile(
+            "^(?=.*(?:下载|磁力|地址|链接|资源))(?:(?:点击|立即|直接|本地|高速|普通|备用|电信|联通|移动|磁力|迅雷|高清|下载|地址|链接|资源|线路|复制)|[\\s\\p{P}\\d])+$");
     private static final Pattern TAG = Pattern.compile("<[^>]+>");
     private static final Pattern ENTITY = Pattern.compile("&(#x?[0-9a-fA-F]+|[a-zA-Z]+);");
 
@@ -274,6 +246,7 @@ public class MovieSearchService {
             return list;
         }
         Set<String> seen = new LinkedHashSet<>();
+        String seriesTitle = parseTitle(html);
         Matcher matcher = MAGNET_ANCHOR.matcher(html);
         while (matcher.find()) {
             String magnet = unescape(matcher.group(1).trim());
@@ -286,7 +259,11 @@ public class MovieSearchService {
                 continue;
             }
             String title = unescape(stripTags(matcher.group(2))).trim();
-            list.add(new MagnetItem(title, magnet, hash, qualityOf(title), episodeOf(title)));
+            if (title.isBlank() || RESOURCE_LABEL.matcher(title).matches()) {
+                String displayName = magnetDisplayName(magnet);
+                if (displayName != null) title = displayName;
+            }
+            list.add(new MagnetItem(title, magnet, hash, qualityOf(title, magnet), episodeOf(title, seriesTitle, magnet)));
         }
         return list;
     }
@@ -343,61 +320,44 @@ public class MovieSearchService {
         };
     }
 
-    /**
-     * 抽取剧集键（集号或范围）：优先 SxxExx / 第 N 集 / EPxx，其次「第 N 季」之后的独立数字段。
-     * 合并集号保留起止范围（01-14 → 1-14），便于跨清晰度去重，并与同起始集的单集资源区分。
-     *
-     * <p>识别不出集号时返回 null：整季打包（「第一季全集打包.1080p.mp4」）、
-     * 正片 / 剧场版（「某电影.2024.1080p.mkv」）都属此类，不会把扩展名或年份当成集号。</p>
-     */
+    /** 抽取集号或范围；显式季集、中文数字优先，未知与未标范围的合集返回 null。 */
     public static String episodeOf(String title) {
-        if (title == null || title.isBlank()) {
-            return null;
-        }
-        // 1) 英美剧习惯的 SxxExx（先于通用数字段，否则会先抽到季号）
-        Matcher sxxexx = SXXEXX.matcher(title);
-        if (sxxexx.find()) {
-            return normalizeEpisode(sxxexx.group(1), sxxexx.group(2));
-        }
-        // 2) 「第 N 集」/「EPxx」等显式写法
-        Matcher cn = CN_EPISODE.matcher(title);
-        if (cn.find()) {
-            return normalizeEpisode(cn.group(1), cn.group(2));
-        }
-        Matcher en = EN_EPISODE.matcher(title);
-        if (en.find()) {
-            return normalizeEpisode(en.group(1), en.group(2));
-        }
-        // 3) 「第 N 季」之后的第一个独立数字段（电影港剧集页最常见的写法）
-        Matcher season = SEASON.matcher(title);
-        String tail = title;
-        if (season.find()) {
-            tail = title.substring(season.end());
-        }
-        // 扩展名、分辨率、年份都不是集号：如「第一季全集打包.1080p.mp4」「某电影.2024.mkv」
-        // 没有集号时不能把 mp4 里的 4 / 1080 / 2024 当成集号。
-        tail = MEDIA_EXTENSION.matcher(tail).replaceAll(" ");
-        tail = QUALITY_TOKEN.matcher(tail).replaceAll(" ");
-        Matcher digits = STANDALONE_DIGITS.matcher(tail);
-        while (digits.find()) {
-            String found = digits.group(1);
-            String end = digits.group(2);
-            if (!RELEASE_YEAR.matcher(found).matches()
-                    && (end == null || !RELEASE_YEAR.matcher(end).matches())) {
-                return normalizeEpisode(found, end);
-            }
-        }
-        return null;
+        return episodeOf(title, null);
     }
 
-    /** 去掉集号两端的前导零（01-14 → 1-14），相同起止集号归并成单集 */
-    private static String normalizeEpisode(String digits, String endDigits) {
-        int start = Integer.parseInt(digits);
-        if (endDigits == null) {
-            return String.valueOf(start);
+    /** 页面剧名作为上下文，防止把「三体2」等片名中的数字当成集号。 */
+    public static String episodeOf(String title, String seriesTitle) {
+        return MovieEpisodeParser.parse(title == null ? null : unescape(stripTags(title)), seriesTitle);
+    }
+
+    /** 锚文本未标集数时，用磁力 dn 中的真实文件名补充识别。 */
+    public static String episodeOf(String title, String seriesTitle, String magnet) {
+        String episode = title != null && RESOURCE_LABEL.matcher(title.trim()).matches() ? null : episodeOf(title, seriesTitle);
+        return episode != null ? episode : episodeOf(magnetDisplayName(magnet), seriesTitle);
+    }
+
+    public static String qualityOf(String title, String magnet) {
+        String quality = qualityOf(title);
+        return "OTHER".equals(quality) ? qualityOf(magnetDisplayName(magnet)) : quality;
+    }
+
+    /** 磁力名称按查询参数解码，兼容 UTF-8 与旧站点的 GB18030，不读取 tracker 等字段。 */
+    private static String magnetDisplayName(String magnet) {
+        if (magnet == null || magnet.isBlank()) return null;
+        String link = unescape(magnet);
+        int query = link.indexOf('?');
+        if (query < 0) return null;
+        for (String parameter : link.substring(query + 1).split("&")) {
+            int equals = parameter.indexOf('=');
+            if (equals < 0 || !"dn".equalsIgnoreCase(parameter.substring(0, equals))) continue;
+            try {
+                String encoded = parameter.substring(equals + 1);
+                String name = URLDecoder.decode(encoded, StandardCharsets.UTF_8);
+                if (name.indexOf('\ufffd') >= 0) name = URLDecoder.decode(encoded, PAGE_CHARSET);
+                return name.isBlank() ? null : name.trim();
+            } catch (IllegalArgumentException ignored) { }
         }
-        int end = Integer.parseInt(endDigits);
-        return end > start ? start + "-" + end : String.valueOf(start);
+        return null;
     }
 
     // ------------------------------------------------------------------ 解析

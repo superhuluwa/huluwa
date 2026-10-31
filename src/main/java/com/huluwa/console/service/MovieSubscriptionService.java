@@ -1391,15 +1391,13 @@ public class MovieSubscriptionService {
         String hash = MovieSearchService.hashOf(link);
         String grade = text(quality);
         String ep = text(episode);
-        // 前端可能只给磁力原文：用站点标题兜底推断集号 / 清晰度，保证任务行与通知信息完整
-        if (grade == null || grade.isBlank() || ep == null || ep.isBlank()) {
+        // 优先从磁力 dn 读取文件名；仍缺失时再回查详情页，所有入口使用同一套识别规则。
+        if (ep == null || ep.isBlank()) ep = MovieSearchService.episodeOf(null, title, link);
+        if (grade == null || grade.isBlank() || "OTHER".equalsIgnoreCase(grade)) grade = MovieSearchService.qualityOf(null, link);
+        if ("OTHER".equals(grade) || ep == null || ep.isBlank()) {
             String probe = magnetTitleOf(url, hash, link);
-            if (grade == null || grade.isBlank()) {
-                grade = probe == null ? null : MovieSearchService.qualityOf(probe);
-            }
-            if (ep == null || ep.isBlank()) {
-                ep = probe == null ? null : MovieSearchService.episodeOf(probe);
-            }
+            if ("OTHER".equals(grade)) grade = MovieSearchService.qualityOf(probe, link);
+            if (ep == null || ep.isBlank()) ep = MovieSearchService.episodeOf(probe, title, link);
         }
         if (grade == null || grade.isBlank()) {
             grade = "OTHER";
