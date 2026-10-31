@@ -17,18 +17,19 @@ final class LibraryFileName {
             "第\\s*(" + NUMBER + ")(?:\\s*[-~～至到]\\s*(" + NUMBER + "))?\\s*[集话期]");
     private static final Pattern EXPLICIT_EPISODE = Pattern.compile("(?i)(?<![a-z0-9])EP?[ ._-]*(\\d{1,4})(?![a-z0-9])");
     private static final Pattern DOTTED = Pattern.compile("(?i)(?<![a-z0-9])S(\\d{1,3})[ ._-]+(\\d{1,4})(?![a-z0-9])");
+    private static final Pattern COMPACT = Pattern.compile("(?<=[\\p{IsHan}])(\\d{2,4})(?=$|[ ._\\-\\[【])");
     private static final Pattern BRACKETED = Pattern.compile("[\\[【]\\s*(\\d{1,4})(?:\\s*[-~～至到]\\s*(\\d{1,4}))?\\s*[\\]】]");
     private static final Pattern SEPARATED = Pattern.compile("(?:^|[ ._-])(\\d{1,4})(?=$|[ ._\\-\\[\\]【】()（）])");
     private static final Pattern RANGE_END = Pattern.compile("(?i)^[ ._]*[-~～至到][ ._]*(?:EP?|第)?\\s*(" + NUMBER + ")(?![a-z0-9])");
     private static final Pattern CHINESE_SEASON = Pattern.compile("第\\s*(" + NUMBER + ")\\s*季");
     private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?<![a-z0-9])(?:Season[ ._-]*|S)(\\d{1,3})(?!\\d)");
     private static final Pattern NOISE = Pattern.compile(
-            "(?i)(?:^|[ ._\\-\\[【(（])(?:4320p|2160p|1440p|1080[pi]|720p|576p|480p|[48]k|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|bd(?:rip|remux)|remux|hdtv|[hx][ ._-]?26[45]|hevc|avc|av1|hdr(?:10\\+?)?|dovi|dv|dolby[ ._-]*vision|杜比视界|aac|ddp?(?:[ .]?\\d)?|atmos|[\\d]+bit|[\\d]+fps)(?=$|[^a-z0-9]).*");
+            "(?i)(?:^|[\\s\\p{P}]|(?<=[\\p{IsHan}]))(?:4320p|2160p|1440p|1080[pi]|720p|576p|480p|[48]k|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|bd(?:rip|remux)|remux|hdtv|[hx][ ._-]?26[45]|hevc|avc|av1|hdr(?:10\\+?)?|dovi|dv|dolby[ ._-]*vision|杜比视界|aac|ddp?(?:[ .]?\\d)?|atmos|[\\d]+bit|[\\d]+fps)(?=$|[^a-z0-9]).*");
     private static final Pattern GENERIC = Pattern.compile(
-            "(?i)^(?:第?" + NUMBER + "[集话期]?|EP?\\d+|S\\d+(?:E\\d+)?|Season\\s*\\d+|video|sample|movie|index|master|playlist|part|file|下载|迅雷下载|电视剧|剧集|downloads?|videos?|tv[ ._-]*shows?)$");
+            "(?i)^(?:第?" + NUMBER + "[集话期]?|EP?\\d+|S\\d+(?:E\\d+)?|Season\\s*\\d+|video|sample|movie|index|master|playlist|part|file|下载|迅雷下载|新建文件夹|电视剧|剧集|国产剧|国剧|美剧|韩剧|日剧|港台剧|动漫|动画|电影|movies?|media|completed|downloads?|videos?|tv[ ._-]*shows?)$");
     private static final Pattern YEAR = Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)");
     private static final Pattern LEADING_NOISE = Pattern.compile(
-            "(?i)^[\\[【(（][^\\]】)）]*(?:www\\.|https?://|\\.(?:com|net|org|cn)|字幕|无水印|高清|发布|搬运|1080|2160|4k)[^\\]】)）]*[\\]】)）][ ._-]*");
+            "(?i)^[\\[【(（][^\\]】)）]*(?:www\\.|https?://|\\.(?:com|net|org|cn)|字幕|无水印|高清|发布|搬运|影视|资源|1080|2160|4k)[^\\]】)）]*[\\]】)）][ ._-]*");
 
     static Identity parse(Path root, Path file) {
         String fileName = file.getFileName().toString();
@@ -82,6 +83,13 @@ final class LibraryFileName {
                 }
             }
         }
+        if (episode == 0) {
+            Matcher compact = COMPACT.matcher(base);
+            if (compact.find() && plausibleEpisode(number(compact.group(1)))) {
+                episode = number(compact.group(1)); titleEnd = compact.start();
+                end = rangeEnd(base, compact.end(), episode);
+            }
+        }
         String title = clean(base.substring(0, titleEnd));
         String parentTitle = "";
         for (Path parent = file.getParent(); parent != null && parent.startsWith(root) && !parent.equals(root); parent = parent.getParent()) {
@@ -90,7 +98,8 @@ final class LibraryFileName {
             String candidate = clean(raw);
             if (parentTitle.isBlank() && usefulTitle(candidate)) parentTitle = candidate;
         }
-        if (!usefulTitle(title)) title = parentTitle;
+        if (!usefulTitle(title) || !title.matches(".*\\p{IsHan}.*")
+                && parentTitle.matches(".*\\p{IsHan}.*")) title = parentTitle;
         // 同名翻拍保留父目录给出的年份，避免两个版本因清理文件名而被合并。
         if (!parentTitle.isBlank() && !YEAR.matcher(title).find() && YEAR.matcher(parentTitle).find()
                 && key(title).equals(key(YEAR.matcher(parentTitle).replaceAll("")))) title = parentTitle;
@@ -128,7 +137,26 @@ final class LibraryFileName {
 
     private static String clean(String value) {
         String result = stripLeadingNoise(value).trim();
-        result = NOISE.matcher(result).replaceFirst("");
+        // 目录也可能是「剧名.01-14.1080p」，不能将分集范围保留在外层剧名中。
+        int boundary = result.length();
+        for (Pattern marker : List.of(STANDARD, CHINESE_EPISODE, EXPLICIT_EPISODE, DOTTED, BRACKETED, COMPACT)) {
+            Matcher episode = marker.matcher(result);
+            while (episode.find()) {
+                if ((marker == BRACKETED || marker == COMPACT) && !plausibleEpisode(number(episode.group(1)))) continue;
+                boundary = Math.min(boundary, episode.start());
+                break;
+            }
+        }
+        Matcher separated = SEPARATED.matcher(result);
+        while (separated.find()) {
+            int candidate = number(separated.group(1));
+            if (plausibleEpisode(candidate) && !seasonNumber(result, separated.start(1))) {
+                boundary = Math.min(boundary, separated.start());
+                break;
+            }
+        }
+        result = NOISE.matcher(result.substring(0, boundary)).replaceFirst("");
+        result = result.replaceAll("[ ._\\-\\[【(（]*(?:全\\s*\\d+\\s*集|全集|合集|完结|国语|中字|中文字幕)[\\]】)） ._-]*$", "");
         Matcher season = CHINESE_SEASON.matcher(result);
         if (season.find()) result = result.substring(0, season.start());
         season = ENGLISH_SEASON.matcher(result);

@@ -537,7 +537,7 @@ data class LibraryScan(
     val workCount get() = entries.filter { it.seriesRecognized }.map { it.groupingKey }.distinct().size
     companion object {
         fun from(raw: JsonObject) = LibraryScan(
-            raw.text("mediaRoot"), raw.flag("writable"), raw.rows("entries").map { LibraryEntry.from(it.asObject()) },
+            raw.text("mediaRoot"), raw.flag("writable"), normalizeLibraryEntries(raw.rows("entries").map { LibraryEntry.from(it.asObject()) }),
             raw.number("totalBytes")?.toLong() ?: 0, raw.number("scannedFiles")?.toInt() ?: 0,
             raw.number("seriesCount")?.toInt() ?: 0, raw.text("scannedAt"), raw.text("warning"),
         )

@@ -28,7 +28,7 @@ import com.huluwa.android.data.isServerUnreachable
 import com.huluwa.android.data.libraryEpisodeCount
 import kotlinx.coroutines.delay
 
-/** 按作品归类，再按明确的季号、集数和文件版本展开；归类不移动磁盘文件。 */
+/** 作品 → 集数及清晰度摘要 → 资源详情；所有集数默认折叠，包括只有一个资源的集数。 */
 @Composable fun LibraryScreen(ui: AppState, vm: HuluwaViewModel) {
     val scanState = ui.library.scan
     val scan = scanState.data
@@ -109,14 +109,6 @@ import kotlinx.coroutines.delay
                             overflow = TextOverflow.Ellipsis)
                         Text(group.summary, style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
-                    // 搜索与季度筛选后的删除范围只覆盖当前展示的文件。
-                    TextButton({ vm.deleteLibrary(rows) }, enabled = !ui.library.deleting) {
-                        Text(when {
-                            selected != 0 -> "删除本季"
-                            keyword.isNotBlank() -> "删除匹配"
-                            else -> "删除全部"
-                        }, color = HuluwaColors.Danger)
-                    }
                 }
                 if (open) {
                     if (group.showSeasons) {
@@ -142,32 +134,40 @@ import kotlinx.coroutines.delay
                             if (it.episodeRecognized) it.episode else Int.MAX_VALUE
                         }.thenBy { it.episodeEnd }.thenBy { it.fileName }).groupBy { it.episodeKey }.forEach { (episodeKey, versions) ->
                             HorizontalDivider(Modifier.padding(top = 8.dp), color = HuluwaColors.Line)
-                            if (versions.size == 1) {
-                                LibraryFileRow(versions.first(), showEpisode = true, deleting = ui.library.deleting,
-                                    onDelete = { vm.deleteLibrary(listOf(versions.first())) })
-                            } else {
-                                val key = "${group.key}|$episodeKey"
-                                val versionsOpen = key in expandedEpisodes
-                                Row(Modifier.fillMaxWidth().clickable {
-                                    expandedEpisodes = if (versionsOpen) expandedEpisodes - key else expandedEpisodes + key
-                                }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(versions.first().episodeLabel, Modifier.weight(1f),
-                                        style = MaterialTheme.typography.titleMedium)
-                                    Text("${versions.size} 个版本", style = MaterialTheme.typography.labelMedium,
-                                        color = HuluwaColors.Muted)
-                                    Icon(if (versionsOpen) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
-                                        if (versionsOpen) "收起版本" else "展开版本", tint = HuluwaColors.Muted)
+                            val key = "${group.key}|$episodeKey"
+                            val versionsOpen = key in expandedEpisodes
+                            Row(Modifier.fillMaxWidth().clickable {
+                                expandedEpisodes = if (versionsOpen) expandedEpisodes - key else expandedEpisodes + key
+                            }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(versions.first().episodeLabel, style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    LibraryQualitySummary(versions)
                                 }
-                                if (versionsOpen) versions.sortedWith(compareByDescending<LibraryEntry> {
-                                    when (it.videoInfo.resolution) {
-                                        "8K" -> 8; "4K" -> 7; "1440P" -> 6; "1080P" -> 5; "720P" -> 4; else -> 0
-                                    }
-                                }.thenByDescending { it.videoInfo.dynamicRange == "杜比视界" }.thenBy { it.fileName }).forEach { entry ->
-                                    LibraryFileRow(entry, showEpisode = false, deleting = ui.library.deleting,
-                                        onDelete = { vm.deleteLibrary(listOf(entry)) })
+                                Text("${versions.size} 个资源", style = MaterialTheme.typography.labelMedium,
+                                    color = HuluwaColors.Muted)
+                                Icon(if (versionsOpen) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                                    if (versionsOpen) "收起资源" else "展开资源", tint = HuluwaColors.Muted)
+                            }
+                            if (versionsOpen) versions.sortedWith(compareByDescending<LibraryEntry> {
+                                when (it.videoInfo.resolution) {
+                                    "8K" -> 8; "4K" -> 7; "1440P" -> 6; "1080P" -> 5; "720P" -> 4; else -> 0
                                 }
+                            }.thenByDescending { it.videoInfo.dynamicRange == "杜比视界" }.thenBy { it.fileName }).forEach { entry ->
+                                LibraryFileRow(entry, deleting = ui.library.deleting,
+                                    onDelete = { vm.deleteLibrary(listOf(entry)) })
                             }
                         }
+                    }
+                    // 整组删除收进展开内容的底部，外层列表只展示作品名称与统计。
+                    TextButton({ vm.deleteLibrary(rows) }, enabled = !ui.library.deleting,
+                        modifier = Modifier.align(Alignment.End)) {
+                        Text(when {
+                            selected != 0 -> "删除本季全部资源"
+                            keyword.isNotBlank() -> "删除匹配资源"
+                            else -> "删除本剧全部资源"
+                        }, color = HuluwaColors.Danger)
                     }
                 }
             }
@@ -192,10 +192,28 @@ private data class LibraryGroup(val key: String, val allEntries: List<LibraryEnt
     }.joinToString(" · ")
 }
 
-@Composable private fun LibraryFileRow(entry: LibraryEntry, showEpisode: Boolean, deleting: Boolean, onDelete: () -> Unit) {
+@Composable private fun LibraryQualitySummary(versions: List<LibraryEntry>) {
+    val labels = versions.map { entry ->
+        val info = entry.videoInfo
+        buildList {
+            add(info.resolution.ifBlank { if (info.status == "pending") "识别中" else "清晰度未知" })
+            if (info.dynamicRange.isNotBlank()) add(info.dynamicRange)
+        }.joinToString(" · ") + if (info.source == "filename") "（文件名）" else ""
+    }.distinct()
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        labels.forEach { label ->
+            Tag(label, tone = when {
+                "杜比视界" in label -> HuluwaColors.Amber
+                "未知" in label || "识别中" in label -> HuluwaColors.Muted
+                else -> HuluwaColors.Pine
+            })
+        }
+    }
+}
+
+@Composable private fun LibraryFileRow(entry: LibraryEntry, deleting: Boolean, onDelete: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (showEpisode && entry.episodeRecognized) Text(entry.episodeLabel, style = MaterialTheme.typography.titleMedium)
             val info = entry.videoInfo
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Tag(info.resolution.ifBlank { if (info.status == "pending") "识别中" else "清晰度未知" },
