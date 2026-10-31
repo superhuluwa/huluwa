@@ -1189,10 +1189,20 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(sheet = sheet.copy(detail = sheet.detail.copy(loading = true, error = null))) }
         sheetJob = viewModelScope.launch {
             try {
-                val detail = repository.btbtlaDetail(card.id)
-                if (current == sheetGeneration) mutable.update { old ->
-                    val active = old.sheet as? AppSheet.Btbtla ?: return@update old
-                    old.copy(sheet = active.copy(detail = LoadState(detail, loaded = true)))
+                var detail = repository.btbtlaDetail(card.id)
+                while (current == sheetGeneration) {
+                    val refreshing = detail.flag("refreshing")
+                    val refreshError = detail.text("refreshError").takeIf { it.isNotBlank() }
+                    mutable.update { old ->
+                        val active = old.sheet as? AppSheet.Btbtla ?: return@update old
+                        if (active.card.id != card.id) return@update old
+                        val state = LoadState(detail, loading = refreshing, loaded = true,
+                            error = refreshError?.let { "刷新失败，当前显示已缓存的资源：$it" })
+                        if (active.detail == state) old else old.copy(sheet = active.copy(detail = state))
+                    }
+                    if (!refreshing) break
+                    delay(1200)
+                    detail = repository.btbtlaDetail(card.id, cachedOnly = true)
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {

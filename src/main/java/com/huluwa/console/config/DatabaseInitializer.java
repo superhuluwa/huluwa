@@ -22,7 +22,7 @@ public class DatabaseInitializer implements ApplicationRunner {
             "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
             "chat_session", "chat_message", "chat_request", "movie_search_watch",
             "hls_subscription", "hls_download_task", "subscription_check_log", "xunlei_win_download_task",
-            "dpd_episode_link"
+            "dpd_episode_link", "btbtla_detail_cache", "btbtla_magnet_cache"
     };
 
     private final JdbcTemplate jdbcTemplate;

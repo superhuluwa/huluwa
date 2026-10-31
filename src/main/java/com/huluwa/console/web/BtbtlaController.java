@@ -1,6 +1,7 @@
 package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
+import com.huluwa.console.service.BtbtlaCacheService;
 import com.huluwa.console.service.BtbtlaSearchService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,18 +16,23 @@ import java.util.Map;
 @RequestMapping("/api/btbtla")
 public class BtbtlaController {
     private final BtbtlaSearchService search;
-    public BtbtlaController(BtbtlaSearchService search) { this.search = search; }
+    private final BtbtlaCacheService cache;
+    public BtbtlaController(BtbtlaSearchService search, BtbtlaCacheService cache) {
+        this.search = search;
+        this.cache = cache;
+    }
 
     @GetMapping("/search")
     public ApiResult<List<Map<String, Object>>> search(@RequestParam String q) {
         return ApiResult.ok(search.search(q).stream().map(search::payload).toList());
     }
     @GetMapping("/detail")
-    public ApiResult<BtbtlaSearchService.Detail> detail(@RequestParam String id) {
-        return ApiResult.ok(search.detail(id));
+    public ApiResult<BtbtlaCacheService.DetailResponse> detail(
+            @RequestParam String id, @RequestParam(defaultValue = "false") boolean cachedOnly) {
+        return ApiResult.ok(cache.detail(id, cachedOnly));
     }
     @GetMapping("/magnet")
     public ApiResult<Map<String, String>> magnet(@RequestParam String id) {
-        return ApiResult.ok(search.magnet(id));
+        return ApiResult.ok(cache.magnet(id));
     }
 }

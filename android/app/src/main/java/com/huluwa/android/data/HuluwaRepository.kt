@@ -160,8 +160,9 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             "type" to if (online) "online" else "magnet", "url" to url, "title" to card.title, "year" to card.year,
         )).asObject()
     }
-    suspend fun btbtlaDetail(id: String): JsonObject =
-        api.get("btbtla", "detail", query = mapOf("id" to id)).asObject()
+    /** 首次请求返回目录缓存并启动刷新，轮询只读取缓存，避免反复触发抓站。 */
+    suspend fun btbtlaDetail(id: String, cachedOnly: Boolean = false): JsonObject =
+        api.get("btbtla", "detail", query = mapOf("id" to id, "cachedOnly" to cachedOnly.toString())).asObject()
 
     suspend fun btbtlaMagnet(id: String): String =
         api.get("btbtla", "magnet", query = mapOf("id" to id)).asObject().text("magnet").also {

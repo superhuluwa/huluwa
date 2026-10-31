@@ -67,7 +67,7 @@ import com.huluwa.android.data.*
     }
 }
 
-/** 分辨率优先；最新单集在前，分包和全集靠后；复制与下载共用按需获取的磁力。 */
+/** 分辨率优先；最新单集在前，分包和全集靠后；目录先显示缓存并后台刷新。 */
 @Composable fun BtbtlaResources(sheet: AppSheet.Btbtla, ui: AppState, vm: HuluwaViewModel) {
     val context = LocalContext.current
     val groups = remember(sheet.detail.data) { BtbtlaQuality.rows(sheet.detail.data) }
@@ -76,7 +76,11 @@ import com.huluwa.android.data.*
     // 打开作品、切换清晰度时全部折叠；复制、下载和刷新时保留当前展开状态。
     var expandedEpisodes by rememberSaveable(sheet.card.id, selected?.resolution) { mutableStateOf(listOf<String>()) }
     val list = rememberLazyListState()
-    LaunchedEffect(selected?.resolution) { list.scrollToItem(0) }
+    LaunchedEffect(selected?.resolution) {
+        // 固定首次缓存中展示的清晰度，后台新增更高清晰度时继续保留当前选择。
+        selected?.let { selectedResolution = it.resolution }
+        list.scrollToItem(0)
+    }
     Dialog(onDismissRequest = vm::dismissSheet, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 620.dp)
             .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .88f),

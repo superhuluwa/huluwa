@@ -565,7 +565,7 @@ public class ChatService {
         return replies;
     }
 
-    /** BT影视只在聊天里抓搜索目录，点开作品后再读取全部版本，磁力按条获取。 */
+    /** BT影视聊天仅搜索作品；资源接口负责目录和全部版本磁力的数据库缓存。 */
     private List<ChatMessage> runBtbtlaSearch(String sessionId, String text) {
         String keyword = text.replaceFirst("(?i)^(?:BT影视搜索|BT影视|btbtla搜索|btbtla)\\s+", "").trim();
         List<BtbtlaSearchService.SearchItem> found = btbtlaSearchService.search(keyword);

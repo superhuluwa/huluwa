@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** BT影视公开页面适配：搜索 → 作品资源目录 → 用户选中的下载页磁力。 */
+/** BT影视公开页面适配：搜索 → 作品资源目录 → 下载页磁力，持久化缓存交由 BtbtlaCacheService。 */
 @Service
 public class BtbtlaSearchService {
     public static final String BASE_URL = "https://www.btbtla.com";
@@ -37,8 +37,6 @@ public class BtbtlaSearchService {
     private static final Pattern COLLECTION = Pattern.compile("(?i)全集|合集|打包|整季|全\\s*[0-9一二三四五六七八九十百]+\\s*集|\\b(?:complete[ ._-]*(?:series|season)|full[ ._-]*season|season[ ._-]*pack)\\b");
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER).build();
-    // 下载 ID 对应固定种子；只缓存成功结果，避免每次复制重复请求。目录刷新始终重新抓取。
-    private final Map<String, String> magnets = new LinkedHashMap<>(128, .75f, true);
 
     public record SearchItem(String id, String title, String cover, String year, String genre, String origin,
                              String pageUrl) { }
@@ -143,18 +141,9 @@ public class BtbtlaSearchService {
 
     public Map<String, String> magnet(String requestedId) {
         String id = numericId(requestedId);
-        String magnet;
-        synchronized (magnets) { magnet = magnets.get(id); }
-        if (magnet == null) {
-            Matcher match = MAGNET.matcher(MovieSearchService.unescape(fetch("/tdown/" + id + ".html")));
-            if (!match.find()) throw new BusinessException(502, "该资源暂未提供可识别的磁力链接，请稍后重试");
-            magnet = match.group();
-            synchronized (magnets) {
-                magnets.put(id, magnet);
-                while (magnets.size() > 512) magnets.remove(magnets.keySet().iterator().next());
-            }
-        }
-        return Map.of("id", id, "magnet", magnet);
+        Matcher match = MAGNET.matcher(MovieSearchService.unescape(fetch("/tdown/" + id + ".html")));
+        if (!match.find()) throw new BusinessException(502, "该资源暂未提供可识别的磁力链接，请稍后重试");
+        return Map.of("id", id, "magnet", match.group());
     }
 
     private String fetch(String path) {
@@ -243,7 +232,7 @@ public class BtbtlaSearchService {
         return (resource.tags().contains("杜比视界") ? 8 : resource.tags().contains("HDR") ? 4 : 0)
                 + (resource.tags().contains("高码") ? 2 : 0) + (resource.tags().contains("60帧") ? 1 : 0);
     }
-    private static String numericId(String value) {
+    static String numericId(String value) {
         if (value == null || !value.matches("\\d{1,15}")) throw new BusinessException(400, "请选择有效的 BT影视资源");
         return value;
     }

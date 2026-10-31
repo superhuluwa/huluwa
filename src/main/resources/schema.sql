@@ -428,3 +428,19 @@ CREATE TABLE IF NOT EXISTS dpd_episode_link (
 );
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (9, datetime('now', 'localtime'));
+
+
+-- v10：BT影视作品目录及全部下载资源磁力持久化；刷新失败保留上次成功的数据。
+CREATE TABLE IF NOT EXISTS btbtla_detail_cache (
+    detail_id     TEXT PRIMARY KEY,
+    detail_json   TEXT NOT NULL,                     -- 完整目录快照，包含各清晰度和全部资源元数据
+    refresh_error TEXT,
+    updated_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS btbtla_magnet_cache (
+    resource_id   TEXT PRIMARY KEY,                  -- 下载 ID 对应固定种子，可跨同名作品复用
+    magnet        TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (10, datetime('now', 'localtime'));
