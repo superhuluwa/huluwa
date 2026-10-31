@@ -350,6 +350,11 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
 
     // ---- 剧集管理（扫描共享下载目录并批量删除） ----
     suspend fun libraryScan(): LibraryScan = LibraryScan.from(api.get("library", "episodes").asObject())
+    suspend fun libraryVideoInfo(ids: List<String>): Map<String, LibraryVideoInfo> =
+        api.post("library", "video-info", body = jsonBody { put("ids", JsonArray(ids.map(::JsonPrimitive))) })
+            .asArray().map { it.asObject() }.associate { row ->
+                row.text("id") to LibraryVideoInfo.from(row["videoInfo"].asObject())
+            }
     suspend fun libraryDelete(ids: List<String>): LibraryDeleteResult {
         require(ids.isNotEmpty()) { "请选择要删除的剧集" }
         return LibraryDeleteResult.from(api.request("DELETE", listOf("library", "episodes"),

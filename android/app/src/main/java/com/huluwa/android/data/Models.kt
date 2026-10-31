@@ -471,22 +471,62 @@ data class CheckLog(
     }
 }
 
-/** 本地下载目录中的一个视频文件（后端只接受本次扫描返回的短期 ID 做删除）。 */
+/** ffprobe 的真实信息优先；文件名标注保留来源，不能当成已确认的杜比视界。 */
+data class LibraryVideoInfo(
+    val width: Int = 0, val height: Int = 0, val resolution: String = "", val dynamicRange: String = "",
+    val source: String = "unknown", val status: String = "unknown",
+) {
+    companion object {
+        fun from(raw: JsonObject) = LibraryVideoInfo(
+            raw.number("width")?.toInt() ?: 0, raw.number("height")?.toInt() ?: 0,
+            raw.text("resolution"), raw.text("dynamicRange"), raw.text("source"), raw.text("status"),
+        )
+    }
+}
+
+/** 本地下载目录中的一个视频文件（删除只提交本次扫描返回的短期 ID）。 */
 data class LibraryEntry(
     val id: String, val seriesTitle: String, val seriesKey: String, val season: Int, val episode: Int,
     val fileName: String, val relativePath: String, val size: Long, val modifiedAt: String,
     val episodeRecognized: Boolean,
+    val showKey: String = "", val seasonExplicit: Boolean = false, val seriesRecognized: Boolean = true,
+    val episodeEnd: Int = episode, val videoInfo: LibraryVideoInfo = LibraryVideoInfo(),
 ) {
-    val episodeLabel get() = if (episodeRecognized && episode > 0) "第 $episode 集" else fileName.substringBeforeLast('.').take(64)
+    val groupingKey get() = showKey.ifBlank { seriesTitle.lowercase(Locale.ROOT).trim() }
+    val episodeKey get() = if (episodeRecognized && episode > 0) "$season|$episode-$episodeEnd" else relativePath
+    val episodeLabel get() = when {
+        !episodeRecognized || episode <= 0 -> fileName.substringBeforeLast('.').take(64)
+        episodeEnd > episode -> "第 %02d–%02d 集".format(episode, episodeEnd)
+        else -> "第 %02d 集".format(episode)
+    }
     companion object {
         fun from(raw: JsonObject) = LibraryEntry(
             raw.text("id"), raw.text("seriesTitle"), raw.text("seriesKey"),
             raw.number("season")?.toInt() ?: 1, raw.number("episode")?.toInt() ?: 0,
             raw.text("fileName"), raw.text("relativePath"), raw.number("size")?.toLong() ?: 0,
-            raw.text("modifiedAt"), raw.flag("episodeRecognized"),
+            raw.text("modifiedAt"), raw.flag("episodeRecognized"), raw.text("showKey"),
+            if (raw.containsKey("seasonExplicit")) raw.flag("seasonExplicit") else (raw.number("season")?.toInt() ?: 1) > 1,
+            if (raw.containsKey("seriesRecognized")) raw.flag("seriesRecognized") else true,
+            raw.number("episodeEnd")?.toInt() ?: raw.number("episode")?.toInt() ?: 0,
+            (raw["videoInfo"] as? JsonObject)?.let(LibraryVideoInfo::from) ?: LibraryVideoInfo(),
         )
     }
 }
+
+/** 分季合并区间后计数，重复版本与分集/合并集混存时都不会重复计算集数。 */
+fun libraryEpisodeCount(entries: List<LibraryEntry>): Int = entries.filter { it.episodeRecognized && it.episode > 0 }
+    .groupBy { it.season }.values.sumOf { season ->
+        var last = 0
+        var count = 0
+        season.sortedBy { it.episode }.forEach { entry ->
+            val end = entry.episodeEnd.coerceAtLeast(entry.episode)
+            if (end > last) {
+                count += end - maxOf(last, entry.episode - 1)
+                last = end
+            }
+        }
+        count
+    }
 
 /** 扫描结果：下载根目录、可写状态、文件清单与统计。 */
 data class LibraryScan(
@@ -494,6 +534,7 @@ data class LibraryScan(
     val totalBytes: Long = 0, val scannedFiles: Int = 0, val seriesCount: Int = 0,
     val scannedAt: String = "", val warning: String = "",
 ) {
+    val workCount get() = entries.filter { it.seriesRecognized }.map { it.groupingKey }.distinct().size
     companion object {
         fun from(raw: JsonObject) = LibraryScan(
             raw.text("mediaRoot"), raw.flag("writable"), raw.rows("entries").map { LibraryEntry.from(it.asObject()) },

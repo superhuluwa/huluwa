@@ -134,7 +134,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     value.library.scan.error != null -> "下载目录扫描失败，点击重试"
                     !value.library.scan.loaded -> if (value.library.scan.loading) "正在扫描下载目录…" else "扫描共享下载目录，管理磁盘空间"
                     value.library.scan.data.entries.isEmpty() -> "下载目录里还没有可管理的剧集"
-                    else -> "${value.library.scan.data.seriesCount} 部作品 · ${value.library.scan.data.entries.size} 个视频 · ${formatBytes(value.library.scan.data.totalBytes.toDouble())}"
+                    else -> "${value.library.scan.data.workCount} 部作品 · ${value.library.scan.data.entries.size} 个视频 · ${formatBytes(value.library.scan.data.totalBytes.toDouble())}"
                 }
                 // 我的订阅：电影港与电影天堂两个来源合并统计，失败只标注单个来源
                 ManagementService.Subscriptions -> when {
@@ -549,25 +549,71 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+    /** 只在剧集页可见时轮询一批待识别文件，不重复扫描或更新删除令牌。 */
+    suspend fun refreshLibraryVideoInfo(): Boolean {
+        val epoch = generation
+        val pending = mutable.value.library.scan.data.entries.filter { it.videoInfo.status == "pending" }.take(500)
+        if (pending.isEmpty()) return false
+        return try {
+            val updates = repository.libraryVideoInfo(pending.map { it.id })
+            if (epoch != generation) return false
+            val requested = pending.map { it.id }.toSet()
+            mutable.update { state ->
+                val scan = state.library.scan
+                state.copy(library = state.library.copy(scan = scan.copy(data = scan.data.copy(
+                    entries = scan.data.entries.map { entry ->
+                        val info = updates[entry.id]
+                        when {
+                            info != null -> entry.copy(videoInfo = info)
+                            entry.id in requested -> entry.copy(videoInfo = entry.videoInfo.copy(status = "unknown"))
+                            else -> entry
+                        }
+                    }))))
+            }
+            mutable.value.library.scan.data.entries.any { it.videoInfo.status == "pending" }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Throwable) {
+            if (epoch == generation && error is ApiException && error.code == 401) handleError(error)
+            false
+        }
+    }
+
     fun deleteLibrary(entries: List<LibraryEntry>) {
         if (entries.isEmpty()) return
         val bytes = entries.sumOf { it.size }
-        val preview = entries.take(6).joinToString("、") { "${it.seriesTitle} ${it.episodeLabel}" }
+        val showSeasons = entries.any { it.seasonExplicit && it.season > 1 }
+        val preview = entries.take(6).joinToString("、") {
+            "${it.seriesTitle} " + (if (showSeasons) "第 ${it.season} 季 " else "") + it.episodeLabel
+        }
         val extra = if (entries.size > 6) "等 ${entries.size} 个文件" else ""
         confirm("删除 ${entries.size} 个剧集文件", "$preview$extra\n将释放约 ${formatBytes(bytes.toDouble())}，删除后无法恢复。", "确认删除") {
             perform("library-delete", "", close = false, after = { refreshLibrary() }) {
-                val result = repository.libraryDelete(entries.map { it.id })
-                val removed = result.deletedIds
-                // 先在本地剔除已删除项，避免后台刷新期间列表仍然显示旧文件
-                if (removed.isNotEmpty()) {
-                    mutable.update { state ->
-                        val scan = state.library.scan
-                        state.copy(library = state.library.copy(scan = scan.copy(
-                            data = scan.data.copy(entries = scan.data.entries.filterNot { it.id in removed }))))
+                val epoch = generation
+                mutable.update { it.copy(library = it.library.copy(deleting = true)) }
+                try {
+                    var deleted = 0
+                    var failed = 0
+                    var freedBytes = 0L
+                    // 按剧归类后，一部多季作品可能超过后端的单次 500 文件上限。
+                    for (batch in entries.chunked(500)) {
+                        val result = repository.libraryDelete(batch.map { it.id })
+                        if (epoch != generation) return@perform
+                        deleted += result.deleted
+                        failed += result.failed
+                        freedBytes += result.freedBytes
+                        val removed = result.deletedIds
+                        if (removed.isNotEmpty()) mutable.update { state ->
+                            val scan = state.library.scan
+                            val remaining = scan.data.entries.filterNot { it.id in removed }
+                            state.copy(library = state.library.copy(scan = scan.copy(data = scan.data.copy(
+                                entries = remaining, totalBytes = remaining.sumOf { it.size }))))
+                        }
                     }
+                    notify("已删除 $deleted 个文件" + (if (failed > 0) "，$failed 个失败" else "") +
+                        "，释放 ${formatBytes(freedBytes.toDouble())}")
+                } finally {
+                    if (epoch == generation) mutable.update { it.copy(library = it.library.copy(deleting = false)) }
                 }
-                notify(if (result.failed > 0) "${result.message}，释放 ${formatBytes(result.freedBytes.toDouble())}"
-                    else "已删除 ${result.deleted} 个文件，释放 ${formatBytes(result.freedBytes.toDouble())}")
             }
         }
     }

@@ -27,8 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 下载目录剧集盘点：只扫描媒体根目录下的普通视频文件，跳过工作区、隐藏目录和符号链接。
@@ -42,47 +41,31 @@ public class EpisodeLibraryService {
             ".webm", ".m4v", ".mpg", ".mpeg", ".rmvb", ".rm", ".3gp");
     private static final Set<String> IGNORED_DIRECTORIES = Set.of(
             ".huluwa-work", "@eadir", "#recycle", "#snapshot", "$recycle.bin");
-    private static final Pattern SEASON_EPISODE = Pattern.compile(
-            "(?i)(?:^|[^a-z0-9])S(\\d{1,3})[ ._-]*E(\\d{1,4})(?!\\d)");
-    private static final Pattern CHINESE_EPISODE = Pattern.compile(
-            "第\\s*([0-9零〇一二两三四五六七八九十百千]+)\\s*[集话期]");
-    private static final Pattern CHINESE_SEASON = Pattern.compile(
-            "第\\s*([0-9零〇一二两三四五六七八九十百千]+)\\s*季");
-    private static final Pattern EXPLICIT_EPISODE = Pattern.compile(
-            "(?i)(?:^|[^a-z0-9])(?:EP?|E)(\\d{1,4})(?!\\d)");
-    private static final Pattern TRAILING_EPISODE = Pattern.compile("(?<!\\d)(\\d{1,4})(?!\\d)\\s*$");
-    private static final Pattern BRACKETED_EPISODE = Pattern.compile(
-            "(?i)(?:\\[|【)\\s*(?:EP?|第)?\\s*(\\d{1,4})\\s*(?:集|话|期)?\\s*(?:\\]|】)");
-    private static final Pattern DOTTED_SEASON_EPISODE = Pattern.compile(
-            "(?:^|[\\s._-])S(\\d{1,3})[ ._-]?(\\d{1,4})(?!\\d)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern SEPARATED_EPISODE = Pattern.compile(
-            "(?i)(?:^|[\\s._-])(?:EP?[ ._-]?)?(\\d{1,4})(?!\\d)");
-    private static final Pattern QUALITY_BEFORE_EPISODE = Pattern.compile(
-            "(?i)(?:2160p|1080p|720p|480p|4k|8k|web-?dl|bluray|bdrip|hdtv)[\\s._-]*(\\d{1,4})(?!\\d)");
-    private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?:^|[^a-z0-9])S(\\d{1,3})(?!\\d)");
-    private static final Pattern SEASON_WORD = Pattern.compile("(?i)Season\\s*(\\d{1,3})");
-    private static final Pattern RELEASE_NOISE = Pattern.compile(
-            "(?i)[.\\s_-]*(?:2160p|1080p|720p|480p|4k|8k|web-?dl|bluray|bdrip|hdtv|h264|h265|hevc|x264|x265|aac|ddp?5\\.1)(?:[.\\s_-].*)?$");
-    private static final Pattern GENERIC_EPISODE_TITLE = Pattern.compile(
-            "(?i)^(?:第?[0-9零〇一二两三四五六七八九十百千]+[集话期]?|EP?\\d+|S\\d+(?:E\\d+)?)$");
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.of("Asia/Shanghai"));
     private static final long SCAN_TOKEN_TTL = 30 * 60 * 1000L;
     private static final int MAX_SCAN_FILES = 50_000;
 
     private final HlsProperties paths;
+    private final LibraryMediaProbe mediaProbe;
     private final Map<String, ScanToken> tokens = new ConcurrentHashMap<>();
     private final AtomicLong scanSequence = new AtomicLong();
 
     public EpisodeLibraryService(HlsProperties paths) {
         this.paths = paths;
+        this.mediaProbe = new LibraryMediaProbe(paths);
     }
 
     private record ScanToken(Path file, long size, FileTime modified, long createdAt) { }
 
     public record Entry(String id, String seriesTitle, String seriesKey, int season, int episode,
                         String fileName, String relativePath, String extension, long size, String modifiedAt,
-                        boolean episodeRecognized) { }
+                        boolean episodeRecognized, String showKey, boolean seasonExplicit,
+                        boolean seriesRecognized, int episodeEnd, LibraryMediaProbe.VideoInfo videoInfo) { }
+
+    public record VideoInfoRequest(List<String> ids) { }
+
+    public record VideoInfoUpdate(String id, LibraryMediaProbe.VideoInfo videoInfo) { }
 
     public record ScanResult(String mediaRoot, boolean writable, List<Entry> entries, long totalBytes,
                              int scannedFiles, int skippedFiles, int seriesCount, String scannedAt, String warning) { }
@@ -165,6 +148,7 @@ public class EpisodeLibraryService {
         if (scanSequence.get() == scanId) {
             tokens.clear();
             tokens.putAll(found);
+            mediaProbe.retain(found.values().stream().map(ScanToken::file).collect(Collectors.toSet()));
         }
 
         entries.sort((left, right) -> {
@@ -177,7 +161,7 @@ public class EpisodeLibraryService {
             return left.fileName().compareToIgnoreCase(right.fileName());
         });
         long totalBytes = entries.stream().mapToLong(Entry::size).sum();
-        long seriesCount = entries.stream().map(Entry::seriesKey).distinct().count();
+        long seriesCount = entries.stream().filter(Entry::seriesRecognized).map(Entry::showKey).distinct().count();
         String warning = truncated[0]
                 ? "可管理文件数量已达到 " + MAX_SCAN_FILES + " 上限，本次扫描已截断"
                 : counts[1] > 0 ? "已跳过 " + counts[1] + " 个非视频、隐藏或不可读文件" : null;
@@ -218,6 +202,7 @@ public class EpisodeLibraryService {
                 }
                 Files.delete(target);
                 tokens.remove(id);
+                mediaProbe.remove(target);
                 deleted++;
                 deletedIds.add(id);
                 freedBytes += token.size();
@@ -236,118 +221,31 @@ public class EpisodeLibraryService {
                 List.copyOf(deletedIds), List.copyOf(failures), message);
     }
 
+    /** 仅读取本次扫描令牌对应的视频信息，不重新扫描，也不使删除令牌失效。 */
+    public List<VideoInfoUpdate> videoInfo(VideoInfoRequest request) {
+        List<String> ids = request == null || request.ids() == null ? List.of() : request.ids();
+        if (ids.size() > 500) throw new BusinessException(400, "一次最多读取 500 个文件的视频信息");
+        List<VideoInfoUpdate> updates = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (String id : new LinkedHashSet<>(ids)) {
+            ScanToken token = id == null ? null : tokens.get(id);
+            if (token == null || now - token.createdAt() > SCAN_TOKEN_TTL) continue;
+            updates.add(new VideoInfoUpdate(id, mediaProbe.get(token.file(), token.size(), token.modified())));
+        }
+        return List.copyOf(updates);
+    }
+
     private Entry entry(Path root, Path file, BasicFileAttributes attributes) {
         String fileName = file.getFileName().toString();
-        String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+        LibraryFileName.Identity identity = LibraryFileName.parse(root, file);
         String relative = root.relativize(file).toString().replace('\\', '/');
-        Integer season = null;
-        Integer episode = null;
-        String title = null;
-
-        Matcher standard = SEASON_EPISODE.matcher(baseName);
-        if (standard.find()) {
-            season = positive(standard.group(1));
-            episode = positive(standard.group(2));
-            title = baseName.substring(0, standard.start()).trim();
-        }
-        if (episode == null) {
-            Matcher chinese = CHINESE_EPISODE.matcher(baseName);
-            if (chinese.find()) {
-                episode = positive(chineseNumber(chinese.group(1)));
-                title = baseName.substring(0, chinese.start()).trim();
-            }
-        }
-        if (episode == null) {
-            Matcher explicit = EXPLICIT_EPISODE.matcher(baseName);
-            if (explicit.find()) {
-                episode = positive(explicit.group(1));
-                title = baseName.substring(0, explicit.start()).trim();
-            }
-        }
-        if (episode == null) {
-            Matcher dotted = DOTTED_SEASON_EPISODE.matcher(baseName);
-            if (dotted.find()) {
-                season = positive(dotted.group(1));
-                episode = positive(dotted.group(2));
-                title = baseName.substring(0, dotted.start()).trim();
-            }
-        }
-        if (episode == null) {
-            Matcher bracketed = BRACKETED_EPISODE.matcher(baseName);
-            if (bracketed.find() && plausibleTrailingEpisode(bracketed.group(1))) {
-                episode = positive(bracketed.group(1));
-                title = baseName.substring(0, bracketed.start()).trim();
-            }
-        }
-        if (episode == null) {
-            Matcher quality = QUALITY_BEFORE_EPISODE.matcher(baseName);
-            if (quality.find() && plausibleTrailingEpisode(quality.group(1))) {
-                episode = positive(quality.group(1));
-                title = baseName.substring(0, quality.start()).trim();
-            }
-        }
-        if (episode == null) {
-            // 常见发布名：剧名.01.1080p、剧名 01-02、剧名[03]。只取紧邻标题的普通数字，
-            // 年份、分辨率、编码等数字在候选筛选阶段排除。
-            Matcher separated = SEPARATED_EPISODE.matcher(baseName);
-            while (separated.find()) {
-                int start = separated.start();
-                String before = baseName.substring(0, start);
-                char separator = start == 0 ? ' ' : baseName.charAt(start - 1);
-                boolean parenthesized = before.matches(".*[\\[【]");
-                if (" \t._-".indexOf(separator) < 0 && !parenthesized) continue;
-                if (!plausibleSeriesEpisode(separated.group(1), before)) continue;
-                episode = positive(separated.group(1));
-                title = before.trim();
-                break;
-            }
-        }
-        if (episode == null) {
-            Matcher trailing = TRAILING_EPISODE.matcher(baseName);
-            if (trailing.find() && plausibleSeriesEpisode(trailing.group(1),
-                    baseName.substring(0, trailing.start()))) {
-                episode = positive(trailing.group(1));
-                title = baseName.substring(0, trailing.start()).trim();
-            }
-        }
-        if (season == null) season = seasonOf(baseName);
-        String clean = cleanTitle(title);
-        if (clean.isBlank() || GENERIC_EPISODE_TITLE.matcher(clean).matches()
-                || episode == null && clean.matches("[\\s._-]*\\d{1,4}[\\s._-]*")) {
-            clean = fallbackSeriesTitle(root, file);
-        }
-        if (clean.isBlank()) clean = baseName;
-        int resolvedSeason = season == null || season <= 0 ? 1 : season;
-        int resolvedEpisode = episode == null || episode <= 0 ? 0 : episode;
-        String normalizedTitle = clean.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
-        String seriesKey = normalizedTitle + "|" + resolvedSeason;
+        // 保留旧客户端使用的季度分组键；新客户端使用不含季度的 showKey。
+        String seriesKey = identity.title().toLowerCase(Locale.ROOT) + "|" + identity.season();
         String extension = fileName.substring(fileName.lastIndexOf('.') + 1).toUpperCase(Locale.ROOT);
-        return new Entry(UUID.randomUUID().toString(), clean, seriesKey, resolvedSeason, resolvedEpisode,
+        return new Entry(UUID.randomUUID().toString(), identity.title(), seriesKey, identity.season(), identity.episode(),
                 fileName, relative, extension, attributes.size(), TIME.format(attributes.lastModifiedTime().toInstant()),
-                episode != null && episode > 0);
-    }
-
-    /** 文件名只含集号时，用父目录补剧名；Season/第一季等目录继续向上找。 */
-    private static String fallbackSeriesTitle(Path root, Path file) {
-        Path directory = file.getParent();
-        while (directory != null && directory.startsWith(root) && !directory.equals(root)) {
-            String name = cleanTitle(directory.getFileName().toString());
-            if (!name.isBlank() && seasonOf(name) == null && !GENERIC_EPISODE_TITLE.matcher(name).matches()) {
-                return name;
-            }
-            directory = directory.getParent();
-        }
-        return "";
-    }
-
-    private static Integer seasonOf(String value) {
-        Matcher english = ENGLISH_SEASON.matcher(value);
-        if (english.find()) return positive(english.group(1));
-        Matcher word = SEASON_WORD.matcher(value);
-        if (word.find()) return positive(word.group(1));
-        Matcher chinese = CHINESE_SEASON.matcher(value);
-        if (chinese.find()) return positive(chineseNumber(chinese.group(1)));
-        return null;
+                identity.episode() > 0, identity.showKey(), identity.seasonExplicit(), identity.seriesRecognized(),
+                identity.episodeEnd(), mediaProbe.get(file, attributes.size(), attributes.lastModifiedTime()));
     }
 
     private static boolean isVideo(Path file) {
@@ -398,76 +296,9 @@ public class EpisodeLibraryService {
         return Path.of(paths.getMediaRoot()).toAbsolutePath().normalize();
     }
 
-    private static boolean plausibleTrailingEpisode(String value) {
-        try {
-            int number = Integer.parseInt(value);
-            // 结尾的 19xx/20xx 通常是电影年份，不按集号处理。
-            return number > 0 && number <= 9999 && !(value.length() == 4 && number >= 1900 && number <= 2099);
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    /** 普通数字只有在标题之后、且不像分辨率/编码时，才作为候选集号。 */
-    private static boolean plausibleSeriesEpisode(String value, String before) {
-        if (!plausibleTrailingEpisode(value)) return false;
-        String preceding = HlsSupport.text(before).toLowerCase(Locale.ROOT);
-        if (preceding.matches(".*(?:2160p|1080p|720p|480p|4k|8k|h264|h265|x264|x265|hevc|aac|ddp?).*")) {
-            return false;
-        }
-        String tail = preceding.length() > 8 ? preceding.substring(preceding.length() - 8) : preceding;
-        return !tail.matches(".*(?:^|[\\s._-])(?:19|20)\\d{2}\\s*$");
-    }
-
-    private static Integer positive(String value) {
-        try {
-            int number = Integer.parseInt(value);
-            return number > 0 && number <= 9999 ? number : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static Integer positive(int value) {
-        return value > 0 && value <= 9999 ? value : null;
-    }
-
-    private static String cleanTitle(String value) {
-        String result = HlsSupport.text(value).trim();
-        result = RELEASE_NOISE.matcher(result).replaceAll("");
-        // 仅从剧名中剥离季号等结构信息，不用清洁后的标题回填扫描结果。
-        result = result.replaceAll("\\[[^\\]]*\\]$", "")
-                .replaceAll("[\\[\\](){}]+$", "")
-                .replaceAll("[._-]+$", "")
-                .replaceAll("\\s+", " ")
-                .trim();
-        return result.isBlank() ? HlsSupport.text(value).trim() : result;
-    }
-
-    private static int chineseNumber(String value) {
-        if (value == null || value.isBlank()) return 0;
-        if (value.matches("[0-9]+")) return Integer.parseInt(value);
-        if (value.matches("[零〇一二两三四五六七八九]+")) {
-            StringBuilder digits = new StringBuilder();
-            for (char character : value.toCharArray()) {
-                int digit = "零一二三四五六七八九".indexOf(
-                        character == '两' ? '二' : character == '〇' ? '零' : character);
-                if (digit < 0) return 0;
-                digits.append(digit);
-            }
-            try { return Integer.parseInt(digits.toString()); } catch (NumberFormatException e) { return 0; }
-        }
-        int result = 0, digit = 0;
-        for (char character : value.toCharArray()) {
-            int unit = switch (character) { case '十' -> 10; case '百' -> 100; case '千' -> 1000; default -> 0; };
-            if (unit > 0) { result += (digit == 0 ? 1 : digit) * unit; digit = 0; }
-            else { digit = "零一二三四五六七八九".indexOf(character == '两' ? '二' : character == '〇' ? '零' : character); }
-        }
-        return result + Math.max(digit, 0);
-    }
-
     @PreDestroy
     public void clearTokens() {
         tokens.clear();
+        mediaProbe.close();
     }
 }
