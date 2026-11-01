@@ -27,6 +27,8 @@ final class LibraryFileName {
     private static final Pattern ENGLISH_SEASON = Pattern.compile("(?i)(?<![a-z0-9])(?:Season[ ._-]*|S)(\\d{1,3})(?!\\d)");
     private static final Pattern NOISE = Pattern.compile(
             "(?i)(?:^|[\\s\\p{P}]|(?<=[\\p{IsHan}]))(?:4320p|2160p|1440p|1080[pi]|720p|576p|480p|[48]k|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|bd(?:rip|remux)|remux|hdtv|[hx][ ._-]?26[45]|hevc|avc|av1|hdr(?:10\\+?)?|dovi|dv|dolby[ ._-]*vision|杜比视界|aac|ddp?(?:[ .]?\\d)?|atmos|[\\d]+bit|[\\d]+fps)(?=$|[^a-z0-9]).*");
+    private static final Pattern VERSION_TAG = Pattern.compile(
+            "(?i)(?:高码版|高码|高帧率版|高帧率|高帧版|高帧|60帧率版本|60帧率版|60帧率|60帧版本|60帧版|60帧|帧率版本|帧率版|普通版|标准版|修复版|重制版|加长版|未删减版|无删减版|完整版|导演剪辑版|导演版|杜比视界版|HDR版|DV版|4K版|2160P版|1080P版)");
     private static final Pattern GENERIC = Pattern.compile(
             "(?i)^(?:第?" + NUMBER + "[集话期]?|EP?\\d+|S\\d+(?:E\\d+)?|Season\\s*\\d+|video|sample|movie|index|master|playlist|part|file|下载|迅雷下载|新建文件夹|电视剧|剧集|国产剧|国剧|美剧|韩剧|日剧|港台剧|动漫|动画|电影|movies?|media|completed|downloads?|videos?|tv[ ._-]*shows?)$");
     private static final Pattern YEAR = Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)");
@@ -177,6 +179,7 @@ final class LibraryFileName {
         if (season.find()) result = result.substring(0, season.start());
         season = ENGLISH_SEASON.matcher(result);
         if (season.find()) result = result.substring(0, season.start());
+        result = VERSION_TAG.matcher(result).replaceAll(" ");
         result = result.replaceAll("[._\\[\\]【】]+", " ")
                 .replaceAll("^[\\s-]+|[\\s(（-]+$", "")
                 .replaceAll("\\s+", " ").trim();

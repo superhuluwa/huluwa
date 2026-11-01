@@ -21,6 +21,7 @@ private object LibraryNames {
     private val chineseSeason = Regex("第\\s*($number)\\s*季")
     private val englishSeason = Regex("(?i)(?<![a-z0-9])(?:Season[ ._-]*|S)(\\d{1,3})(?!\\d)")
     private val quality = Regex("(?i)(?:^|[\\s\\p{P}]|(?<=[\\u3400-\\u9fff]))(?:4320p|2160p|1440p|1080[pi]|720p|576p|480p|[48]k|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|bd(?:rip|remux)|remux|hdtv|[hx][ ._-]?26[45]|hevc|avc|av1|hdr(?:10\\+?)?|dovi|dv|dolby[ ._-]*vision|杜比视界|aac|ddp?(?:[ .]?\\d)?|atmos|\\d+bit|\\d+fps)(?=$|[^a-z0-9])")
+    private val versionTag = Regex("(?i)(?:高码版|高码|高帧率版|高帧率|高帧版|高帧|60帧率版本|60帧率版|60帧率|60帧版本|60帧版|60帧|帧率版本|帧率版|普通版|标准版|修复版|重制版|加长版|未删减版|无删减版|完整版|导演剪辑版|导演版|杜比视界版|HDR版|DV版|4K版|2160P版|1080P版)")
     private val leadingNoise = Regex("(?i)^[\\[【(（][^\\]】)）]*(?:www\\.|https?://|\\.(?:com|net|org|cn)|字幕|无水印|高清|发布|搬运|影视|资源|1080|2160|4k)[^\\]】)）]*[\\]】)）][ ._-]*")
     private val decoration = Regex("(?i)[\\[【(（][^\\]】)）]*(?:www\\.|https?://|\\.(?:com|net|org|cn)|字幕|无水印|高清|发布|搬运|影视|资源|国语|中字|国剧|国产剧|完整版|全集|完结)[^\\]】)）]*[\\]】)）]")
     private val hints = listOf("8k|4320p" to "8K", "4k|2160p" to "4K", "1440p" to "1440P",
@@ -110,6 +111,7 @@ private object LibraryNames {
         if (boundary != null) value = value.substring(0, boundary)
         val releaseYear = year.find(value)?.value.orEmpty()
         value = year.replace(value, " ")
+        value = versionTag.replace(value, " ")
         while (true) {
             val next = collection.replace(value, "").trim()
             if (next == value) break

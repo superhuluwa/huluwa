@@ -54,6 +54,21 @@ class EpisodeLibraryServiceTest {
     }
 
     @Test
+    void groupsReleaseVersionTagsUnderTheSeriesTitle() throws Exception {
+        Path series = Files.createDirectories(downloads.resolve("嫁金钗"));
+        Files.writeString(series.resolve("嫁金钗[高码版][第23集][国语配音+中文字幕].Where.the.Mask.Ends.S01.2026.2160p.HQ.WEB-DL.H265.AAC-BlackTV.mkv"), "high");
+        Files.writeString(series.resolve("嫁金钗[60帧率版本][第21集][国语配音+中文字幕].2026.2160p.WEB-DL.H265.HDR.60fps.AAC-BlackTV.mkv"), "60fps");
+        Path batch = Files.createDirectories(series.resolve("嫁金钗.NF.01-08"));
+        Files.writeString(batch.resolve("01.1080p.HD国语内封中字无水印.mkv"), "normal");
+
+        var result = service.scan();
+
+        assertEquals(1, result.seriesCount());
+        assertTrue(result.entries().stream().allMatch(entry -> entry.seriesTitle().equals("嫁金钗")));
+        assertEquals(1, result.entries().stream().map(EpisodeLibraryService.Entry::showKey).distinct().count());
+    }
+
+    @Test
     void skipsWorkAndHiddenDirectories() throws Exception {
         Files.writeString(downloads.resolve("正片 S01E01.mp4"), "ok");
         Path work = Files.createDirectories(downloads.resolve(".huluwa-work").resolve("1"));
