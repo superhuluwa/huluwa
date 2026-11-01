@@ -6,7 +6,6 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-const val DENGTA_SESSION_ID = "local-dengta"
 const val DENGTA_SESSION_KIND = "dengta"
 
 /** 单位沿用接口，不把缺失值当作零。raw 用于画图与比较，label 用于展示。 */

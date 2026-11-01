@@ -2,6 +2,7 @@ package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.common.BusinessException;
+import com.huluwa.console.service.AndroidSessionService;
 import com.huluwa.console.service.ChatService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,15 +26,18 @@ import java.util.Map;
 public class ChatController {
 
     private final ChatService chatService;
+    private final AndroidSessionService androidSessionService;
 
-    public ChatController(ChatService chatService) {
+    public ChatController(ChatService chatService, AndroidSessionService androidSessionService) {
         this.chatService = chatService;
+        this.androidSessionService = androidSessionService;
     }
 
-    /** 会话列表（含未读与最后一条预览） */
+    /** 会话列表；安卓客户端额外读取服务端配置的原生入口。 */
     @GetMapping("/sessions")
-    public ApiResult<List<Map<String, Object>>> sessions() {
-        return ApiResult.ok(chatService.sessions());
+    public ApiResult<List<Map<String, Object>>> sessions(@RequestParam(defaultValue = "") String client) {
+        List<Map<String, Object>> sessions = chatService.sessions();
+        return ApiResult.ok("android".equals(client) ? androidSessionService.sessions(sessions) : sessions);
     }
 
     /** 会话消息：beforeId 向上翻页（仅取更早的消息），limit 默认 50 */

@@ -99,6 +99,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         terminalBuddyBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.TerminalBuddy)),
     )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
+        // 先恢复整份缓存；无缓存时等首次服务端结果，避免先显示少数本地入口再重排。
+        if (!value.sessionCacheReady || !value.sessions.loaded) {
+            return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = emptyList()))
+        }
         val cached = value.cachedLocalSessions.associateBy { it.id }
         val upgradeTime = upgrade.latest?.publishedAt.orEmpty().ifBlank {
             if (upgrade.checkedAt > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(upgrade.checkedAt), ZoneId.systemDefault())
@@ -154,16 +158,14 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             if (!ready && cached[service.sessionId] != null) cached.getValue(service.sessionId)
             else Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
-        val dengtaSession = Session(DENGTA_SESSION_ID, "灯塔", DENGTA_SESSION_KIND, 0, null,
-            "影视榜单 · 剧集详情 · 追剧日历")
-        val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID + DENGTA_SESSION_ID
-        val remoteSessions = value.sessions.data.filterNot { it.isLocal || it.id in localIds }
+        val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
+        val remoteSessions = value.sessions.data.filterNot { it.isAppManaged || it.id in localIds }
             .groupBy { it.id }.values.map { rows ->
                 rows.maxBy { it.updatedAt }.copy(unread = rows.sumOf { it.unread })
             }
         // 最新置顶的会话排在最前，其余仍按更新时间排序；管理会话无消息时间，按最旧处理。
         val pinOrder = value.pinnedSessionIds.withIndex().associate { it.value to it.index }
-        val sortedSessions = (remoteSessions + managementSessions + upgradeSession + dengtaSession).sortedWith(
+        val sortedSessions = (remoteSessions + managementSessions + upgradeSession).sortedWith(
             compareBy<Session> { pinOrder[it.id] ?: Int.MAX_VALUE }
                 .thenByDescending { it.updatedAt.ifBlank { "0000-00-00 00:00:00" } }.thenBy { it.id })
         return value.copy(upgrade = upgrade, sessions = value.sessions.copy(data = sortedSessions))
@@ -230,20 +232,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             // 只观察实际展示的列表；轮询结果未变化时不重复落盘。
             state.map { ui ->
                 if (!ui.auth.loggedIn || !ui.sessionCacheReady || !ui.sessions.loaded) null
-                else sessionListCache.scope()?.let { scope ->
-                    val cachedIds = ui.cachedLocalSessions.map { it.id }.toSet()
-                    scope to ui.sessions.data.filter { row ->
-                        // 首次同步前的加载提示不落盘，已有摘要则继续保留。
-                        !row.isLocal || row.kind == DENGTA_SESSION_KIND || row.id in cachedIds || when (val service = row.managementService) {
-                            null -> upgradePreviewReady(ui.upgrade)
-                            else -> managementPreviewReady(ui, service)
-                        }
-                    }
-                }
+                else sessionListCache.scope()?.let { scope -> scope to ui.sessions.data }
             }.distinctUntilChanged().collect { snapshot ->
                 if (snapshot != null) {
                     val (scope, rows) = snapshot
-                    mutable.update { it.copy(cachedLocalSessions = rows.filter { row -> row.isLocal }) }
+                    mutable.update { it.copy(cachedLocalSessions = rows.filter { row -> row.isAppManaged }) }
                     withContext(Dispatchers.IO) { sessionListCache.write(scope, rows) }
                 }
             }
@@ -282,7 +275,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 冷启动先读磁盘；若网络已先返回，则只补充尚未同步的本地服务摘要。 */
+    /** 先恢复完整展示快照，服务端刷新在缓存恢复后执行。 */
     private fun restoreSessionList() {
         sessionCacheJob?.cancel()
         val scope = sessionListCache.scope() ?: return
@@ -293,9 +286,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             mutable.update {
                 it.copy(
                     sessions = if (rows != null && it.sessions.updatedAt == 0L) it.sessions.copy(
-                        data = rows.filterNot { row -> row.isLocal }, loading = false, loaded = true,
+                        data = rows.filterNot { row -> row.isAppManaged }, loading = false, loaded = true,
                     ) else it.sessions,
-                    cachedLocalSessions = rows.orEmpty().filter { row -> row.isLocal },
+                    cachedLocalSessions = rows.orEmpty().filter { row -> row.isAppManaged },
                     sessionCacheReady = true,
                 )
             }
@@ -536,6 +529,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshSessions(silent: Boolean = false) = refresh("sessions") {
         val epoch = generation
+        sessionCacheJob?.join()
+        if (epoch != generation) return@refresh
         if (!silent) mutable.update { it.copy(sessions = it.sessions.copy(loading = !it.sessions.loaded)) }
         try { val data = repository.sessions(); if (epoch == generation) mutable.update { it.copy(sessions = LoadState(data, loaded = true, updatedAt = System.currentTimeMillis())) } }
         catch (error: CancellationException) { throw error }
@@ -948,7 +943,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun onFrame(frame: JsonObject) {
         val id = frame.text("sessionId")
         when (frame.text("type")) {
-            "chat.sessions" -> mutable.update { it.copy(sessions = LoadState(frame.rows("sessions").map { row -> Session.from(row.asObject()) }, loaded = true, updatedAt = System.currentTimeMillis())) }
+            // 通用推送不包含安卓原生入口，统一重取完整配置，避免推送覆盖掉灯塔。
+            "chat.sessions" -> refreshSessions(true)
             "chat.messages" -> {
                 val rows = frame.rows("messages").map { ChatMessage.from(it.asObject()) }
                 if (mutable.value.chat.session?.id == id) {

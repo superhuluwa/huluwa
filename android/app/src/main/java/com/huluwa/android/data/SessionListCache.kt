@@ -7,7 +7,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 
-/** 功能 / 系统列表的展示快照：按服务器和账号隔离，只保存列表所需字段。 */
+/** 功能 / 系统会话的统一展示快照：包含服务端原生入口，按服务器和账号隔离。 */
 class SessionListCache(context: Context, private val store: SessionStore) {
     data class Scope internal constructor(val server: String, val username: String, internal val version: Long)
 
@@ -29,7 +29,7 @@ class SessionListCache(context: Context, private val store: SessionStore) {
             val rows = array.map { element ->
                 val row = element as? JsonObject ?: error("列表缓存条目错误")
                 require(row.text("id").isNotBlank())
-                Session.from(row).copy(previewOverride = row.text("preview"))
+                Session.from(row)
             }
             memory[key] = rows
             lastWritten[key] = encode(rows)

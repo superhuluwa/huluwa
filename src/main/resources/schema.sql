@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS sys_config (
     updated_at  TEXT NOT NULL
 );
 
+-- 安卓原生功能入口配置：保留已有会话 ID，更新服务端配置不覆盖用户的置顶记录。
+-- 仅对声明 client=android 的会话列表请求下发；INSERT OR IGNORE 保留后续自定义配置。
+INSERT OR IGNORE INTO sys_config (cfg_key, cfg_value, updated_at)
+VALUES ('chat.android.sessions',
+    '[{"id":"local-dengta","title":"灯塔","kind":"dengta","preview":"影视榜单 · 剧集详情 · 追剧日历","enabled":true}]',
+    datetime('now', 'localtime'));
+
 -- 消息中心
 CREATE TABLE IF NOT EXISTS message (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -139,7 +139,7 @@ private enum class RootPage { Home, Chat, ServerStatus }
                     pageUi.chat.session?.kind == DENGTA_SESSION_KIND ->
                         holder.SaveableStateProvider("dengta:${pageUi.auth.server}:${pageUi.auth.username}") {
                             val dengtaVm: DengtaViewModel = viewModel(key = "dengta:${pageUi.auth.server}:${pageUi.auth.username}")
-                            DengtaScreen(dengtaVm, vm::closeChat)
+                            DengtaScreen(dengtaVm, pageUi.chat.session?.title.orEmpty(), vm::closeChat)
                         }
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }

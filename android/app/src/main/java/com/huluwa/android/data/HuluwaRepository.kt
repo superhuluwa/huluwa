@@ -19,7 +19,8 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun me() = api.get("auth", "me").asObject()
     suspend fun changePassword(old: String, new: String) = api.post("auth", "password", body = jsonBody { put("oldPassword", old); put("newPassword", new) })
     fun clearCaches() { previousCpu.clear(); chatCache.clear() }
-    suspend fun sessions() = api.get("chat", "sessions").asArray().map { Session.from(it.asObject()) }
+    suspend fun sessions() = api.get("chat", "sessions", query = mapOf("client" to "android"))
+        .asArray().map { Session.from(it.asObject()) }
 
     /** 进入会话时先取本地缓存，命中即可立即渲染，不必等网络返回。 */
     suspend fun cachedMessages(id: String): List<ChatMessage> = withContext(Dispatchers.IO) { chatCache.read(id) }

@@ -47,7 +47,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 
-@Composable fun DengtaScreen(vm: DengtaViewModel, onClose: () -> Unit) {
+@Composable fun DengtaScreen(vm: DengtaViewModel, title: String, onClose: () -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val pages = rememberSaveableStateHolder()
@@ -70,7 +70,7 @@ import kotlin.math.abs
                     IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
                     if (ui.page == DengtaPage.Ranking) SessionIcon(DENGTA_SESSION_KIND, Modifier.size(36.dp))
                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                        Text(when (ui.page) { DengtaPage.Ranking -> "灯塔"; DengtaPage.Detail -> "剧集详情"; DengtaPage.Journal -> "追剧日志" },
+                        Text(when (ui.page) { DengtaPage.Ranking -> title; DengtaPage.Detail -> "剧集详情"; DengtaPage.Journal -> "追剧日志" },
                             style = MaterialTheme.typography.titleMedium)
                         Text(if (ui.page == DengtaPage.Ranking) "影视榜单与追剧日历" else ui.selected?.name ?: "每一集，都有记录",
                             color = HuluwaColors.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
