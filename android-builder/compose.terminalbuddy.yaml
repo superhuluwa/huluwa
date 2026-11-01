@@ -28,6 +28,10 @@ services:
       HULUWA_ANDROID_PLATFORM: debian
       HULUWA_ANDROID_GRADLE_WORKERS: ${HULUWA_ANDROID_GRADLE_WORKERS:-8}
       HULUWA_ANDROID_GRADLE_JVM_ARGS: "${HULUWA_ANDROID_GRADLE_JVM_ARGS:--Xmx6144m -XX:+UseParallelGC -Dfile.encoding=UTF-8}"
+    # 显式设置上游 DNS，避免开机时 DHCP 尚未写入宿主机解析配置。
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
