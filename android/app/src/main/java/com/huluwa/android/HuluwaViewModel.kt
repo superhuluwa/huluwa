@@ -49,6 +49,7 @@ private const val CHAT_PAGE_SIZE = 50
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
+    val savingImageUrls: Set<String> = emptySet(),
     val pinnedSessionIds: List<String> = emptyList(),
     val cachedLocalSessions: List<Session> = emptyList(), val sessionCacheReady: Boolean = false,
     val upgrade: AppUpgradeState = AppUpgradeState(),
@@ -81,6 +82,7 @@ data class LibraryState(
 
 class HuluwaViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as HuluwaApplication).repository
+    private val imageGallerySaver = ImageGallerySaver(application, repository.api.http)
     private val session = repository.api.store
     private val sessionListCache = (application as HuluwaApplication).sessionListCache
     private val appUpdates = (application as HuluwaApplication).appUpdates
@@ -301,6 +303,29 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun notify(text: String) { viewModelScope.launch { notices.send(text) } }
+    fun saveImageToGallery(url: String) {
+        if (url in mutable.value.savingImageUrls) return
+        val epoch = generation
+        mutable.update { it.copy(savingImageUrls = it.savingImageUrls + url) }
+        viewModelScope.launch {
+            try {
+                imageGallerySaver.save(url)
+                if (epoch == generation) notify("原图已保存到相册 · 葫芦娃")
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                AppLog.e("保存原图", "保存图片失败", error)
+                val reason = when (error) {
+                    is java.net.SocketTimeoutException -> "图片下载超时，请重试"
+                    is SecurityException -> "请允许存储权限后重试"
+                    is java.io.IOException -> "请检查网络和手机存储空间后重试"
+                    else -> error.userMessage()
+                }
+                if (epoch == generation) notify("保存失败：$reason")
+            } finally {
+                if (epoch == generation) mutable.update { it.copy(savingImageUrls = it.savingImageUrls - url) }
+            }
+        }
+    }
     fun authenticate(server: String, username: String, password: String, confirmation: String) {
         if (authJob?.isActive == true) return
         val requestedSetup = mutable.value.auth.setup

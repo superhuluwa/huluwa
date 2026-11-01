@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,7 +29,7 @@ import kotlinx.coroutines.launch
 /** 同一作品的图片与实况照片共用一个分页区域，切页立即停止视频播放。 */
 @Composable internal fun VideoImageGallery(
     images: List<ParsedImage>, playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit,
-    onOpenImage: (String) -> Unit,
+    savingImageUrls: Set<String>, onSaveImage: (String) -> Unit, onOpenImage: (String) -> Unit,
 ) {
     val pager = rememberPagerState(pageCount = { images.size })
     val scope = rememberCoroutineScope()
@@ -69,5 +70,19 @@ import kotlinx.coroutines.launch
                 Icon(Icons.Outlined.ChevronRight, "下一张", Modifier.size(20.dp), tint = if (pager.currentPage < images.lastIndex) HuluwaColors.Pine else HuluwaColors.Line)
             }
         }
+        images.getOrNull(pager.currentPage)?.let { image ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                SaveOriginalImageButton(image.url in savingImageUrls, { onSaveImage(image.url) }, enabled = !pager.isScrollInProgress)
+            }
+        }
+    }
+}
+
+@Composable internal fun SaveOriginalImageButton(saving: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
+    TextButton(onClick, enabled = enabled && !saving, colors = ButtonDefaults.textButtonColors(contentColor = HuluwaColors.Pine)) {
+        if (saving) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
+        else Icon(Icons.Outlined.FileDownload, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(if (saving) "保存中…" else "保存原图", style = MaterialTheme.typography.labelMedium)
     }
 }

@@ -1,5 +1,10 @@
 package com.huluwa.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,10 +26,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
 import com.huluwa.android.data.*
@@ -33,6 +40,22 @@ import kotlinx.coroutines.flow.first
 @Composable fun ChatScreen(ui: AppState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val chat = ui.chat; val session = chat.session ?: return
     val displayMessages = remember(chat.messages) { mergeVideoImageMessages(chat.messages) }
+    val context = LocalContext.current
+    var pendingSaveImage by rememberSaveable { mutableStateOf<String?>(null) }
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val url = pendingSaveImage
+        pendingSaveImage = null
+        if (granted && url != null) vm.saveImageToGallery(url)
+        else if (url != null) vm.notify("保存原图需要存储权限，请授权后重试")
+    }
+    fun saveOriginalImage(url: String) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            if (pendingSaveImage != null) return
+            pendingSaveImage = url
+            storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else vm.saveImageToGallery(url)
+    }
     val reconnecting = rememberReconnecting(vm)
     val list = rememberLazyListState()
     var content by rememberSaveable(session.id) { mutableStateOf("") }
@@ -100,6 +123,7 @@ import kotlinx.coroutines.flow.first
                     playingVideo = activeVideoId == message.id,
                     onVideoPlay = { activeVideoId = message.id },
                     onVideoStop = { if (activeVideoId == message.id) activeVideoId = null },
+                    onSaveImage = ::saveOriginalImage,
                     onMedia = { url, video -> activeVideoId = null; media = url to video })
             }
             item("history") {
@@ -117,7 +141,8 @@ import kotlinx.coroutines.flow.first
 
 @Composable private fun MessageBubble(
     message: ChatMessage, kind: String, ui: AppState, vm: HuluwaViewModel,
-    playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit, onMedia: (String, Boolean) -> Unit,
+    playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit,
+    onSaveImage: (String) -> Unit, onMedia: (String, Boolean) -> Unit,
 ) {
     val notify = message.notify
     val film = message.film
@@ -140,14 +165,23 @@ import kotlinx.coroutines.flow.first
                         dpd != null -> DpdResultCard(dpd, ui, vm)
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {
-                            VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop) { onMedia(it, false) }
+                            VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage) { onMedia(it, false) }
                             val caption = plainText(message.contentText)
                             if (caption.isNotBlank()) SelectionContainer { Text(caption, color = HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
                         }
-                        message.type == "image" && message.content.isNotBlank() -> AsyncImage(message.content, "消息图片",
-                            Modifier.width(240.dp).heightIn(min = 150.dp, max = 300.dp).clickable { onMedia(message.content, false) }, contentScale = ContentScale.Fit)
+                        message.type == "image" && message.content.isNotBlank() -> {
+                            AsyncImage(message.content, "消息图片",
+                                Modifier.width(240.dp).heightIn(min = 150.dp, max = 300.dp).clickable { onMedia(message.content, false) }, contentScale = ContentScale.Fit)
+                            if (kind == "video" && !message.mine) SaveOriginalImageButton(message.content in ui.savingImageUrls, { onSaveImage(message.content) })
+                        }
                         message.type == "video" && message.content.isNotBlank() -> {
                             InlineVideoBubble(message.content, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
+                            // 单张实况照片以视频消息下发，保存对应的静态原图。
+                            val originalImage = message.payload.text("poster", "cover")
+                            if (kind == "video" && !message.mine && message.payload.text("video").isBlank() &&
+                                (message.payload.number("imageCount") ?: 0.0) > 0 && originalImage.isNotBlank()) {
+                                SaveOriginalImageButton(originalImage in ui.savingImageUrls, { onSaveImage(originalImage) })
+                            }
                             val caption = plainText(message.contentText)
                             if (caption.isNotBlank()) SelectionContainer { Text(caption, color = HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
                         }
@@ -158,7 +192,7 @@ import kotlinx.coroutines.flow.first
                             if (message.payload.text("kind") == "video" && video.startsWith("http")) {
                                 InlineVideoBubble(video, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
                             }
-                            if (galleryImages.isNotEmpty()) VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop) { onMedia(it, false) }
+                            if (galleryImages.isNotEmpty()) VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage) { onMedia(it, false) }
                             if (text.isBlank() && video.isBlank() && galleryImages.isEmpty()) Text("收到一条服务消息", style = MaterialTheme.typography.bodySmall)
                         }
                     }
