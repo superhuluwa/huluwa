@@ -10,12 +10,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,14 +31,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -53,43 +47,42 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.huluwa.android.FanqieReaderState
 import com.huluwa.android.HuluwaViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 
-/** 原生阅读：目录从左侧滑出，字号跨书籍保存，全屏时轻点唤出工具，章末继续上滑自动翻章。 */
+/** 原生阅读：上下章预加载并连续排版，轻点全屏正文唤出工具。 */
 @Composable fun FanqieReaderScreen(state: FanqieReaderState, vm: HuluwaViewModel) {
     val chapter = state.chapter
+    val chapters = state.chapters
     val listState = rememberLazyListState()
-    val currentReaderState by rememberUpdatedState(state)
-    val nextChapterDragThreshold = with(LocalDensity.current) { 48.dp.toPx() }
-    val chapterScrollConnection = remember(listState, vm, nextChapterDragThreshold) {
-        ReaderChapterScrollConnection(listState, nextChapterDragThreshold) {
-            val reader = currentReaderState
-            val currentChapter = reader.chapter
-            if (reader.fullScreen && !reader.loading && reader.error == null &&
-                !reader.tocVisible && !reader.fontSettingsVisible && currentChapter?.hasNext == true) {
-                vm.rememberReaderPosition(reader.bookId, currentChapter.order,
-                    listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-                vm.readChapter(currentChapter.order + 1)
-            }
-        }
-    }
-    LaunchedEffect(chapterScrollConnection) {
-        listState.interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is DragInteraction.Start -> chapterScrollConnection.startDrag()
-                is DragInteraction.Stop, is DragInteraction.Cancel -> chapterScrollConnection.stopDrag()
-            }
-        }
-    }
+    val atStart by remember(listState) { derivedStateOf { !listState.canScrollBackward } }
+    val atEnd by remember(listState) { derivedStateOf { !listState.canScrollForward } }
     val showControls = !state.fullScreen || state.controlsVisible
     ReaderSystemBars(state.fullScreen)
-    LaunchedEffect(state.bookId, chapter, state.loading, state.error) {
-        if (chapter == null || state.loading || state.error != null) return@LaunchedEffect
-        listState.scrollToItem(chapter.paragraphIndex.coerceIn(0, chapter.paragraphs.size + 1),
-            chapter.scrollOffset.coerceAtLeast(0))
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .distinctUntilChanged().collect { (index, offset) ->
-                vm.rememberReaderPosition(state.bookId, chapter.order, index, offset)
-            }
+    // 续读与主动跳章才定位；后台插入上下章交给稳定的段落 key 保持原位置。
+    LaunchedEffect(state.bookId, state.scrollRequest, state.loading, state.error) {
+        val request = state.scrollRequest ?: return@LaunchedEffect
+        if (state.loading || state.error != null) return@LaunchedEffect
+        val chapterIndex = chapters.indexOfFirst { it.order == request.order }
+        if (chapterIndex < 0) return@LaunchedEffect
+        val target = chapters[chapterIndex]
+        val index = chapters.take(chapterIndex).sumOf { it.paragraphs.size + 1 } +
+                request.paragraphIndex.coerceIn(0, target.paragraphs.size)
+        listState.scrollToItem(index, request.scrollOffset.coerceAtLeast(0))
+        vm.completeReaderScroll(state.bookId, request.token)
+    }
+    LaunchedEffect(state.bookId, state.loading, state.error, state.scrollRequest) {
+        if (state.loading || state.error != null || state.scrollRequest != null) return@LaunchedEffect
+        snapshotFlow {
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val first = visible.firstOrNull { it.index == listState.firstVisibleItemIndex }
+            val position = first?.key?.let(::readerParagraphPosition)
+            val lastOrder = visible.asReversed().firstNotNullOfOrNull { readerParagraphPosition(it.key)?.first }
+            if (position != null && lastOrder != null) ReaderViewport(position.first, position.second,
+                listState.firstVisibleItemScrollOffset, lastOrder) else null
+        }.filterNotNull().distinctUntilChanged().collect { viewport ->
+            vm.rememberReaderPosition(state.bookId, viewport.order, viewport.paragraphIndex, viewport.scrollOffset)
+            vm.preloadReaderChapters(state.bookId, viewport.order, viewport.lastOrder)
+        }
     }
     BackHandler {
         when {
@@ -163,46 +156,55 @@ import kotlinx.coroutines.flow.distinctUntilChanged
                         Spacer(Modifier.height(12.dp))
                         Button(vm::retryReader) { Text("重试") }
                     }
-                    chapter != null -> LazyColumn(state = listState,
-                        modifier = Modifier.fillMaxSize().widthIn(max = 720.dp).align(Alignment.TopCenter)
-                            .nestedScroll(chapterScrollConnection)
-                            .pointerInput(state.fullScreen) {
-                                if (state.fullScreen) detectTapGestures { vm.toggleReaderControls() }
-                            }.semantics {
-                                if (state.fullScreen) onClick("显示或隐藏阅读工具") { vm.toggleReaderControls(); true }
-                            },
-                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        item {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(chapter.chapterTitle, fontSize = (state.fontSizeSp + 4).sp,
-                                    lineHeight = (state.fontSizeSp * 1.6f + 4).sp, fontWeight = FontWeight.SemiBold)
-                                HorizontalDivider(color = HuluwaColors.Line)
-                            }
-                        }
-                        items(chapter.paragraphs) { paragraph ->
-                            Text("　　$paragraph", fontSize = state.fontSizeSp.sp,
-                                lineHeight = (state.fontSizeSp * 1.8f).sp, color = HuluwaColors.Ink)
-                        }
-                        item {
-                            if (showControls) {
-                                Spacer(Modifier.height(20.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    if (chapter.hasPrev) OutlinedButton({ vm.readChapter(chapter.order - 1) }, Modifier.weight(1f)) {
-                                        Text("上一章", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    if (chapter.hasNext) Button({ vm.readChapter(chapter.order + 1) }, Modifier.weight(1f)) {
-                                        Text("下一章", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    } else TextButton(vm::refreshReaderBook, Modifier.weight(1f)) {
-                                        Text("已读到最新，刷新章节", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    chapter != null -> {
+                        LazyColumn(state = listState,
+                            modifier = Modifier.fillMaxSize().widthIn(max = 720.dp).align(Alignment.TopCenter)
+                                .pointerInput(state.fullScreen) {
+                                    if (state.fullScreen) detectTapGestures { vm.toggleReaderControls() }
+                                }.semantics {
+                                    if (state.fullScreen) onClick("显示或隐藏阅读工具") { vm.toggleReaderControls(); true }
+                                },
+                            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            chapters.forEach { readingChapter ->
+                                item(key = "${readingChapter.order}:0", contentType = "title") {
+                                    Column(Modifier.padding(top = 20.dp, bottom = 6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(readingChapter.chapterTitle, fontSize = (state.fontSizeSp + 4).sp,
+                                            lineHeight = (state.fontSizeSp * 1.6f + 4).sp, fontWeight = FontWeight.SemiBold)
+                                        HorizontalDivider(color = HuluwaColors.Line)
                                     }
                                 }
-                            } else {
-                                Text(if (chapter.hasNext) "本章结束，继续上滑阅读下一章" else "已读到最新",
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                                    color = HuluwaColors.Muted, style = MaterialTheme.typography.bodySmall,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                itemsIndexed(readingChapter.paragraphs,
+                                    key = { index, _ -> "${readingChapter.order}:${index + 1}" },
+                                    contentType = { _, _ -> "paragraph" }) { _, paragraph ->
+                                    Text("　　$paragraph", fontSize = state.fontSizeSp.sp,
+                                        lineHeight = (state.fontSizeSp * 1.8f).sp, color = HuluwaColors.Ink)
+                                }
                             }
+                            if (chapters.lastOrNull()?.hasNext == false) {
+                                item(key = "latest", contentType = "end") {
+                                    TextButton(vm::refreshReaderBook, Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+                                        Text("已读到最新，刷新章节")
+                                    }
+                                }
+                            }
+                        }
+                        // 预取正常完成时不显示提示；只有停在缺失的章节边缘才展示加载或重试。
+                        val first = chapters.firstOrNull()
+                        val last = chapters.lastOrNull()
+                        if (first?.hasPrev == true && atStart &&
+                            (listState.isScrollInProgress || first.order - 1 in state.adjacentErrors)) {
+                            val previousOrder = first.order - 1
+                            ReaderAdjacentLoadHint("上一章", previousOrder in state.adjacentLoading,
+                                state.adjacentErrors[previousOrder], { vm.retryAdjacentReaderChapter(previousOrder) },
+                                Modifier.align(Alignment.TopCenter).padding(12.dp))
+                        }
+                        if (last?.hasNext == true && atEnd) {
+                            val nextOrder = last.order + 1
+                            ReaderAdjacentLoadHint("下一章", nextOrder in state.adjacentLoading,
+                                state.adjacentErrors[nextOrder], { vm.retryAdjacentReaderChapter(nextOrder) },
+                                Modifier.align(Alignment.BottomCenter).padding(12.dp))
                         }
                     }
                 }
@@ -215,37 +217,30 @@ import kotlinx.coroutines.flow.distinctUntilChanged
     }
 }
 
-/** 从章末开始的新手势才触发翻章，让最后一屏正文留给用户读完。 */
-private class ReaderChapterScrollConnection(
-    private val listState: LazyListState,
-    private val dragThreshold: Float,
-    private val onNextChapter: () -> Unit,
-) : NestedScrollConnection {
-    private var startedAtEnd = false
-    private var upwardDrag = 0f
+private data class ReaderViewport(val order: Int, val paragraphIndex: Int, val scrollOffset: Int, val lastOrder: Int)
 
-    fun startDrag() {
-        startedAtEnd = !listState.canScrollForward
-        upwardDrag = 0f
-    }
+/** key 使用章节内段落索引，前面插入或移除章节后仍能准确续读。 */
+private fun readerParagraphPosition(key: Any): Pair<Int, Int>? {
+    val value = key as? String ?: return null
+    val separator = value.indexOf(':')
+    if (separator < 1) return null
+    val order = value.substring(0, separator).toIntOrNull() ?: return null
+    val paragraphIndex = value.substring(separator + 1).toIntOrNull() ?: return null
+    return order to paragraphIndex
+}
 
-    fun stopDrag() {
-        startedAtEnd = false
-        upwardDrag = 0f
-    }
-
-    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-        if (!startedAtEnd || source != NestedScrollSource.UserInput) return Offset.Zero
-        if (available.y >= 0f || listState.canScrollForward) {
-            upwardDrag = 0f
-            return Offset.Zero
+@Composable private fun ReaderAdjacentLoadHint(label: String, loading: Boolean, error: String?,
+    onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    if (!loading && error == null) return
+    Surface(modifier.widthIn(max = 320.dp).clickable(enabled = error != null, onClick = onRetry),
+        color = HuluwaColors.Paper, shape = RoundedCornerShape(12.dp), shadowElevation = 4.dp) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text(if (error != null) "${label}加载失败，点此重试" else "正在加载${label}…",
+                color = if (error != null) HuluwaColors.Danger else HuluwaColors.Muted,
+                style = MaterialTheme.typography.bodySmall)
         }
-        upwardDrag -= available.y
-        if (upwardDrag >= dragThreshold) {
-            stopDrag()
-            onNextChapter()
-        }
-        return Offset.Zero
     }
 }
 

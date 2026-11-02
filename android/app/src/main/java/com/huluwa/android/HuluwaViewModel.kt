@@ -46,7 +46,11 @@ data class ChatState(val session: Session? = null, val messages: List<ChatMessag
     val hasEarlier: Boolean = false, val error: String? = null, val processing: Boolean = false)
 /** 消息分页大小：与接口 limit 和本地缓存的一页保持一致。 */
 private const val CHAT_PAGE_SIZE = 50
-/** 番茄小说阅读页状态：当前章正文 + 目录（按需加载）+ 翻页界面状态。 */
+/** 仅打开书籍或主动跳章时定位；连续滚动跨章不会重新定位列表。 */
+data class FanqieReaderScrollRequest(val token: Int, val order: Int,
+    val paragraphIndex: Int = 0, val scrollOffset: Int = 0)
+
+/** 番茄小说阅读页状态：当前可见章 + 相邻章节正文缓存 + 按需加载的目录。 */
 data class FanqieReaderState(
     val bookId: String, val title: String, val order: Int = 0,
     val author: String = "", val cover: String = "", val prepared: Boolean = false,
@@ -54,6 +58,9 @@ data class FanqieReaderState(
     val fontSizeSp: Int = 18, val fullScreen: Boolean = false,
     val controlsVisible: Boolean = true, val fontSettingsVisible: Boolean = false,
     val chapter: FanqieChapter? = null, val loading: Boolean = false, val error: String? = null,
+    val chapters: List<FanqieChapter> = emptyList(),
+    val adjacentLoading: Set<Int> = emptySet(), val adjacentErrors: Map<Int, String> = emptyMap(),
+    val scrollRequest: FanqieReaderScrollRequest? = null,
     val tocVisible: Boolean = false,
     /** 目录只在第一次打开抽屉时拉取，之后复用。 */
     val toc: FanqieCatalog? = null, val tocLoading: Boolean = false, val tocError: String? = null,
@@ -244,6 +251,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var upgradeDownloadJob: Job? = null
     private var chatJob: Job? = null
     private var readerJob: Job? = null
+    private val readerAdjacentJobs = mutableMapOf<Int, Job>()
     private var tocJob: Job? = null
     private var readerGeneration = 0
     private var shelfGeneration = 0
@@ -940,6 +948,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun cancelReaderLoads() {
         readerGeneration++
         readerJob?.cancel(); readerJob = null
+        readerAdjacentJobs.values.forEach { it.cancel() }
+        readerAdjacentJobs.clear()
         tocJob?.cancel(); tocJob = null
     }
 
@@ -976,10 +986,89 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (reader.loading || order < 1 || order > (reader.chapter?.chapterCount ?: 0)) return
         flushReaderProgress()
         readerPosition = null
-        readerJob?.cancel(); tocJob?.cancel()
-        readerGeneration++
-        mutable.update { it.copy(reader = reader.copy(order = order, loading = true, error = null, tocVisible = false, tocLoading = false)) }
-        loadChapter(reader.bookId, order)
+        cancelReaderLoads()
+        val cached = reader.chapters.firstOrNull { it.order == order }
+        mutable.update { it.copy(reader = reader.copy(order = order, loading = cached == null, error = null,
+            chapter = cached ?: reader.chapter, chapters = if (cached != null) reader.chapters else emptyList(),
+            adjacentLoading = emptySet(), adjacentErrors = emptyMap(),
+            scrollRequest = cached?.let { FanqieReaderScrollRequest(readerGeneration, order) },
+            tocVisible = false, tocLoading = false)) }
+        if (cached == null) loadChapter(reader.bookId, order)
+    }
+
+    fun completeReaderScroll(bookId: String, token: Int) {
+        val reader = mutable.value.reader ?: return
+        if (reader.bookId != bookId || reader.scrollRequest?.token != token) return
+        mutable.update { it.copy(reader = reader.copy(scrollRequest = null)) }
+    }
+
+    /** 只围绕屏幕内的章节预取，保留前后少量正文；预取不修改阅读进度。 */
+    fun preloadReaderChapters(bookId: String, firstOrder: Int, lastOrder: Int) {
+        val reader = mutable.value.reader ?: return
+        if (reader.bookId != bookId || reader.loading || reader.error != null || reader.scrollRequest != null) return
+        val first = reader.chapters.firstOrNull { it.order == firstOrder } ?: return
+        val last = reader.chapters.firstOrNull { it.order == lastOrder } ?: return
+        if (firstOrder > lastOrder) return
+        val keepRange = (firstOrder - 2)..(lastOrder + 2)
+        val chapters = reader.chapters.filter { it.order in keepRange }
+        val errors = reader.adjacentErrors.filterKeys { it in keepRange }
+        if (chapters.size != reader.chapters.size || errors.size != reader.adjacentErrors.size) {
+            mutable.update { it.copy(reader = reader.copy(chapters = chapters, adjacentErrors = errors)) }
+        }
+        // 优先取下一章，同时准备上一章供向上回看。
+        if (last.hasNext) loadAdjacentReaderChapter(bookId, last.order + 1)
+        if (first.hasPrev) loadAdjacentReaderChapter(bookId, first.order - 1)
+    }
+
+    fun retryAdjacentReaderChapter(order: Int) {
+        val reader = mutable.value.reader ?: return
+        val first = reader.chapters.firstOrNull() ?: return
+        val last = reader.chapters.lastOrNull() ?: return
+        if (order != first.order - 1 && order != last.order + 1) return
+        loadAdjacentReaderChapter(reader.bookId, order, retry = true)
+    }
+
+    private fun loadAdjacentReaderChapter(bookId: String, order: Int, retry: Boolean = false) {
+        val reader = mutable.value.reader ?: return
+        if (reader.bookId != bookId || reader.loading || reader.error != null || reader.scrollRequest != null ||
+            order < 1 || order > (reader.chapter?.chapterCount ?: 0) ||
+            reader.chapters.any { it.order == order } || order in readerAdjacentJobs ||
+            (!retry && order in reader.adjacentErrors)) return
+        val epoch = readerGeneration
+        mutable.update { it.copy(reader = reader.copy(adjacentLoading = reader.adjacentLoading + order,
+            adjacentErrors = reader.adjacentErrors - order)) }
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val data = repository.readFanqieChapter(bookId, order)
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val active = current.reader ?: return@update current
+                    if (active.bookId != bookId) return@update current
+                    val first = active.chapters.firstOrNull()?.order ?: return@update current
+                    val last = active.chapters.lastOrNull()?.order ?: return@update current
+                    // 已滑远的慢请求不再接入，保持缓存章节连续。
+                    val canJoin = data.order == first - 1 || data.order == last + 1
+                    current.copy(reader = active.copy(
+                        chapters = if (canJoin) (active.chapters + data).sortedBy { it.order } else active.chapters,
+                        adjacentLoading = active.adjacentLoading - order,
+                        adjacentErrors = active.adjacentErrors - order))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val active = current.reader ?: return@update current
+                    if (active.bookId != bookId) return@update current
+                    current.copy(reader = active.copy(adjacentLoading = active.adjacentLoading - order,
+                        adjacentErrors = active.adjacentErrors + (order to error.userMessage())))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            } finally {
+                if (epoch == readerGeneration) readerAdjacentJobs.remove(order)
+            }
+        }
+        readerAdjacentJobs[order] = job
+        job.start()
     }
 
     fun toggleReaderToc() {
@@ -1028,15 +1117,16 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         cancelReaderLoads()
         readerPosition = null
         mutable.update { it.copy(reader = reader.copy(order = 0, prepared = false, loading = true,
-            error = null, toc = null, tocVisible = false, tocLoading = false, tocError = null)) }
+            error = null, chapters = emptyList(), adjacentLoading = emptySet(), adjacentErrors = emptyMap(),
+            scrollRequest = null, toc = null, tocVisible = false, tocLoading = false, tocError = null)) }
         loadChapter(reader.bookId, 0)
     }
 
     fun retryReader() {
         val reader = mutable.value.reader ?: return
-        readerJob?.cancel(); tocJob?.cancel()
-        readerGeneration++
-        mutable.update { it.copy(reader = reader.copy(loading = true, error = null, tocLoading = false)) }
+        cancelReaderLoads()
+        mutable.update { it.copy(reader = reader.copy(loading = true, error = null, tocLoading = false,
+            chapters = emptyList(), adjacentLoading = emptySet(), adjacentErrors = emptyMap(), scrollRequest = null)) }
         loadChapter(reader.bookId, reader.order)
     }
 
@@ -1057,7 +1147,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 if (epoch != readerGeneration) return@launch
                 mutable.update { current ->
                     val reader = current.reader ?: return@update current
-                    current.copy(reader = reader.copy(loading = false, error = null, chapter = data, order = data.order))
+                    current.copy(reader = reader.copy(loading = false, error = null, chapter = data, order = data.order,
+                        chapters = listOf(data), adjacentLoading = emptySet(), adjacentErrors = emptyMap(),
+                        scrollRequest = FanqieReaderScrollRequest(epoch, data.order, data.paragraphIndex, data.scrollOffset)))
                 }
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
@@ -1071,11 +1163,17 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 列表位置仅存到私有字段，滚动时不触发整页重组。 */
+    /** 按屏幕顶部实际可见的章节保存局部段落位置；只有跨章才更新工具栏。 */
     fun rememberReaderPosition(bookId: String, order: Int, paragraphIndex: Int, scrollOffset: Int) {
         val reader = mutable.value.reader ?: return
-        if (reader.bookId != bookId || reader.chapter?.order != order || reader.loading || reader.error != null) return
-        val position = ReaderPosition(generation, bookId, order, paragraphIndex, scrollOffset)
+        if (reader.bookId != bookId || reader.loading || reader.error != null || reader.scrollRequest != null) return
+        val chapter = reader.chapters.firstOrNull { it.order == order } ?: return
+        if (reader.chapter?.order != order) {
+            flushReaderProgress()
+            mutable.update { it.copy(reader = reader.copy(chapter = chapter, order = order)) }
+        }
+        val position = ReaderPosition(generation, bookId, order,
+            paragraphIndex.coerceIn(0, chapter.paragraphs.size), scrollOffset.coerceAtLeast(0))
         if (position == readerPosition) return
         readerPosition = position
         readerProgressJob?.cancel()
