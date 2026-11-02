@@ -87,3 +87,32 @@ data class BtbtlaQuality(val quality: String, val resolution: Int, val items: Li
         }.sortedByDescending { it.resolution }
     }
 }
+
+/**
+ * 番茄小说书目卡（kind=fanqie-book）。
+ *
+ * 只承载搜索接口下发的书目信息；番茄小说不参与订阅追更，
+ * 摘要与最新章节标题用于卡片配文之外的补充展示。
+ */
+data class FanqieBook(
+    val bookId: String, val title: String, val author: String, val cover: String,
+    val category: String, val wordNumber: Long, val finished: Boolean,
+    val score: Double, val abstractText: String, val lastChapterTitle: String,
+) {
+    val meta get() = listOf(category, if (finished) "完结" else "连载中",
+        if (wordNumber > 0) "${wordNumber / 10000} 万字" else "",
+        if (score > 0) "评分 ${"%.1f".format(score)}" else "")
+        .filter(String::isNotBlank).joinToString(" · ")
+    val summary get() = abstractText.replace(Regex("\\s+"), " ").trim()
+    companion object {
+        fun from(raw: JsonObject): FanqieBook? {
+            if (raw.text("kind") != "fanqie-book") return null
+            val id = raw.text("bookId")
+            if (id.isBlank() || raw.text("title").isBlank()) return null
+            return FanqieBook(id, raw.text("title"), raw.text("author"), raw.text("thumbUrl"),
+                raw.text("category"), raw.number("wordNumber")?.toLong() ?: 0L,
+                raw.flag("finished"), raw.number("score")?.toDouble() ?: 0.0,
+                raw.text("abstract"), raw.text("lastChapterTitle"))
+        }
+    }
+}

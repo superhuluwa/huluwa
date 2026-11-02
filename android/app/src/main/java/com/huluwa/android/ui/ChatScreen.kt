@@ -105,7 +105,7 @@ import kotlinx.coroutines.flow.first
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(content, { content = it }, Modifier.weight(1f), maxLines = 4,
-                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; "movie-hls" -> "输入片名或新版详情链接…"; "dpd" -> "输入片名，按线路搜索…"; "btbtla" -> "输入片名，搜索高清磁力…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; "movie-hls" -> "输入片名或新版详情链接…"; "dpd" -> "输入片名，按线路搜索…"; "btbtla" -> "输入片名，搜索高清磁力…"; "fanqie" -> "输入书名或作者，搜索番茄小说…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
                         textStyle = MaterialTheme.typography.bodyMedium, shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = HuluwaColors.Line, unfocusedContainerColor = HuluwaColors.Paper))
                     FilledIconButton({ val text = content.trim(); if (text.isNotEmpty()) { vm.send(text); content = "" } }, enabled = content.isNotBlank() && !chat.loading,
@@ -149,19 +149,21 @@ import kotlinx.coroutines.flow.first
     // 懂片帝作品卡走独立渲染，不复用电影港 / 电影天堂的 FilmResultCard
     val dpd = message.dpd
     val btbtla = message.btbtla
+    val fanqie = message.fanqie
     val galleryImages = remember(message.payload) { message.videoImages }
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
             Surface(color = if (message.mine) HuluwaColors.ChatBubble else Color.White,
-                shape = if (film != null || dpd != null || btbtla != null) RoundedCornerShape(18.dp) else RoundedCornerShape(
+                shape = if (film != null || dpd != null || btbtla != null || fanqie != null) RoundedCornerShape(18.dp) else RoundedCornerShape(
                     topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp,
                     bottomStart = 17.dp, bottomEnd = 17.dp),
                 border = BorderStroke(1.dp, HuluwaColors.Line)) {
-                Column(Modifier.padding(if (film != null || dpd != null || btbtla != null) 12.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(if (film != null || dpd != null || btbtla != null || fanqie != null) 12.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
                         btbtla != null -> BtbtlaResultCard(btbtla, vm)
+                        fanqie != null -> FanqieResultCard(fanqie)
                         dpd != null -> DpdResultCard(dpd, ui, vm)
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {

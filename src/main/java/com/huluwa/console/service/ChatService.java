@@ -2,6 +2,7 @@ package com.huluwa.console.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.BusinessException;
+import com.huluwa.console.service.fanqie.FanqieClient;
 import com.huluwa.console.ws.ChatPushService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -56,6 +57,8 @@ public class ChatService {
     public static final String DPD_SESSION = "dpd";
     /** BT影视磁力搜索会话键。 */
     public static final String BTBTLA_SESSION = "btbtla";
+    /** 番茄小说搜索会话键。 */
+    public static final String FANQIE_SESSION = "fanqie";
     /** 磁力下载会话键（schema 内置） */
     public static final String MAGNET_SESSION = "magnet";
     /** 视频解析会话键（schema 内置） */
@@ -92,6 +95,8 @@ public class ChatService {
     private static final int DYTT_SHOW_MAX = DyttSearchService.DEFAULT_MAX;
     /** 懂片帝单条搜索最多展示的结果条数 */
     private static final int DPD_SHOW_MAX = DongPianSearchService.DEFAULT_MAX;
+    /** 番茄小说单条搜索最多展示的书目数 */
+    private static final int FANQIE_SHOW_MAX = FanqieSearchService.DEFAULT_MAX;
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
@@ -106,6 +111,7 @@ public class ChatService {
     private final DyttSearchService dyttSearchService;
     private final DongPianSearchService dongPianSearchService;
     private final BtbtlaSearchService btbtlaSearchService;
+    private final FanqieSearchService fanqieSearchService;
     private final MovieCatalogService movieCatalogService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
@@ -120,6 +126,7 @@ public class ChatService {
     public ChatService(JdbcTemplate jdbcTemplate, DyttSearchService dyttSearchService,
                        DongPianSearchService dongPianSearchService,
                        BtbtlaSearchService btbtlaSearchService,
+                       FanqieSearchService fanqieSearchService,
                        MovieCatalogService movieCatalogService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
@@ -131,6 +138,7 @@ public class ChatService {
         this.dyttSearchService = dyttSearchService;
         this.dongPianSearchService = dongPianSearchService;
         this.btbtlaSearchService = btbtlaSearchService;
+        this.fanqieSearchService = fanqieSearchService;
         this.movieCatalogService = movieCatalogService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
@@ -404,6 +412,9 @@ public class ChatService {
                 replies.addAll(runDpdSearch(sessionId, normalizeDpdKeyword(text)));
             } else if ("btbtla".equals(kind)) {
                 replies.addAll(runBtbtlaSearch(sessionId, text));
+            } else if ("fanqie".equals(kind)) {
+                // 番茄小说会话：submit = 按书名搜索（站点接口，不参与订阅追更）
+                replies.addAll(runFanqieSearch(sessionId, normalizeFanqieKeyword(text)));
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runMagnetTask(sessionId, text));
@@ -586,6 +597,67 @@ public class ChatService {
                     : append(sessionId, "bot", "image", item.cover(), caption, payload));
         }
         return replies;
+    }
+
+    /**
+     * 番茄小说搜索：回复形态与 BT影视一致（摘要一条 + 每条书目一张卡片）。
+     *
+     * <p>番茄小说不参与订阅追更，卡片只带书目信息与封面；搜不到时给出换词提示。</p>
+     */
+    private List<ChatMessage> runFanqieSearch(String sessionId, String keyword) {
+        List<ChatMessage> replies = new ArrayList<>();
+        List<FanqieClient.Book> found;
+        try {
+            found = fanqieSearchService.search(keyword);
+        } catch (Exception e) {
+            replies.add(append(sessionId, "bot", "error", "搜索失败：" + safeMessage(e), null, null));
+            return replies;
+        }
+        if (found.isEmpty()) {
+            replies.add(append(sessionId, "bot", "text",
+                    "未搜索到「" + keyword + "」相关书籍，换个书名或作者名试试。", null, null));
+            return replies;
+        }
+        int shown = Math.min(found.size(), FANQIE_SHOW_MAX);
+        replies.add(append(sessionId, "bot", "text",
+                "关键字「" + keyword + "」找到 " + found.size() + " 本书，展示前 " + shown + " 本。", null, null));
+        for (FanqieClient.Book book : found.subList(0, shown)) {
+            String caption = FanqieSearchService.caption(book);
+            String payload = toJson(fanqieSearchService.payload(book));
+            replies.add(book.thumbUrl().isBlank()
+                    ? append(sessionId, "bot", "text", caption, null, payload)
+                    : append(sessionId, "bot", "image", book.thumbUrl(), caption, payload));
+        }
+        return replies;
+    }
+
+    /**
+     * 番茄小说关键字归一化：兼容「番茄小说搜索 斗罗」/「番茄 斗罗」/「fanqie 斗罗」→「斗罗」，
+     * 纯书名保持原样。
+     */
+    static String normalizeFanqieKeyword(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return text;
+        }
+        int space = -1;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '　' || ch == '\t' || ch == '\n' || ch == '\r') {
+                space = i;
+                break;
+            }
+        }
+        if (space <= 0) {
+            return text;
+        }
+        String head = text.substring(0, space);
+        if ("番茄小说搜索".equals(head) || "番茄小说".equals(head) || "番茄".equals(head)
+                || "fanqie".equalsIgnoreCase(head)) {
+            String rest = text.substring(space + 1).trim();
+            return rest.isEmpty() ? text : rest;
+        }
+        return text;
     }
 
     /** 懂片帝卡片配文：标题（年代 / 产地 / 类型 / 评分）+ 更新备注 + 详情页链接 */

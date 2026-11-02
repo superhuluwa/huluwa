@@ -70,6 +70,8 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     // 懂片帝：独自一套图标与配色，与电影港 / 电影天堂区分
     "dpd" -> Icons.Outlined.LocalPlay
     "btbtla" -> Icons.Outlined.ManageSearch
+    // 番茄小说：书本图标 + 品牌红，与影视类会话区分
+    "fanqie" -> Icons.Outlined.MenuBook
     "magnet" -> Icons.Outlined.CloudDownload
     "video" -> Icons.Outlined.SmartDisplay
     "xunlei", "xunlei-win" -> Icons.Outlined.Bolt
@@ -88,6 +90,7 @@ fun sessionColor(kind: String): Color = when (kind) {
     "movie", "movie-hls" -> HuluwaColors.Lilac
     "dpd" -> Color(0xFF2E7D6F)
     "btbtla" -> Color(0xFF526BA3)
+    "fanqie" -> Color(0xFFD9483B)
     "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber
@@ -103,6 +106,7 @@ private fun sessionBrandIcon(kind: String): Int? = when (kind) {
     "dytt" -> R.drawable.session_icon_dytt
     "dpd" -> R.drawable.session_icon_dpd
     "btbtla" -> R.drawable.session_icon_btbtla
+    "fanqie" -> R.drawable.session_icon_fanqie
     "magnet" -> R.drawable.session_icon_magnet
     "video" -> R.drawable.session_icon_video
     "xunlei", "xunlei-win" -> R.drawable.session_icon_xunlei

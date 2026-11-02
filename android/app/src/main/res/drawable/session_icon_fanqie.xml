@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 番茄小说会话图标：品牌红底 + 白色书本与番茄简笔，矢量重绘以适配不同尺寸的会话头像。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- 圆角底板 -->
+    <path android:pathData="M24,4 L72,4 C83,4 92,13 92,24 L92,72 C92,83 83,92 72,92 L24,92 C13,92 4,83 4,72 L4,24 C4,13 13,4 24,4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="8"
+                android:startY="4"
+                android:endX="88"
+                android:endY="92">
+                <item android:offset="0" android:color="#FF6B52" />
+                <item android:offset="1" android:color="#C7352B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 白底翻开的书页 -->
+    <path android:pathData="M22,30 C34,25 44,27 48,31 L48,68 C44,64 34,62 22,66 Z"
+        android:fillColor="#FFFFFF" />
+    <path android:pathData="M74,30 C62,25 52,27 48,31 L48,68 C52,64 62,62 74,66 Z"
+        android:fillColor="#FFF3EC" />
+    <!-- 书页横线 -->
+    <path android:pathData="M28,38 L42,36 L42,40 L28,42 Z" android:fillColor="#F3B3A8" />
+    <path android:pathData="M28,46 L42,44 L42,48 L28,50 Z" android:fillColor="#F3B3A8" />
+    <path android:pathData="M28,54 L42,52 L42,56 L28,58 Z" android:fillColor="#F3B3A8" />
+    <path android:pathData="M54,36 L68,38 L68,42 L54,40 Z" android:fillColor="#F3B3A8" />
+    <path android:pathData="M54,44 L68,46 L68,50 L54,48 Z" android:fillColor="#F3B3A8" />
+    <path android:pathData="M54,52 L68,54 L68,58 L54,56 Z" android:fillColor="#F3B3A8" />
+</vector>

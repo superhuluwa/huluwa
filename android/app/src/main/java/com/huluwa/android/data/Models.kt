@@ -104,6 +104,8 @@ data class ChatMessage(
     /** 懂片帝作品卡（kind=dpd-title）：与 [film] 互斥，渲染走独立分支 */
     val dpd: DpdCard? get() = DpdCard.from(payload)
     val btbtla: BtbtlaCard? get() = BtbtlaCard.from(payload)
+    /** 番茄小说书目卡（kind=fanqie-book）：与影视卡片互斥，走独立渲染分支 */
+    val fanqie: FanqieBook? get() = FanqieBook.from(payload)
     companion object {
         fun from(raw: JsonObject): ChatMessage {
             val payload = when (val value = raw["payload"]) {
