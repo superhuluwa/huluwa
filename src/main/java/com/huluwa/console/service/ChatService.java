@@ -175,6 +175,10 @@ public class ChatService {
         for (Map<String, Object> row : jdbcTemplate.queryForList(
                 "SELECT id, title, kind, updated_at FROM chat_session")) {
             String id = String.valueOf(row.get("id"));
+            // 电影天堂暂时从功能列表屏蔽，保留会话及历史数据，方便后续恢复。
+            if (DYTT_SESSION.equals(id)) {
+                continue;
+            }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", id);
             item.put("title", row.get("title"));
