@@ -200,3 +200,13 @@ data class FanqieBookShelf(
         }
     }
 }
+
+/** 批量删除逐本返回成功与失败，界面只移除真正删除成功的条目。 */
+data class FanqieDeleteResult(val deletedIds: Set<String>, val failures: Map<String, String>) {
+    companion object {
+        fun from(raw: JsonObject) = FanqieDeleteResult(
+            raw.rows("deletedIds").mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet(),
+            raw["failures"].asObject().mapValues { (_, value) -> (value as? JsonPrimitive)?.contentOrNull.orEmpty() },
+        )
+    }
+}

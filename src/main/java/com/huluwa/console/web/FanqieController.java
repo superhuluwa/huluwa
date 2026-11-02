@@ -4,6 +4,7 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.FanqieLibraryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotEmpty;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,11 +20,22 @@ public class FanqieController {
 
     public record OpenRequest(@Size(max = 300) String title, @Size(max = 300) String author,
                               @Size(max = 2048) String cover) { }
+    public record DeleteRequest(@NotEmpty @Size(max = 500) List<String> bookIds) { }
     public record ProgressRequest(int order, int paragraphIndex, int scrollOffset) { }
 
     @GetMapping("/books")
     public ApiResult<List<FanqieLibraryService.BookSummary>> books() {
         return ApiResult.ok(library.list());
+    }
+
+    @PostMapping("/books/delete")
+    public ApiResult<FanqieLibraryService.DeleteResult> deleteBooks(@Valid @RequestBody DeleteRequest request) {
+        return ApiResult.ok(library.deleteBooks(request.bookIds()));
+    }
+
+    @DeleteMapping("/books/{bookId}")
+    public ApiResult<FanqieLibraryService.DeleteResult> deleteBook(@PathVariable String bookId) {
+        return ApiResult.ok(library.deleteBooks(List.of(bookId)));
     }
 
     @PostMapping("/books/{bookId}/open")

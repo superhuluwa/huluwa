@@ -56,14 +56,17 @@ private enum class RootPage { Home, Chat, ServerStatus }
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
-    BackHandler(ui.chat.session != null && ui.sheet == null && !ui.browserVisible && ui.reader == null) { vm.closeChat() }
-    BackHandler(ui.serverStatusVisible && ui.sheet == null && ui.reader == null) { vm.closeServerStatus() }
+    BackHandler(ui.chat.session != null && ui.sheet == null && !ui.browserVisible && ui.reader == null && ui.fanqieShelf == null) { vm.closeChat() }
+    BackHandler(ui.serverStatusVisible && ui.sheet == null && ui.reader == null && ui.fanqieShelf == null) { vm.closeServerStatus() }
     val activeReader = ui.reader
+    val activeShelf = ui.fanqieShelf
     if (!ui.auth.loggedIn) {
         AuthScreen(ui.auth, vm::authenticate, vm::resetSetup)
     } else if (activeReader != null) {
         // 阅读页是最上层全屏页，优先于会话页与隐藏浏览器
         FanqieReaderScreen(activeReader, vm)
+    } else if (activeShelf != null) {
+        holder.SaveableStateProvider("fanqie-shelf") { FanqieShelfScreen(activeShelf, vm, snackbar) }
     } else if (ui.browserVisible) {
         HiddenBrowserScreen(vm, initialUrl = ui.browserUrl, bookmarksEnabled = ui.browserBookmarksEnabled)
     } else {

@@ -22,7 +22,6 @@ sealed interface AppSheet {
     /** defaultSeason 非空时使用订阅季号直接下载，省略参数配置。 */
     data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
         val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
-    data class FanqieShelf(val data: LoadState<List<FanqieBookShelf>>) : AppSheet
     data class Btbtla(val card: BtbtlaCard, val detail: LoadState<JsonObject>,
         val magnets: Map<String, String> = emptyMap(), val downloaded: Set<String> = emptySet()) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
@@ -52,6 +51,8 @@ data class FanqieReaderState(
     val bookId: String, val title: String, val order: Int = 0,
     val author: String = "", val cover: String = "", val prepared: Boolean = false,
     val progressError: String? = null,
+    val fontSizeSp: Int = 18, val fullScreen: Boolean = false,
+    val controlsVisible: Boolean = true, val fontSettingsVisible: Boolean = false,
     val chapter: FanqieChapter? = null, val loading: Boolean = false, val error: String? = null,
     val tocVisible: Boolean = false,
     /** 目录只在第一次打开抽屉时拉取，之后复用。 */
@@ -60,6 +61,12 @@ data class FanqieReaderState(
     val chapterTitle get() = chapter?.chapterTitle.orEmpty().ifBlank { title }
     val paragraphs get() = chapter?.paragraphs.orEmpty()
 }
+
+data class FanqieShelfState(
+    val books: LoadState<List<FanqieBookShelf>> = LoadState(emptyList()),
+    val selecting: Boolean = false, val selectedIds: Set<String> = emptySet(),
+    val deleting: Boolean = false, val deleteError: String? = null,
+)
 
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
@@ -84,6 +91,7 @@ data class AppState(
     val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
     /** 阅读页：非空时展示番茄小说阅读界面（全屏二级页）。 */
     val reader: FanqieReaderState? = null,
+    val fanqieShelf: FanqieShelfState? = null,
 ) {
     fun build(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) androidBuild else terminalBuddyBuild
     fun updateBuild(project: AndroidBuildProject, transform: (AndroidBuildState) -> AndroidBuildState): AppState =
@@ -106,6 +114,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val terminalBuddyBuildDownloads = (application as HuluwaApplication).terminalBuddyBuildDownloads
     private fun buildDownloader(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) buildDownloads else terminalBuddyBuildDownloads
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
+    private val readerPreferences = FanqieReaderPreferences(application)
     private val buildPreferences = AndroidBuildPreferences(application)
     private val sessionListPreferences = SessionListPreferences(application)
     private val mutable = MutableStateFlow(initialState())
@@ -237,6 +246,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var readerJob: Job? = null
     private var tocJob: Job? = null
     private var readerGeneration = 0
+    private var shelfGeneration = 0
+    private var shelfJob: Job? = null
+    private var shelfDeleteJob: Job? = null
     private data class ReaderPosition(val generation: Int, val bookId: String, val order: Int,
         val paragraphIndex: Int, val scrollOffset: Int)
     private data class ReaderProgressSave(val position: ReaderPosition, val completion: CompletableDeferred<Unit>)
@@ -404,7 +416,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun resetSetup() { mutable.update { it.copy(auth = it.auth.copy(setup = false, error = null)) } }
     fun logout(message: String? = null) {
-        generation++; cancelReaderLoads(); readerProgressJob?.cancel(); readerPosition = null; queuedReaderPosition = null
+        generation++; shelfGeneration++; shelfJob?.cancel(); shelfDeleteJob?.cancel(); cancelReaderLoads(); readerProgressJob?.cancel(); readerPosition = null; queuedReaderPosition = null
         stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
         appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
@@ -862,6 +874,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var chatGeneration = 0
     private var localId = -1L
     fun openSession(session: Session) {
+        if (mutable.value.fanqieShelf != null) closeFanqieShelf()
         closeReader()
         if (session.isLocal) {
             closeChat()
@@ -918,7 +931,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         cancelReaderLoads()
         readerPosition = null
         dismissSheet()
-        mutable.update { it.copy(reader = FanqieReaderState(bookId, title, author = author, cover = cover, loading = true)) }
+        mutable.update { it.copy(reader = FanqieReaderState(bookId, title, author = author, cover = cover, loading = true,
+            fontSizeSp = readerPreferences.fontSize())) }
         loadChapter(bookId, 0)
     }
 
@@ -933,6 +947,27 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         cancelReaderLoads()
         readerPosition = null
         mutable.update { it.copy(reader = null) }
+        if (mutable.value.fanqieShelf != null) refreshFanqieShelf()
+    }
+
+    fun setReaderFontSize(size: Int) {
+        val value = size.coerceIn(14, 32)
+        readerPreferences.setFontSize(value)
+        mutable.update { it.copy(reader = it.reader?.copy(fontSizeSp = value)) }
+    }
+
+    fun toggleReaderFontSettings() = mutable.update { current ->
+        current.copy(reader = current.reader?.let { it.copy(fontSettingsVisible = !it.fontSettingsVisible, controlsVisible = true) })
+    }
+
+    fun toggleReaderFullscreen() = mutable.update { current ->
+        current.copy(reader = current.reader?.let { it.copy(fullScreen = !it.fullScreen,
+            controlsVisible = it.fullScreen, fontSettingsVisible = false) })
+    }
+
+    fun toggleReaderControls() = mutable.update { current ->
+        current.copy(reader = current.reader?.let { if (it.fullScreen) it.copy(controlsVisible = !it.controlsVisible,
+            fontSettingsVisible = false) else it })
     }
 
     fun readChapter(order: Int) {
@@ -953,6 +988,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(reader = reader.copy(tocVisible = open)) }
         if (open && reader.toc == null && !reader.tocLoading) loadCatalog(reader.bookId)
     }
+
+    fun closeReaderToc() = mutable.update { it.copy(reader = it.reader?.copy(tocVisible = false)) }
 
     private fun loadCatalog(bookId: String) {
         tocJob?.cancel()
@@ -1058,16 +1095,111 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun showFanqieShelf() {
-        showSheet(AppSheet.FanqieShelf(LoadState(emptyList(), loading = true)))
-        val epoch = sheetGeneration
-        sheetJob = viewModelScope.launch {
+        dismissSheet()
+        mutable.update { it.copy(fanqieShelf = it.fanqieShelf ?: FanqieShelfState(deleting = shelfDeleteJob?.isActive == true)) }
+        refreshFanqieShelf()
+    }
+
+    fun closeFanqieShelf() {
+        shelfGeneration++; shelfJob?.cancel()
+        mutable.update { it.copy(fanqieShelf = null) }
+    }
+
+    fun refreshFanqieShelf() {
+        val shelf = mutable.value.fanqieShelf ?: return
+        if (shelf.deleting) return
+        shelfJob?.cancel()
+        val epoch = ++shelfGeneration
+        mutable.update { it.copy(fanqieShelf = shelf.copy(books = shelf.books.copy(loading = true, error = null))) }
+        shelfJob = viewModelScope.launch {
             try {
+                // 从阅读页返回时，先等待退出前提交的进度，使书架显示最新位置。
+                readerProgressBarrier?.await()
                 val books = repository.fanqieBooks()
-                if (epoch == sheetGeneration) mutable.update { it.copy(sheet = AppSheet.FanqieShelf(LoadState(books, loaded = true))) }
+                if (epoch != shelfGeneration) return@launch
+                mutable.update { current ->
+                    val latest = current.fanqieShelf ?: return@update current
+                    current.copy(fanqieShelf = latest.copy(books = LoadState(books, loaded = true),
+                        selectedIds = latest.selectedIds.intersect(books.map { it.bookId }.toSet())))
+                }
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
-                if (epoch == sheetGeneration) {
-                    mutable.update { it.copy(sheet = AppSheet.FanqieShelf(LoadState(emptyList(), error = error.userMessage(), loaded = true))) }
+                if (epoch != shelfGeneration) return@launch
+                mutable.update { current -> current.copy(fanqieShelf = current.fanqieShelf?.let {
+                    it.copy(books = it.books.copy(loading = false, error = error.userMessage()))
+                }) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun toggleShelfSelection() = mutable.update { current ->
+        current.copy(fanqieShelf = current.fanqieShelf?.let {
+            if (it.deleting) it else it.copy(selecting = !it.selecting, selectedIds = emptySet(), deleteError = null)
+        })
+    }
+
+    fun selectShelfBook(bookId: String) = mutable.update { current ->
+        current.copy(fanqieShelf = current.fanqieShelf?.let {
+            if (it.deleting) it else it.copy(selecting = true,
+                selectedIds = if (bookId in it.selectedIds) it.selectedIds - bookId else it.selectedIds + bookId)
+        })
+    }
+
+    fun selectAllShelfBooks() = mutable.update { current ->
+        current.copy(fanqieShelf = current.fanqieShelf?.let {
+            if (it.deleting) it else {
+                val all = it.books.data.map { book -> book.bookId }.toSet()
+                it.copy(selectedIds = if (it.selectedIds == all) emptySet() else all)
+            }
+        })
+    }
+
+    fun deleteShelfBooks(bookIds: Set<String>) {
+        val shelf = mutable.value.fanqieShelf ?: return
+        if (shelf.deleting || shelfDeleteJob?.isActive == true || bookIds.isEmpty()) return
+        val ids = bookIds.intersect(shelf.books.data.map { it.bookId }.toSet())
+        if (ids.isEmpty()) return
+        shelfJob?.cancel()
+        val shelfEpoch = ++shelfGeneration
+        val epoch = generation
+        mutable.update { it.copy(fanqieShelf = shelf.copy(deleting = true, deleteError = null,
+            books = shelf.books.copy(loading = false))) }
+        shelfDeleteJob = viewModelScope.launch {
+            try {
+                readerProgressBarrier?.await()
+                // 服务端每批最多 500 本，大书架按批提交并合并逐本结果。
+                val deleted = mutableSetOf<String>()
+                val failures = mutableMapOf<String, String>()
+                for (batch in ids.toList().chunked(500)) {
+                    try {
+                        val result = repository.deleteFanqieBooks(batch.toSet())
+                        deleted += result.deletedIds
+                        failures += result.failures
+                    } catch (error: CancellationException) { throw error }
+                    catch (error: Throwable) {
+                        if (error is ApiException && error.code == 401) throw error
+                        batch.forEach { failures[it] = error.userMessage() }
+                    }
+                }
+                if (epoch != generation) return@launch
+                if (queuedReaderPosition?.bookId in deleted) queuedReaderPosition = null
+                mutable.update { current ->
+                    val latest = current.fanqieShelf ?: return@update current
+                    current.copy(fanqieShelf = latest.copy(
+                        books = latest.books.copy(data = latest.books.data.filterNot { it.bookId in deleted }),
+                        selectedIds = latest.selectedIds - deleted, deleting = false,
+                        deleteError = if (failures.isEmpty()) null else "${failures.size} 本删除失败，请重试",
+                    ))
+                }
+                // 若删除期间离开又重进书架，则重新取服务器列表。
+                if (shelfEpoch != shelfGeneration && mutable.value.fanqieShelf != null) refreshFanqieShelf()
+                notify(if (failures.isEmpty()) "已删除 ${deleted.size} 本小说" else "已删除 ${deleted.size} 本，${failures.size} 本删除失败")
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (epoch == generation) {
+                    mutable.update { current -> current.copy(fanqieShelf = current.fanqieShelf?.copy(deleting = false,
+                        deleteError = error.userMessage())) }
                     if (error is ApiException && error.code == 401) handleError(error)
                 }
             }

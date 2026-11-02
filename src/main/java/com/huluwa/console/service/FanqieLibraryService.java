@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -100,6 +101,49 @@ public class FanqieLibraryService {
         return books;
     }
 
+    public record DeleteResult(List<String> deletedIds, Map<String, String> failures) { }
+
+    /** 批量操作逐本返回结果，某一本清理失败不会掩盖其他书籍的删除结果。 */
+    public DeleteResult deleteBooks(List<String> bookIds) {
+        if (bookIds == null || bookIds.isEmpty() || bookIds.size() > 500) {
+            throw new BusinessException(400, "请选择 1 至 500 本小说");
+        }
+        bookIds.forEach(FanqieLibraryService::validateId);
+        List<String> deleted = new ArrayList<>();
+        Map<String, String> failures = new LinkedHashMap<>();
+        for (String bookId : new LinkedHashSet<>(bookIds)) {
+            synchronized (bookLock(bookId)) {
+                try {
+                    Path dir = bookDir(bookId);
+                    if (Files.exists(dir)) {
+                        // 先清理正文，最后移除目录索引；中途失败仍可从书架重试。
+                        if (Files.isSymbolicLink(dir)) {
+                            Files.delete(dir);
+                        } else {
+                            Path catalog = dir.resolve("catalog.json");
+                            try (var paths = Files.walk(dir)) {
+                                for (Path path : paths.filter(p -> !p.equals(dir) && !p.equals(catalog))
+                                        .sorted(Comparator.reverseOrder()).toList()) {
+                                    Files.deleteIfExists(path);
+                                }
+                            }
+                            Files.deleteIfExists(catalog);
+                            Files.deleteIfExists(dir);
+                        }
+                    }
+                    jdbc.update("DELETE FROM fanqie_read_progress WHERE book_id = ?", bookId);
+                    deleted.add(bookId);
+                } catch (IOException | RuntimeException error) {
+                    log.warn("删除番茄小说 {} 失败", bookId, error);
+                    failures.put(bookId, "删除失败，请重试");
+                } finally {
+                    synchronized (cache) { cache.remove(bookId); }
+                }
+            }
+        }
+        return new DeleteResult(List.copyOf(deleted), Map.copyOf(failures));
+    }
+
     /** 读取完整的一章；GET 不推进阅读进度，避免取消请求或目录加载覆盖续读位置。 */
     public Map<String, Object> read(String bookId, int order) {
         validateId(bookId);
@@ -165,18 +209,21 @@ public class FanqieLibraryService {
 
     /** 由客户端在正文实际显示、滚动停下或离开阅读页时保存。 */
     public void saveProgress(String bookId, int order, int paragraphIndex, int scrollOffset) {
-        BookIndex index = requireIndex(bookId);
-        if (order < 1 || order > index.chapters().size() || paragraphIndex < 0 || paragraphIndex > 100000
-                || scrollOffset < 0 || scrollOffset > 100000) {
-            throw new BusinessException(400, "阅读位置不正确");
+        validateId(bookId);
+        synchronized (bookLock(bookId)) {
+            BookIndex index = requireIndex(bookId);
+            if (order < 1 || order > index.chapters().size() || paragraphIndex < 0 || paragraphIndex > 100000
+                    || scrollOffset < 0 || scrollOffset > 100000) {
+                throw new BusinessException(400, "阅读位置不正确");
+            }
+            jdbc.update("""
+                    INSERT INTO fanqie_read_progress (book_id, chapter_order, paragraph_index, scroll_offset, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(book_id) DO UPDATE SET chapter_order = excluded.chapter_order,
+                        paragraph_index = excluded.paragraph_index, scroll_offset = excluded.scroll_offset,
+                        updated_at = excluded.updated_at
+                    """, bookId, order, paragraphIndex, scrollOffset, System.currentTimeMillis());
         }
-        jdbc.update("""
-                INSERT INTO fanqie_read_progress (book_id, chapter_order, paragraph_index, scroll_offset, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(book_id) DO UPDATE SET chapter_order = excluded.chapter_order,
-                    paragraph_index = excluded.paragraph_index, scroll_offset = excluded.scroll_offset,
-                    updated_at = excluded.updated_at
-                """, bookId, order, paragraphIndex, scrollOffset, System.currentTimeMillis());
     }
 
     private BookSummary summary(BookIndex index) {
@@ -194,21 +241,23 @@ public class FanqieLibraryService {
 
     private BookIndex loadIndex(String bookId) {
         validateId(bookId);
-        synchronized (cache) {
-            BookIndex index = cache.get(bookId);
-            if (index != null) return index;
-        }
-        Path file = bookDir(bookId).resolve("catalog.json");
-        if (!Files.isRegularFile(file)) return null;
-        try {
-            BookIndex index = json.readValue(Files.readString(file, StandardCharsets.UTF_8), BookIndex.class);
-            if (!bookId.equals(index.bookId()) || index.chapters() == null || index.chapters().isEmpty()
-                    || index.chapters().stream().anyMatch(c -> !validId(c.itemId()))) return null;
-            synchronized (cache) { cache.put(bookId, index); }
-            return index;
-        } catch (IOException | RuntimeException error) {
-            log.warn("读取番茄小说 {} 的目录缓存失败：{}", bookId, error.getMessage());
-            return null;
+        synchronized (bookLock(bookId)) {
+            synchronized (cache) {
+                BookIndex index = cache.get(bookId);
+                if (index != null) return index;
+            }
+            Path file = bookDir(bookId).resolve("catalog.json");
+            if (!Files.isRegularFile(file)) return null;
+            try {
+                BookIndex index = json.readValue(Files.readString(file, StandardCharsets.UTF_8), BookIndex.class);
+                if (!bookId.equals(index.bookId()) || index.chapters() == null || index.chapters().isEmpty()
+                        || index.chapters().stream().anyMatch(c -> !validId(c.itemId()))) return null;
+                synchronized (cache) { cache.put(bookId, index); }
+                return index;
+            } catch (IOException | RuntimeException error) {
+                log.warn("读取番茄小说 {} 的目录缓存失败：{}", bookId, error.getMessage());
+                return null;
+            }
         }
     }
 

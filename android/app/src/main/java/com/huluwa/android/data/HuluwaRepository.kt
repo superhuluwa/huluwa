@@ -196,6 +196,11 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun fanqieBooks(): List<FanqieBookShelf> =
         api.get("fanqie", "books").asArray().mapNotNull { FanqieBookShelf.from(it.asObject()) }
 
+    suspend fun deleteFanqieBooks(bookIds: Set<String>): FanqieDeleteResult =
+        FanqieDeleteResult.from(api.post("fanqie", "books", "delete", body = jsonBody {
+            putJsonArray("bookIds") { bookIds.forEach { add(JsonPrimitive(it)) } }
+        }).asObject())
+
     /** 复用电影港的手动磁力下载接口、默认下载器、保存目录、任务记录及通知。 */
     suspend fun enqueueBtbtlaMagnet(card: BtbtlaCard, item: BtbtlaResource, magnet: String, resolution: Int): JsonObject =
         api.post("chat", "subscriptions", "magnets", "download", body = jsonBody {

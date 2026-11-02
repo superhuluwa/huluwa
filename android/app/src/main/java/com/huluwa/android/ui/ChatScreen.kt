@@ -91,12 +91,14 @@ import kotlinx.coroutines.flow.first
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
                     if (session.kind == "fanqie") IconButton(vm::showFanqieShelf) {
-                        Icon(Icons.Outlined.MenuBook, "我的书架")
+                        Icon(Icons.Outlined.MenuBook, "书架管理")
                     }
                     IconButton({ vm.refreshChat() }) { Icon(Icons.Outlined.Refresh, "刷新会话") }
                     Box {
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "会话操作") }
                         DropdownMenu(menu, { menu = false }) {
+                            if (session.kind == "fanqie") DropdownMenuItem(text = { Text("书架管理") },
+                                onClick = { menu = false; vm.showFanqieShelf() })
                             if (session.kind != "system" && session.kind != "fanqie") DropdownMenuItem(text = { Text("服务设置") }, onClick = { menu = false; vm.showSettings(session.kind) })
                             if (session.kind != "system") DropdownMenuItem(text = { Text("清空会话") }, onClick = { menu = false; vm.clearChat() })
                         }
@@ -136,7 +138,7 @@ import kotlinx.coroutines.flow.first
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }
                 if (!chat.loading && chat.messages.isEmpty() && chat.error == null) {
-                    if (session.kind == "fanqie") EmptyContent("搜索想看的小说", "发送书名或作者，点击搜索结果即可阅读；读过的书可从右上角书架继续", sessionIcon(session.kind))
+                    if (session.kind == "fanqie") EmptyContent("搜索想看的小说", "发送书名或作者，点击搜索结果即可阅读；读过的书可从右上角书架管理继续", sessionIcon(session.kind))
                     else EmptyContent("发条消息，开始吧", "搜索影视、提交下载，都可以从这里开始", sessionIcon(session.kind))
                 }
             }
