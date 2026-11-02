@@ -1,9 +1,10 @@
 package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
-import com.huluwa.console.service.DyttSearchService;
+import com.huluwa.console.service.VideoResourceCacheService;
 import com.huluwa.console.service.HlsDownloadService;
 import com.huluwa.console.service.HlsSubscriptionService;
+import com.huluwa.console.service.HlsSupport;
 import com.huluwa.console.service.SubscriptionCheckLogService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,10 +24,10 @@ import java.util.Map;
 public class HlsController {
     private final HlsSubscriptionService subscriptions;
     private final HlsDownloadService downloads;
-    private final DyttSearchService source;
+    private final VideoResourceCacheService cache;
 
-    public HlsController(HlsSubscriptionService subscriptions, HlsDownloadService downloads, DyttSearchService source) {
-        this.subscriptions = subscriptions; this.downloads = downloads; this.source = source;
+    public HlsController(HlsSubscriptionService subscriptions, HlsDownloadService downloads, VideoResourceCacheService cache) {
+        this.subscriptions = subscriptions; this.downloads = downloads; this.cache = cache;
     }
     @GetMapping("/settings")
     public ApiResult<HlsDownloadService.Settings> settings() { return ApiResult.ok(downloads.settings()); }
@@ -35,10 +36,11 @@ public class HlsController {
         return ApiResult.ok(downloads.saveSettings(body));
     }
     @GetMapping("/detail")
-    public ApiResult<DyttSearchService.DyttItem> detail(@RequestParam String resId, @RequestParam(required = false) String apiUrl) {
-        DyttSearchService.DyttItem item = source.detail(apiUrl, resId);
+    public ApiResult<Map<String, Object>> detail(@RequestParam String resId, @RequestParam(required = false) String apiUrl,
+                                                  @RequestParam(defaultValue = "false") boolean cachedOnly) {
+        Map<String, Object> item = cache.dyttDetail(apiUrl, resId, cachedOnly);
         // 顺带回填订阅封面：旧订阅缺图或站点换海报时，「我的订阅」无需等巡检即可显示
-        subscriptions.refreshCover(apiUrl, resId, item.cover());
+        subscriptions.refreshCover(apiUrl, resId, HlsSupport.text(item.get("cover")));
         return ApiResult.ok(item);
     }
     @GetMapping("/subscriptions")

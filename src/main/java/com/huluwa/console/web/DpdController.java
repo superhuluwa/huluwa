@@ -3,6 +3,7 @@ package com.huluwa.console.web;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.DongPianSearchService;
 import com.huluwa.console.service.HlsDownloadService;
+import com.huluwa.console.service.VideoResourceCacheService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,10 +28,12 @@ public class DpdController {
     private final DongPianSearchService source;
 
     private final HlsDownloadService downloads;
+    private final VideoResourceCacheService cache;
 
-    public DpdController(DongPianSearchService source, HlsDownloadService downloads) {
+    public DpdController(DongPianSearchService source, HlsDownloadService downloads, VideoResourceCacheService cache) {
         this.source = source;
         this.downloads = downloads;
+        this.cache = cache;
     }
 
     public record DownloadRequest(String resId, String line, String title, Integer season, Integer episode) { }
@@ -42,21 +45,18 @@ public class DpdController {
         return ApiResult.ok(downloads.enqueueDpd(catalog, body.line(), body.title(), body.season(), body.episode()));
     }
 
-    /** 作品详情 + 线路清单（各集地址留空，前端按线路懒加载） */
+    /** 详情先返回持久化目录并后台刷新；cachedOnly 轮询不触发站点请求。 */
     @GetMapping("/detail")
     public ApiResult<Map<String, Object>> detail(@RequestParam String resId,
-                                                 @RequestParam(defaultValue = "false") boolean refresh) {
-        DongPianSearchService.Catalog catalog = refresh ? source.refreshDetail(resId) : source.detail(resId);
-        List<DongPianSearchService.Line> lines = source.lines(catalog);
-        return ApiResult.ok(source.toDetail(catalog, lines));
+                                                 @RequestParam(defaultValue = "false") boolean cachedOnly) {
+        return ApiResult.ok(cache.dpdDetail(resId, cachedOnly));
     }
 
-    /** 指定线路的全部剧集，官方线路未解析的地址留空 */
+    /** 指定线路的全部剧集；后台补齐第三方地址，官方线路不预兑换。 */
     @GetMapping("/line")
-    public ApiResult<Map<String, Object>> line(@RequestParam String resId, @RequestParam String line) {
-        DongPianSearchService.Catalog catalog = source.detail(resId);
-        List<DongPianSearchService.PlayItem> items = source.line(catalog, line);
-        return ApiResult.ok(source.toLinePayload(catalog, line, items));
+    public ApiResult<Map<String, Object>> line(@RequestParam String resId, @RequestParam String line,
+                                               @RequestParam(defaultValue = "false") boolean cachedOnly) {
+        return ApiResult.ok(cache.dpdLine(resId, line, cachedOnly));
     }
 
     /** 单集按需解析：长剧首屏之外的集在用户点开时才解析/兑换 */

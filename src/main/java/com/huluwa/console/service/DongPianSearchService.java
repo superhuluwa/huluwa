@@ -37,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
+import java.util.function.Consumer;
 
 /**
  * 懂片帝（dongpian19.com）搜索：逆向其 Web 前端调用的私有 JSON 接口。
@@ -478,6 +479,73 @@ public class DongPianSearchService {
             }
         }
         return items;
+    }
+
+    /**
+     * 服务端持续补齐选中线路；首份快照立即落库，后续每批最多 6 集，覆盖全部已更新集数。
+     * 官方线路仅读回永久链接，后台始终不兑换票据。
+     */
+    public void cacheLine(Catalog catalog, String lineName, Consumer<List<PlayItem>> snapshots) {
+        String wanted = requireLine(lineName);
+        List<Episode> episodes = catalog.episodes();
+        loadCachedEpisodes(episodes);
+        // 将升级前的短期直链缓存也归档到稳定键，服务重启或 token 轮换后仍可读回。
+        for (Episode episode : episodes) {
+            if (episode.lines != null) saveDirectLinks(episode, episode.lines);
+        }
+        snapshots.accept(cachedPlayItems(episodes, wanted));
+        if (isOfficialLine(episodes, wanted)) return;
+
+        List<Episode> missing = episodes.stream().filter(episode -> {
+            Map<String, RawLine> lines = episode.lines;
+            return !episode.redeemed.containsKey(wanted) && (lines == null || !lines.containsKey(wanted));
+        }).toList();
+        int failures = 0;
+        for (int offset = 0; offset < missing.size(); offset += CONCURRENCY) {
+            List<CompletableFuture<Boolean>> batch = new ArrayList<>();
+            for (Episode episode : missing.subList(offset, Math.min(offset + CONCURRENCY, missing.size()))) {
+                batch.add(CompletableFuture.supplyAsync(() -> {
+                    try {
+                        // 只解析第三方直链及线路票据，不调用会消耗额度的 resolveSingle。
+                        saveDirectLinks(episode, resolve(episode));
+                        return true;
+                    } catch (RuntimeException error) {
+                        log.debug("懂片帝后台缓存分集失败 {}：{}", episode.title(), error.getMessage());
+                        return false;
+                    }
+                }, pool));
+            }
+            for (var task : batch) if (!task.join()) failures++;
+            snapshots.accept(cachedPlayItems(episodes, wanted));
+        }
+        if (failures > 0) throw new DongPianException("部分剧集地址未能缓存，请刷新重试", null);
+    }
+
+    /** 纯缓存快照，不请求站点；永久链接优先，未解析的集继续保留为空地址。 */
+    private List<PlayItem> cachedPlayItems(List<Episode> episodes, String lineName) {
+        loadSavedLinks(episodes, lineName);
+        return episodes.stream().map(episode -> {
+            String url = episode.redeemed.get(lineName);
+            if (url == null && episode.lines != null) {
+                RawLine direct = episode.lines.get(lineName);
+                if (direct != null) url = direct.url();
+            }
+            return new PlayItem(episode.title(), url == null ? "" : url);
+        }).toList();
+    }
+
+    /** 第三方解析一次得到多条线路，全部永久保存；不会兑换或覆盖官方线路票据。 */
+    private void saveDirectLinks(Episode episode, Map<String, RawLine> lines) {
+        String now = LocalDateTime.now().format(TIME_FORMAT);
+        for (RawLine line : lines.values()) {
+            db.update("""
+                    INSERT INTO dpd_episode_link (res_id, episode_title, line_name, url, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(res_id, episode_title, line_name) DO UPDATE SET
+                        url = excluded.url, updated_at = excluded.updated_at
+                    WHERE url <> excluded.url
+                    """, episode.resId(), episode.title(), line.name(), line.url(), now, now);
+        }
     }
 
     /** 单集解析失败不影响整条线路，缺的集直接跳过；失败时释放排队标记，下次请求可重试 */

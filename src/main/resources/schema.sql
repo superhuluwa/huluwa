@@ -424,7 +424,7 @@ CREATE TABLE IF NOT EXISTS android_build_server (
     created_at TEXT NOT NULL
 );
 
--- 懂片帝第三方直链的短期解析缓存；用户主动获取的链接另存于 dpd_episode_link，永久保留。
+-- 懂片帝第三方直链的短期解析缓存；后台取得的直链和用户主动兑换的链接另存于 dpd_episode_link，永久保留。
 CREATE TABLE IF NOT EXISTS dpd_episode_cache (
     episode_token TEXT PRIMARY KEY,                  -- 每集唯一的解析 token
     res_id        TEXT NOT NULL,                     -- 作品 ID，按作品清理时用
@@ -436,7 +436,7 @@ CREATE TABLE IF NOT EXISTS dpd_episode_cache (
 CREATE INDEX IF NOT EXISTS idx_dpd_cache_res ON dpd_episode_cache(res_id);
 CREATE INDEX IF NOT EXISTS idx_dpd_cache_time ON dpd_episode_cache(updated_at);
 
--- 用户主动解析或下载后取得的链接，按作品 / 集标题 / 线路永久保存，不依赖会轮换的 token。
+-- 第三方后台解析及用户主动解析或下载取得的链接，按作品 / 集标题 / 线路永久保存，不依赖会轮换的 token。
 CREATE TABLE IF NOT EXISTS dpd_episode_link (
     res_id        TEXT NOT NULL,
     episode_title TEXT NOT NULL,
@@ -464,3 +464,18 @@ CREATE TABLE IF NOT EXISTS btbtla_magnet_cache (
 );
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (10, datetime('now', 'localtime'));
+
+
+-- v11：懂片帝作品 / 线路和电影天堂完整播放源快照，按采集接口区分同名数字 ID。
+CREATE TABLE IF NOT EXISTS video_resource_cache (
+    source        TEXT NOT NULL,
+    provider      TEXT NOT NULL DEFAULT '',
+    res_id        TEXT NOT NULL,
+    line_name     TEXT NOT NULL DEFAULT '',           -- 空串表示作品详情，否则为懂片帝线路名
+    payload_json  TEXT NOT NULL,
+    refresh_error TEXT,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (source, provider, res_id, line_name)
+);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (11, datetime('now', 'localtime'));

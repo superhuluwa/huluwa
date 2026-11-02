@@ -261,6 +261,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var authJob: Job? = null
     private var mutationJob: Job? = null
     private var sheetJob: Job? = null
+    private val dpdLineJobs = mutableMapOf<String, Job>()
     private val refreshJobs = mutableMapOf<String, Job>()
     private var generation = 0
     private var sheetGeneration = 0
@@ -417,7 +418,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     fun resetSetup() { mutable.update { it.copy(auth = it.auth.copy(setup = false, error = null)) } }
     fun logout(message: String? = null) {
         generation++; shelfGeneration++; shelfJob?.cancel(); shelfDeleteJob?.cancel(); cancelReaderLoads(); readerProgressJob?.cancel(); readerPosition = null; queuedReaderPosition = null
-        stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
+        stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); cancelSheetLoads(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
         appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
@@ -1317,8 +1318,14 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             "error" -> if (frame.number("code")?.toInt() == 401) logout("登录已过期，请重新登录")
         }
     }
-    fun showSheet(sheet: AppSheet) { sheetGeneration++; sheetJob?.cancel(); mutable.update { it.copy(sheet = sheet, actionError = null) } }
-    fun dismissSheet() { sheetGeneration++; sheetJob?.cancel(); mutable.update { it.copy(sheet = null) } }
+    private fun cancelSheetLoads() {
+        sheetJob?.cancel()
+        val lines = dpdLineJobs.values.toList()
+        dpdLineJobs.clear()
+        lines.forEach(Job::cancel)
+    }
+    fun showSheet(sheet: AppSheet) { sheetGeneration++; cancelSheetLoads(); mutable.update { it.copy(sheet = sheet, actionError = null) } }
+    fun dismissSheet() { sheetGeneration++; cancelSheetLoads(); mutable.update { it.copy(sheet = null) } }
     fun confirm(title: String, text: String, positive: String = "确认", action: () -> Unit) { showSheet(AppSheet.Confirm(title, text, positive, action)) }
     fun confirmSheet() { val action = (mutable.value.sheet as? AppSheet.Confirm)?.action ?: return; dismissSheet(); action() }
     private fun perform(key: String, success: String, close: Boolean = true, after: () -> Unit = {}, block: suspend () -> Unit) {
@@ -1444,84 +1451,114 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (mutable.value.sheet is AppSheet.Dpd) dismissSheet()
     }
 
-    /** 重新抓取作品详情；已解析的各线路一并清空，避免集数变化后仍显示旧地址 */
+    /** 先显示服务端缓存，再同步目录；保留线路、已解析地址和下载标记。 */
     fun reloadDpdSources(card: DpdCard) {
         val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
-        if (sheet.card.key() != card.key()) return
+        if (sheet.card.key() != card.key() || sheetJob?.isActive == true) return
         val current = sheetGeneration
-        mutable.update { old ->
-            val active = old.sheet as? AppSheet.Dpd ?: return@update old
-            old.copy(sheet = active.copy(detail = active.detail.copy(loading = true, error = null), lines = emptyMap(), busyLine = ""))
-        }
-        viewModelScope.launch {
+        mutable.update { it.copy(sheet = sheet.copy(detail = sheet.detail.copy(loading = true, error = null))) }
+        sheetJob = viewModelScope.launch {
             try {
-                val result = repository.dpdDetail(card.id)
-                AppLog.d("懂片帝", "详情返回：${result.rows("dpdLines").size} 条线路")
-                if (current != sheetGeneration) return@launch
-                mutable.update { old ->
-                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
-                    old.copy(sheet = active.copy(detail = LoadState(result, loaded = true)))
+                var result = repository.dpdDetail(card.id)
+                while (current == sheetGeneration) {
+                    val refreshing = result.flag("refreshing")
+                    mutable.update { old ->
+                        val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                        if (active.card.key() != card.key()) return@update old
+                        old.copy(sheet = active.copy(detail = resourceSnapshot(result)))
+                    }
+                    if (!refreshing) {
+                        // 目录更新后刷新已打开的线路。旧线路若仍在补齐，完成后再取得新集数。
+                        val active = mutable.value.sheet as? AppSheet.Dpd
+                        val names = DpdLine.rows(result).map { it.name }.toSet()
+                        active?.lines?.keys?.filter { it in names }?.forEach { line ->
+                            val running = dpdLineJobs[line]
+                            if (running?.isActive == true) running.invokeOnCompletion {
+                                viewModelScope.launch {
+                                    if (current == sheetGeneration) loadDpdLine(card, line, refresh = true)
+                                }
+                            } else loadDpdLine(card, line, refresh = true)
+                        }
+                        break
+                    }
+                    delay(1200)
+                    result = repository.dpdDetail(card.id, cachedOnly = true)
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                AppLog.e("懂片帝", "详情加载失败", error)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                AppLog.e("懂片帝", "目录同步失败", error)
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
-                    old.copy(sheet = active.copy(detail = LoadState(JsonObject(emptyMap()), loaded = true, error = error.userMessage())))
+                    old.copy(sheet = active.copy(detail = active.detail.copy(
+                        loading = false, loaded = true, error = error.userMessage())))
                 }
                 if (error is ApiException && error.code == 401) handleError(error)
             }
         }
     }
 
-    /**
-     * 解析某条线路的全部剧集。
-     * 每条线路的每集都要单独请求站点，很慢，所以只在用户点选这条线路时才拉；结果缓存到弹框状态里。
-     */
-    fun loadDpdLine(card: DpdCard, line: String) {
+    /** 每条线路独立同步，后台每批补齐的地址自动回填，切换线路无需等待其他线路。 */
+    fun loadDpdLine(card: DpdCard, line: String, refresh: Boolean = false) {
         val sheet = mutable.value.sheet as? AppSheet.Dpd ?: return
-        if (sheet.card.key() != card.key() || line.isBlank()) return
+        if (sheet.card.key() != card.key() || line.isBlank() || dpdLineJobs[line]?.isActive == true) return
         val existing = sheet.lines[line]
-        if (existing != null && (existing.loading || (existing.loaded && existing.error == null))) return
+        if (!refresh && existing?.loaded == true && existing.error == null) return
         val current = sheetGeneration
         mutable.update { old ->
             val active = old.sheet as? AppSheet.Dpd ?: return@update old
-            old.copy(sheet = active.copy(
-                busyLine = line,
-                lines = active.lines + (line to LoadState(JsonObject(emptyMap()), loading = true))))
+            old.copy(sheet = active.copy(busyLine = line, lines = active.lines +
+                (line to (existing ?: LoadState(JsonObject(emptyMap()))).copy(loading = true, error = null))))
         }
-        AppLog.d("懂片帝", "开始解析线路：$line")
-        val startedAt = System.currentTimeMillis()
-        viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val result = repository.dpdLine(card.id, line)
-                val items = result.rows("episodes")
-                AppLog.d("懂片帝", "线路「$line」返回 ${items.size} 集，其中 ${items.count { e -> e.asObject().text("url").isNotBlank() }} 集有地址（${System.currentTimeMillis() - startedAt}ms）")
-                if (current != sheetGeneration) return@launch
-                mutable.update { old ->
-                    val active = old.sheet as? AppSheet.Dpd ?: return@update old
-                    old.copy(sheet = active.copy(
-                        busyLine = if (active.busyLine == line) "" else active.busyLine,
-                        lines = active.lines + (line to LoadState(result, loaded = true))))
+                var result = repository.dpdLine(card.id, line)
+                while (current == sheetGeneration) {
+                    val refreshing = result.flag("refreshing")
+                    mutable.update { old ->
+                        val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                        if (active.card.key() != card.key()) return@update old
+                        // 单集主动解析的响应可能先于后台快照到达；空地址不能覆盖已取得的链接。
+                        val previous = active.lines[line]?.data?.rows("episodes")
+                            ?.associate { it.asObject().text("title") to it.asObject().text("url") }.orEmpty()
+                        val episodes = result.rows("episodes").map { element ->
+                            val item = element.asObject()
+                            val saved = previous[item.text("title")].orEmpty()
+                            if (item.text("url").isBlank() && saved.isNotBlank()) JsonObject(item + ("url" to JsonPrimitive(saved)))
+                            else element
+                        }
+                        val data = JsonObject(result + ("episodes" to JsonArray(episodes)))
+                        old.copy(sheet = active.copy(
+                            busyLine = if (!refreshing && active.busyLine == line) "" else active.busyLine,
+                            lines = active.lines + (line to resourceSnapshot(data))))
+                    }
+                    if (!refreshing) break
+                    delay(1200)
+                    result = repository.dpdLine(card.id, line, cachedOnly = true)
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                AppLog.e("懂片帝", "线路「$line」解析失败（${System.currentTimeMillis() - startedAt}ms）", error)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                AppLog.e("懂片帝", "线路「$line」同步失败", error)
                 if (current != sheetGeneration) return@launch
                 mutable.update { old ->
                     val active = old.sheet as? AppSheet.Dpd ?: return@update old
+                    val state = active.lines[line] ?: LoadState(JsonObject(emptyMap()))
                     old.copy(sheet = active.copy(
                         busyLine = if (active.busyLine == line) "" else active.busyLine,
-                        lines = active.lines + (line to LoadState(
-                            JsonObject(emptyMap()), loaded = true, error = error.userMessage()))))
+                        lines = active.lines + (line to state.copy(loading = false, loaded = true, error = error.userMessage()))))
                 }
                 if (error is ApiException && error.code == 401) handleError(error)
+            } finally {
+                if (current == sheetGeneration) dpdLineJobs.remove(line)
             }
         }
+        dpdLineJobs[line] = job
+        job.start()
     }
+
+    private fun resourceSnapshot(data: JsonObject): LoadState<JsonObject> = LoadState(data,
+        loading = data.flag("refreshing"), loaded = true,
+        error = data.text("refreshError").takeIf { it.isNotBlank() }?.let { "刷新失败，当前显示已缓存的资源：$it" })
 
     /** 懂片帝作品页（站点 /player/{作品ID}）用内置浏览器打开 */
     fun openDpdWebsite(card: DpdCard) {
@@ -1702,11 +1739,18 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             val sources = if (card.isMovie) listOf(false, true) else listOf(false)
             sources.forEach { online -> launch {
                 try {
-                    val result = repository.filmResources(card, online)
-                    if (current == sheetGeneration) mutable.update { old ->
-                        val active = old.sheet as? AppSheet.Films ?: return@update old
-                        val loaded = LoadState(result, loaded = true)
-                        old.copy(sheet = if (online) active.copy(onlineData = loaded) else active.copy(data = loaded))
+                    var result = repository.filmResources(card, online)
+                    while (current == sheetGeneration) {
+                        val refreshing = !card.isMovie && result.flag("refreshing")
+                        mutable.update { old ->
+                            val active = old.sheet as? AppSheet.Films ?: return@update old
+                            if (active.card.key() != card.key()) return@update old
+                            val loaded = if (card.isMovie) LoadState(result, loaded = true) else resourceSnapshot(result)
+                            old.copy(sheet = if (online) active.copy(onlineData = loaded) else active.copy(data = loaded))
+                        }
+                        if (!refreshing) break
+                        delay(1200)
+                        result = repository.filmResources(card, online, cachedOnly = true)
                     }
                 } catch (error: CancellationException) { throw error }
                 catch (error: Throwable) {

@@ -121,8 +121,7 @@ import kotlinx.serialization.json.JsonObject
 /**
  * 懂片帝资源弹框：顶部线路分页签，选中线路后拉取该线路的全部剧集。
  *
- * <p>详情接口只给线路名与集数，各集地址由 `/api/dpd/line` 按线路懒解析，
- * 因此切换线路时会出现短暂的「正在解析」，解析完的线路再切回不再请求。
+ * <p>目录与线路先显示服务端缓存，后台新增的集数和地址由 ViewModel 轮询同步。
  */
 @Composable fun DpdSourceDialog(sheet: AppSheet.Dpd, busy: Boolean, actionError: String?, vm: HuluwaViewModel,
                                 snackbar: SnackbarHostState, onPlay: (String) -> Unit) {
@@ -135,11 +134,17 @@ import kotlinx.serialization.json.JsonObject
         vm.notify("${label}已复制")
     }
     val lines = remember(detail.data) { DpdLine.rows(detail.data) }
-    var selected by rememberSaveable(card.key()) { mutableIntStateOf(0) }
+    var selectedName by rememberSaveable(card.key()) { mutableStateOf("") }
     var logVisible by remember { mutableStateOf(false) }
-    val current = lines.getOrNull(selected.coerceIn(0, (lines.size - 1).coerceAtLeast(0)))?.name.orEmpty()
+    val selected = lines.indexOfFirst { it.name == selectedName }.coerceAtLeast(0)
+    val current = lines.getOrNull(selected)?.name.orEmpty()
     // 选中线路后按需解析；解析过的线路由 ViewModel 缓存，不会重复请求
-    LaunchedEffect(current) { if (current.isNotBlank()) vm.loadDpdLine(card, current) }
+    LaunchedEffect(current) {
+        if (current.isNotBlank()) {
+            selectedName = current
+            vm.loadDpdLine(card, current)
+        }
+    }
     val lineState = sheet.lines[current]
     val episodes = remember(lineState?.data) { lineState?.data?.let { DpdEpisode.rows(it) }.orEmpty() }
 
@@ -172,7 +177,11 @@ import kotlinx.serialization.json.JsonObject
                                 Text(it, Modifier.padding(bottom = 10.dp), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
                             }
                             Feedback(detail.error, { vm.reloadDpdSources(card) })
-                            if (!detail.loaded) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+                            if (detail.loading || !detail.loaded) {
+                                LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+                                if (detail.loaded) Text("正在同步最新剧集…", Modifier.padding(top = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                            }
                         }
                     }
                     if (detail.loaded && !(detail.error != null && detail.data.isEmpty())) {
@@ -184,7 +193,7 @@ import kotlinx.serialization.json.JsonObject
                         } else {
                             item(key = "lines") {
                                 Column {
-                                    DpdLineTabs(lines, selected, { selected = it })
+                                    DpdLineTabs(lines, selected, { selectedName = lines[it].name })
                                     val total = lines.firstOrNull { it.name == current }?.total ?: 0
                                     Text("已更新 $total 集", Modifier.padding(bottom = 10.dp),
                                         style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -200,7 +209,7 @@ import kotlinx.serialization.json.JsonObject
                 HorizontalDivider(color = HuluwaColors.Line)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (sheet.busyLine.isNotBlank()) "正在加载「${sheet.busyLine}」…" else "点击离线下载后自动获取该集地址；任务在「下载 → 离线剧集」查看",
+                    Text(if (lineState?.loading == true) "正在同步「$current」…" else "点击离线下载后自动获取该集地址；任务在「下载 → 离线剧集」查看",
                         Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                     // 出问题时可把这里的日志复制出来定位（同时也会写到 Logcat）
@@ -277,15 +286,23 @@ private fun LazyListScope.dpdEpisodeItems(card: DpdCard, lineName: String, state
                                        episodes: List<DpdEpisode>, defaultSeason: Int?,
                                        downloads: Map<DpdDownloadKey, DpdDownloadState>, busy: Boolean,
                                        vm: HuluwaViewModel, onPlay: (String) -> Unit, onCopy: (String) -> Unit) {
+    if (episodes.isNotEmpty()) {
+        state?.error?.let { message ->
+            item(key = "episode-refresh-error") { Feedback(message, { vm.loadDpdLine(card, lineName, refresh = true) }) }
+        }
+        if (state?.loading == true) item(key = "episode-sync") {
+            LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 10.dp), color = HuluwaColors.Pine)
+        }
+    }
     when {
-        state == null || state.loading -> item(key = "episode-loading") {
+        state == null || (state.loading && !state.loaded) -> item(key = "episode-loading") {
             Row(Modifier.fillMaxWidth().padding(vertical = 26.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(16.dp), color = HuluwaColors.Pine, strokeWidth = 2.dp)
                 Text("正在加载「$lineName」的剧集列表…", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
             }
         }
-        state.error != null -> item(key = "episode-error") { Feedback(state.error, { vm.loadDpdLine(card, lineName) }) }
+        state.error != null && episodes.isEmpty() -> item(key = "episode-error") { Feedback(state.error, { vm.loadDpdLine(card, lineName, refresh = true) }) }
         episodes.isEmpty() -> item(key = "episode-empty") {
             Text("该线路没有可播放的地址，换一条试试", Modifier.fillMaxWidth().padding(vertical = 28.dp),
                 style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)

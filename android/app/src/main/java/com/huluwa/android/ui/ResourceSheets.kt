@@ -67,8 +67,11 @@ import kotlinx.serialization.json.*
         resources.data.rows("playSources").map { PlaySource.from(it.asObject()) }
             .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 }
     }
-    var selectedHlsSource by rememberSaveable(card.key()) { mutableIntStateOf(0) }
-    val currentHlsIndex = selectedHlsSource.coerceIn(0, (sources.size - 1).coerceAtLeast(0))
+    var selectedHlsSource by rememberSaveable(card.key()) { mutableStateOf("") }
+    val currentHlsIndex = sources.indexOfFirst { it.name == selectedHlsSource }.coerceAtLeast(0)
+    LaunchedEffect(card.key(), sources.map { it.name }) {
+        if (sources.none { it.name == selectedHlsSource }) selectedHlsSource = sources.firstOrNull()?.name.orEmpty()
+    }
     val resourceCard = if (card.isMovie) card.copy(
         id = resources.data.text("id", fallback = card.id),
         url = resources.data.text("url", fallback = card.url),
@@ -110,7 +113,11 @@ import kotlinx.serialization.json.*
                                 }
                             }
                             Feedback(resources.error, { vm.reloadFilmResources(card) })
-                            if (!resources.loaded) LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+                            if (!resources.loaded || (!card.isMovie && resources.loading)) {
+                                LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
+                                if (resources.loaded) Text("正在同步最新剧集…", Modifier.padding(top = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                            }
                         }
                     }
                     if (resources.loaded && !(resources.error != null && resources.data.isEmpty())) {
@@ -125,7 +132,7 @@ import kotlinx.serialization.json.*
                                                 style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                                             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 sources.forEachIndexed { index, source ->
-                                                    FilmSourceChip(source.name, source.items.size, index == currentHlsIndex) { selectedHlsSource = index }
+                                                    FilmSourceChip(source.name, source.items.size, index == currentHlsIndex) { selectedHlsSource = source.name }
                                                 }
                                             }
                                         }

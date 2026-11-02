@@ -150,9 +150,10 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         return Subscription.from(response.asObject().child("subscription"), card.subscriptionSource)
     }
     /** 电影港磁力 / 在线标签独立请求，老卡片缺少另一来源地址时由后端按片名匹配。 */
-    suspend fun filmResources(card: FilmCard, online: Boolean = false): JsonObject {
+    suspend fun filmResources(card: FilmCard, online: Boolean = false, cachedOnly: Boolean = false): JsonObject {
         if (!card.isMovie) return api.get("hls", "detail", query = buildMap {
-            put("resId", card.id); if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
+            put("resId", card.id); put("cachedOnly", cachedOnly.toString())
+            if (card.apiUrl.isNotBlank()) put("apiUrl", card.apiUrl)
         }).asObject()
         val url = if (online) {
             if (card.isMovieHls) card.url else card.onlineUrl
@@ -212,13 +213,14 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     // ------------------------------------------------------------------ 懂片帝
     // 独立接口：不复用 hls/detail 或 hls/downloads，与电影港、电影天堂完全隔开。
 
-    /** 懂片帝作品详情：返回线路清单（各集地址留空，选中线路后再拉） */
-    suspend fun dpdDetail(id: String): JsonObject =
-        api.get("dpd", "detail", query = mapOf("resId" to id, "refresh" to "true")).asObject()
+    /** 懂片帝先返回目录缓存并后台刷新；轮询只读取服务端快照。 */
+    suspend fun dpdDetail(id: String, cachedOnly: Boolean = false): JsonObject =
+        api.get("dpd", "detail", query = mapOf("resId" to id, "cachedOnly" to cachedOnly.toString())).asObject()
 
-    /** 懂片帝某条线路的全部剧集 */
-    suspend fun dpdLine(id: String, line: String): JsonObject =
-        api.get("dpd", "line", query = mapOf("resId" to id, "line" to line)).asObject()
+    /** 线路先显示缓存，后台补齐的地址通过 cachedOnly 轮询同步。 */
+    suspend fun dpdLine(id: String, line: String, cachedOnly: Boolean = false): JsonObject =
+        api.get("dpd", "line", query = mapOf("resId" to id, "line" to line,
+            "cachedOnly" to cachedOnly.toString())).asObject()
 
     /** 懂片帝单集按需解析（官方线路受站点限速，只有点开的那一集才兑换） */
     suspend fun dpdEpisode(id: String, line: String, title: String): JsonObject =
