@@ -22,7 +22,8 @@ public class DatabaseInitializer implements ApplicationRunner {
             "sys_user", "sys_config", "message", "frp_config", "push_channel", "docker_host",
             "chat_session", "chat_message", "chat_request", "movie_search_watch",
             "hls_subscription", "hls_download_task", "subscription_check_log", "xunlei_win_download_task",
-            "dpd_episode_link", "btbtla_detail_cache", "btbtla_magnet_cache"
+            "dpd_episode_link", "btbtla_detail_cache", "btbtla_magnet_cache",
+            "fanqie_read_progress"
     };
 
     private final JdbcTemplate jdbcTemplate;
@@ -42,6 +43,8 @@ public class DatabaseInitializer implements ApplicationRunner {
                 throw new IllegalStateException("数据库缺少必需的表: " + table + "，请检查 schema.sql");
             }
         }
+        addColumnIfMissing("fanqie_read_progress", "paragraph_index", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing("fanqie_read_progress", "scroll_offset", "INTEGER NOT NULL DEFAULT 0");
         migrateMovieDownloadTasks();
         migrateDownloadHistory();
         migrateXunleiWinDownloads();

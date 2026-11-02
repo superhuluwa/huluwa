@@ -29,7 +29,7 @@ class ChatServiceTest {
         when(qb.settings()).thenReturn(new QBittorrentService.Settings(null, null, null, null));
         ChatService service = spy(new ChatService(jdbc, mock(DyttSearchService.class),
                 mock(DongPianSearchService.class), mock(BtbtlaSearchService.class),
-                mock(FanqieSearchService.class), mock(MovieCatalogService.class), qb,
+                mock(FanqieSearchService.class), mock(FanqieLibraryService.class), mock(MovieCatalogService.class), qb,
                 mock(MessageService.class), mock(MovieSubscriptionService.class), mock(VideoParseService.class),
                 mock(XunleiService.class), mock(XunleiWinService.class),
                 mock(ChatRequestService.class), mock(ChatPushService.class)));

@@ -116,3 +116,87 @@ data class FanqieBook(
         }
     }
 }
+
+/**
+ * 番茄小说阅读入口卡（kind=fanqie-reader）。
+ *
+ * 兼容手动阅读指令的入口卡，点按后从服务器恢复最新阅读位置。
+ */
+data class FanqieReaderCard(
+    val bookId: String, val title: String, val author: String, val cover: String,
+    val progressChapter: Int,
+) {
+    companion object {
+        fun from(raw: JsonObject): FanqieReaderCard? {
+            if (raw.text("kind") != "fanqie-reader") return null
+            val id = raw.text("bookId")
+            if (id.isBlank()) return null
+            return FanqieReaderCard(id, raw.text("title"), raw.text("author"), raw.text("cover"),
+                raw.number("progressChapter")?.toInt() ?: 0)
+        }
+    }
+}
+
+/** 阅读页的一章正文（/api/fanqie/books/{bookId}/read 的响应）。 */
+data class FanqieChapter(
+    val bookId: String, val title: String, val author: String,
+    val order: Int, val chapterTitle: String, val content: String,
+    val chapterCount: Int, val hasPrev: Boolean, val hasNext: Boolean,
+    val prevChapter: String, val nextChapter: String,
+    val paragraphIndex: Int = 0, val scrollOffset: Int = 0,
+) {
+    /** 正文按行拆成段落，供阅读页分段渲染（不分段会让长章一次性组合过大）。 */
+    val paragraphs = content.split('\n').map(String::trim).filter(String::isNotBlank)
+    companion object {
+        fun from(raw: JsonObject): FanqieChapter = FanqieChapter(
+            raw.text("bookId"), raw.text("title"), raw.text("author"),
+            raw.number("order")?.toInt() ?: 1, raw.text("chapterTitle"), raw.text("content"),
+            raw.number("chapterCount")?.toInt() ?: 0, raw.flag("hasPrev"), raw.flag("hasNext"),
+            raw.text("prevChapter"), raw.text("nextChapter"),
+            raw.number("paragraphIndex")?.toInt() ?: 0, raw.number("scrollOffset")?.toInt() ?: 0,
+        )
+    }
+}
+
+/** 目录（/api/fanqie/books/{bookId}/catalog），打开目录抽屉时单独拉取。 */
+data class FanqieCatalog(val chapterCount: Int, val progressChapter: Int, val chapters: List<FanqieTocItem>) {
+    companion object {
+        fun from(raw: JsonObject): FanqieCatalog = FanqieCatalog(
+            raw.number("chapterCount")?.toInt() ?: 0, raw.number("progressChapter")?.toInt() ?: 0,
+            raw.rows("chapters").mapNotNull { FanqieTocItem.from(it.asObject()) },
+        )
+    }
+}
+
+/** 目录条目。 */
+data class FanqieTocItem(val order: Int, val title: String) {
+    companion object {
+        fun from(raw: JsonObject): FanqieTocItem? {
+            val order = raw.number("order")?.toInt() ?: return null
+            val title = raw.text("title")
+            if (title.isBlank()) return null
+            return FanqieTocItem(order, title)
+        }
+    }
+}
+
+/** 书库条目（/api/fanqie/books）。 */
+data class FanqieBookShelf(
+    val bookId: String, val title: String, val author: String, val cover: String,
+    val chapterCount: Int, val totalChars: Long, val progressChapter: Int,
+) {
+    val progressLabel get() = when {
+        progressChapter < 1 -> "尚未开始阅读"
+        chapterCount > 0 -> "读到第 $progressChapter/$chapterCount 章"
+        else -> "读到第 $progressChapter 章"
+    }
+    companion object {
+        fun from(raw: JsonObject): FanqieBookShelf? {
+            val id = raw.text("bookId")
+            if (id.isBlank() || raw.text("title").isBlank()) return null
+            return FanqieBookShelf(id, raw.text("title"), raw.text("author"), raw.text("cover"),
+                raw.number("chapterCount")?.toInt() ?: 0, raw.number("totalChars")?.toLong() ?: 0L,
+                raw.number("progressChapter")?.toInt() ?: 0)
+        }
+    }
+}

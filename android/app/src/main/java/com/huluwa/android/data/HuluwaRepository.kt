@@ -170,6 +170,32 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             require(it.startsWith("magnet:?xt=urn:btih:")) { "该资源没有返回有效磁力链接" }
         }
 
+    /** 准备目录并刷新连载章节，正文等真正阅读时再加载。 */
+    suspend fun openFanqieBook(bookId: String, title: String, author: String, cover: String) {
+        api.post("fanqie", "books", bookId, "open", body = jsonBody {
+            put("title", title); put("author", author); put("cover", cover)
+        })
+    }
+
+    suspend fun saveFanqieProgress(bookId: String, order: Int, paragraphIndex: Int, scrollOffset: Int) {
+        api.put("fanqie", "books", bookId, "progress", body = jsonBody {
+            put("order", order); put("paragraphIndex", paragraphIndex); put("scrollOffset", scrollOffset)
+        })
+    }
+
+    /** 番茄小说：取一章正文（order<=0 时服务端按上次进度续读）。 */
+    suspend fun readFanqieChapter(bookId: String, order: Int): FanqieChapter =
+        FanqieChapter.from(api.get("fanqie", "books", bookId, "read",
+            query = mapOf("order" to order.toString())).asObject())
+
+    /** 番茄小说：目录（打开目录抽屉时拉取）。 */
+    suspend fun fanqieCatalog(bookId: String): FanqieCatalog =
+        FanqieCatalog.from(api.get("fanqie", "books", bookId, "catalog").asObject())
+
+    /** 番茄小说：读过的书，按最近打开或阅读时间排序。 */
+    suspend fun fanqieBooks(): List<FanqieBookShelf> =
+        api.get("fanqie", "books").asArray().mapNotNull { FanqieBookShelf.from(it.asObject()) }
+
     /** 复用电影港的手动磁力下载接口、默认下载器、保存目录、任务记录及通知。 */
     suspend fun enqueueBtbtlaMagnet(card: BtbtlaCard, item: BtbtlaResource, magnet: String, resolution: Int): JsonObject =
         api.post("chat", "subscriptions", "magnets", "download", body = jsonBody {

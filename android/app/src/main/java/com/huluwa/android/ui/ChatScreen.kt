@@ -90,11 +90,14 @@ import kotlinx.coroutines.flow.first
                         }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
+                    if (session.kind == "fanqie") IconButton(vm::showFanqieShelf) {
+                        Icon(Icons.Outlined.MenuBook, "我的书架")
+                    }
                     IconButton({ vm.refreshChat() }) { Icon(Icons.Outlined.Refresh, "刷新会话") }
                     Box {
                         IconButton({ menu = true }) { Icon(Icons.Outlined.MoreHoriz, "会话操作") }
                         DropdownMenu(menu, { menu = false }) {
-                            if (session.kind != "system") DropdownMenuItem(text = { Text("服务设置") }, onClick = { menu = false; vm.showSettings(session.kind) })
+                            if (session.kind != "system" && session.kind != "fanqie") DropdownMenuItem(text = { Text("服务设置") }, onClick = { menu = false; vm.showSettings(session.kind) })
                             if (session.kind != "system") DropdownMenuItem(text = { Text("清空会话") }, onClick = { menu = false; vm.clearChat() })
                         }
                     }
@@ -132,7 +135,10 @@ import kotlinx.coroutines.flow.first
                 if (chat.hasEarlier) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }
-                if (!chat.loading && chat.messages.isEmpty() && chat.error == null) EmptyContent("发条消息，开始吧", "搜索影视、提交下载，都可以从这里开始", sessionIcon(session.kind))
+                if (!chat.loading && chat.messages.isEmpty() && chat.error == null) {
+                    if (session.kind == "fanqie") EmptyContent("搜索想看的小说", "发送书名或作者，点击搜索结果即可阅读；读过的书可从右上角书架继续", sessionIcon(session.kind))
+                    else EmptyContent("发条消息，开始吧", "搜索影视、提交下载，都可以从这里开始", sessionIcon(session.kind))
+                }
             }
         }
     }
@@ -150,20 +156,25 @@ import kotlinx.coroutines.flow.first
     val dpd = message.dpd
     val btbtla = message.btbtla
     val fanqie = message.fanqie
+    val fanqieReader = message.fanqieReader
+    val card = film != null || dpd != null || btbtla != null || fanqie != null || fanqieReader != null
     val galleryImages = remember(message.payload) { message.videoImages }
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
             Surface(color = if (message.mine) HuluwaColors.ChatBubble else Color.White,
-                shape = if (film != null || dpd != null || btbtla != null || fanqie != null) RoundedCornerShape(18.dp) else RoundedCornerShape(
+                shape = if (card) RoundedCornerShape(18.dp) else RoundedCornerShape(
                     topStart = if (message.mine) 17.dp else 4.dp, topEnd = if (message.mine) 4.dp else 17.dp,
                     bottomStart = 17.dp, bottomEnd = 17.dp),
                 border = BorderStroke(1.dp, HuluwaColors.Line)) {
-                Column(Modifier.padding(if (film != null || dpd != null || btbtla != null || fanqie != null) 12.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(if (card) 12.dp else 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
                         btbtla != null -> BtbtlaResultCard(btbtla, vm)
-                        fanqie != null -> FanqieResultCard(fanqie)
+                        fanqie != null -> FanqieResultCard(fanqie) { vm.requestFanqieRead(fanqie) }
+                        fanqieReader != null -> FanqieReaderResultCard(fanqieReader) {
+                            vm.openReader(fanqieReader.bookId, fanqieReader.title, fanqieReader.author, fanqieReader.cover)
+                        }
                         dpd != null -> DpdResultCard(dpd, ui, vm)
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {

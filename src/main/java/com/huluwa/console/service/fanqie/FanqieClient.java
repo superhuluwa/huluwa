@@ -134,6 +134,15 @@ public final class FanqieClient {
 
     private String host = API_HOST;
     private Duration timeout = Duration.ofSeconds(45);
+    private int requestRetries = 3;
+
+    public FanqieClient() { }
+
+    /** 交互阅读使用较短超时；命令行整本下载仍使用默认退避。 */
+    public FanqieClient(Duration timeout, int requestRetries) {
+        this.timeout = timeout;
+        this.requestRetries = Math.max(0, requestRetries);
+    }
     private long intervalMs = APP_INTERVAL_MS;
 
     private String deviceId;
@@ -938,15 +947,17 @@ public final class FanqieClient {
                     last = "HTTP " + resp.statusCode();
                 } else {
                     body = new String(resp.body(), StandardCharsets.UTF_8);
-                    if (!body.isEmpty()) {
-                        return json.readTree(body);
+                    if (!body.isBlank()) {
+                        JsonNode parsed = json.readTree(body);
+                        if (parsed != null && parsed.isObject()) return parsed;
+                        throw new IOException("接口返回无效数据");
                     }
                     last = "空响应体（服务端限流）";
                 }
             } catch (IOException ex) {
                 last = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             }
-            if (attempt >= retries) {
+            if (attempt >= Math.min(retries, requestRetries)) {
                 throw new IOException(path + " 失败（已重试 " + attempt + " 次）: " + last);
             }
             attempt++;
@@ -974,7 +985,9 @@ public final class FanqieClient {
         if (resp.statusCode() >= 400) {
             throw new IOException("POST " + path + " HTTP " + resp.statusCode());
         }
-        return json.readTree(resp.body());
+        JsonNode parsed = json.readTree(resp.body());
+        if (parsed == null || !parsed.isObject()) throw new IOException("接口返回空响应");
+        return parsed;
     }
 
     /** 注册新设备，得到 device_id / install_id。此请求不得带 x-argus / x-ladon。 */
@@ -987,7 +1000,9 @@ public final class FanqieClient {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
                 .build();
         HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+        if (resp.statusCode() >= 400) throw new IOException("设备注册 HTTP " + resp.statusCode());
         JsonNode reg = json.readTree(resp.body());
+        if (reg == null) throw new IOException("设备注册返回空响应");
         String did = reg.path("device_id").asText("");
         if (did.isEmpty() || "0".equals(did)) {
             throw new IllegalStateException("设备注册失败: " + reg.toString());
@@ -1252,6 +1267,9 @@ public final class FanqieClient {
         Map<String, String> p = new LinkedHashMap<>(params);
         p.put("book_id", String.valueOf(bookId));
         JsonNode res = get("/reading/bookapi/directory/all_items/v", p, 3, 8.0);
+        if (res.path("code").asInt(0) != 0) {
+            throw new IllegalStateException("目录获取失败：" + text(res.path("message")));
+        }
         JsonNode rows = res.path("data").path("item_data_list");
         List<ChapterEntry> out = new ArrayList<>();
         if (rows.isArray()) {
@@ -1269,6 +1287,7 @@ public final class FanqieClient {
 
     /** 书籍详情（原始 JSON）。 */
     public JsonNode detail(String bookId) throws IOException, InterruptedException {
+        if (params == null) loadParams();
         Map<String, String> p = new LinkedHashMap<>(params);
         p.put("book_id", String.valueOf(bookId));
         return get("/reading/bookapi/multi-detail/v", p, 3, 8.0);
@@ -1276,11 +1295,13 @@ public final class FanqieClient {
 
     /** 单章下载并解密。 */
     public ChapterText chapter(String itemId) throws IOException, InterruptedException {
+        if (fetched >= QUOTA_CHAPTERS) renewSession();
         ensureSession();
         Map<String, String> p = new LinkedHashMap<>(params);
         p.put("item_id", String.valueOf(itemId));
         p.put("keyver", String.valueOf(keyver));
         JsonNode res = get("/reading/reader/full/v", p, 3, 8.0);
+        fetched++;
         JsonNode d = res.path("data");
         String ct = text(d.path("content"));
         if (ct.isEmpty() || "Invalid".equals(ct)) {
@@ -1288,6 +1309,7 @@ public final class FanqieClient {
                     + text(d.path("crypt_status")) + ")");
         }
         List<String> paras = xhtmlToParagraphs(decryptContent(ct, contentKey));
+        if (paras.isEmpty()) throw new IllegalStateException("章节正文为空，请重试");
         return new ChapterText(text(d.path("title")), paras, String.join("\n", paras));
     }
 
@@ -1330,10 +1352,26 @@ public final class FanqieClient {
     /**
      * 下载整本书，写入 TXT。返回 (章节结果列表, 总字数)。
      *
-     * <p>限流表现为空响应体，get 已有退避重试；仍失败则重建会话（换设备 + 新 content_key）后重试。</p>
+     * @deprecated 使用 {@link #downloadResult} 获取结构化的整本下载结果。
      */
+    @Deprecated
     public Object[] download(String bookId, String outPath, boolean progress,
                              Integer maxChapters, int retries)
+            throws IOException, InterruptedException {
+        return downloadResult(bookId, outPath, progress, maxChapters, retries).split();
+    }
+
+    /** 整本下载结果：有序章节、总字数、目录大小。 */
+    public record DownloadResult(List<Fetched> chapters, long totalChars, int totalChapters) {
+        /** 兼容旧调用方的 (List, Long) 二元组形式。 */
+        public Object[] split() {
+            return new Object[]{chapters, totalChars};
+        }
+    }
+
+    /** 下载整本书并返回结构化结果（不写文件时 outPath 传 null）。 */
+    public DownloadResult downloadResult(String bookId, String outPath, boolean progress,
+                                         Integer maxChapters, int retries)
             throws IOException, InterruptedException {
         ensureSession();
         List<ChapterEntry> cat = catalog(bookId);
@@ -1427,25 +1465,44 @@ public final class FanqieClient {
         }
 
         if (outPath != null) {
+            // 与 FanqieLibraryService 的章节索引保持一致：每章「标题 + 空行 + 正文 + 空行」，
+            // 不再写 ==== 装饰行，否则按字符偏移切章会错位。
             StringBuilder sb = new StringBuilder();
             for (Fetched r : ordered) {
-                sb.append("\n\n").append("=".repeat(24)).append(' ')
-                        .append(r.title()).append(' ').append("=".repeat(24)).append("\n\n");
-                sb.append(r.text().isEmpty() ? "[下载失败: " + r.error() + "]" : r.text());
-                sb.append('\n');
+                sb.append(chapterBlock(r));
             }
             java.nio.file.Files.writeString(java.nio.file.Path.of(outPath), sb.toString(),
                     StandardCharsets.UTF_8);
         }
-        return new Object[]{ordered, total};
+        return new DownloadResult(ordered, total, cat.size());
+    }
+
+    /** 单章在 TXT 中的块：标题行 + 空行 + 正文 + 空行。 */
+    public static String chapterBlock(Fetched chapter) {
+        String title = chapter.title() == null || chapter.title().isBlank() ? "未命名章节" : chapter.title().trim();
+        String text = chapter.text() == null || chapter.text().isBlank()
+                ? "[下载失败: " + chapter.error() + "]" : chapter.text();
+        return title + "\n\n" + text + "\n\n";
     }
 
     private static String abbreviate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
+    /** 清除失效状态，不在失败处理阶段额外发出网络请求。 */
+    public void resetSession() {
+        deviceId = null;
+        installId = null;
+        cdid = null;
+        contentKey = null;
+        keyver = null;
+        params = null;
+        fetched = 0;
+    }
+
     /** 重新注册设备并换取新 content_key（应对配额/冷却）。 */
     public void renewSession() throws IOException, InterruptedException {
+        resetSession();
         registerDevice();
         loadParams();
         registerKey();

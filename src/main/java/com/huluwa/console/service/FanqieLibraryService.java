@@ -1,0 +1,278 @@
+package com.huluwa.console.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huluwa.console.common.BusinessException;
+import com.huluwa.console.service.fanqie.FanqieClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
+
+/** 番茄小说书库：缓存目录，正文按章获取；失败章节保留原序号，可单独重试。 */
+@Service
+public class FanqieLibraryService {
+    private static final Logger log = LoggerFactory.getLogger(FanqieLibraryService.class);
+    private final JdbcTemplate jdbc;
+    private final ObjectMapper json = new ObjectMapper();
+    private final Path root;
+    // 交互阅读不使用整本下载的长时间退避，失败交给阅读页重试。
+    private final FanqieClient client = new FanqieClient(Duration.ofSeconds(10), 0);
+    private final ReentrantLock remoteLock = new ReentrantLock();
+    private final Object[] bookLocks = new Object[32];
+    private final Map<String, BookIndex> cache = new LinkedHashMap<>(64, .75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, BookIndex> eldest) {
+            return size() > 64;
+        }
+    };
+
+    public FanqieLibraryService(JdbcTemplate jdbc, @Value("${huluwa.data-dir:./data}") String dataDir) {
+        this.jdbc = jdbc;
+        this.root = Path.of(dataDir).resolve("fanqie").toAbsolutePath().normalize();
+        for (int i = 0; i < bookLocks.length; i++) bookLocks[i] = new Object();
+    }
+
+    public record BookIndex(String bookId, String title, String author, String cover,
+                            List<FanqieClient.ChapterEntry> chapters, long updatedAt) { }
+    public record BookSummary(String bookId, String title, String author, String cover,
+                              int chapterCount, long totalChars, long updatedAt, int progressChapter) { }
+    public record ReadProgress(int order, int paragraphIndex, int scrollOffset, long updatedAt) { }
+
+    /** 只准备目录即可进入阅读，无需等整本下载；重开书籍时更新连载目录。 */
+    public BookSummary open(String bookId, String title, String author, String cover) {
+        validateId(bookId);
+        synchronized (bookLock(bookId)) {
+            BookIndex existing = loadIndex(bookId);
+            List<FanqieClient.ChapterEntry> chapters;
+            try {
+                chapters = remote(() -> client.catalog(bookId)).stream()
+                        .filter(c -> c.itemId().matches("[0-9]{6,24}"))
+                        .sorted(Comparator.comparingLong(FanqieClient.ChapterEntry::order))
+                        .collect(java.util.stream.Collectors.toMap(FanqieClient.ChapterEntry::itemId,
+                                c -> c, (first, duplicate) -> first, LinkedHashMap::new))
+                        .values().stream().toList();
+                if (chapters.isEmpty()) throw new BusinessException(502, "这本书暂无可阅读章节，请稍后重试");
+            } catch (BusinessException error) {
+                // 已缓存的书即使上游暂时不可达，也可以继续阅读。
+                if (existing == null) throw error;
+                chapters = existing.chapters();
+                log.info("番茄小说 {} 暂时沿用缓存目录：{}", bookId, error.getMessage());
+            }
+            BookIndex index = new BookIndex(bookId,
+                    metadata(title, existing == null ? "书号 " + bookId : existing.title(), 300),
+                    metadata(author, existing == null ? "" : existing.author(), 300),
+                    metadata(cover, existing == null ? "" : existing.cover(), 2048),
+                    List.copyOf(chapters), System.currentTimeMillis());
+            writeIndex(index);
+            return summary(index);
+        }
+    }
+
+    public List<BookSummary> list() {
+        List<BookSummary> books = new ArrayList<>();
+        if (!Files.isDirectory(root)) return books;
+        try (var dirs = Files.list(root)) {
+            for (Path dir : dirs.filter(Files::isDirectory).toList()) {
+                String bookId = dir.getFileName().toString();
+                if (!validId(bookId)) continue;
+                BookIndex index = loadIndex(bookId);
+                if (index != null) books.add(summary(index));
+            }
+        } catch (IOException error) {
+            throw new BusinessException(500, "读取书架失败，请稍后重试");
+        }
+        books.sort(Comparator.comparingLong(BookSummary::updatedAt).reversed());
+        return books;
+    }
+
+    /** 读取完整的一章；GET 不推进阅读进度，避免取消请求或目录加载覆盖续读位置。 */
+    public Map<String, Object> read(String bookId, int order) {
+        validateId(bookId);
+        synchronized (bookLock(bookId)) {
+            BookIndex index = requireIndex(bookId);
+            ReadProgress progress = progress(bookId);
+            int current = order <= 0 ? Math.max(1, Math.min(progress.order(), index.chapters().size())) : order;
+            if (current < 1 || current > index.chapters().size()) {
+                throw new BusinessException(400, "章节不存在，请刷新目录后重试");
+            }
+            FanqieClient.ChapterEntry entry = index.chapters().get(current - 1);
+            Path file = bookDir(bookId).resolve(entry.itemId() + ".txt");
+            String content;
+            try {
+                content = Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : "";
+                if (content.isBlank()) {
+                    content = remote(() -> client.chapter(entry.itemId())).text();
+                    if (content.isBlank()) throw new BusinessException(502, "当前章节暂时无法获取，请重试");
+                    atomicWrite(file, content);
+                }
+            } catch (IOException error) {
+                log.warn("番茄小说 {} 第 {} 章缓存失败", bookId, current, error);
+                throw new BusinessException(500, "读取或保存章节失败，请重试");
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("bookId", bookId);
+            result.put("title", index.title());
+            result.put("author", index.author());
+            result.put("order", current);
+            result.put("chapterTitle", chapterTitle(entry, current));
+            result.put("content", content);
+            result.put("chapterCount", index.chapters().size());
+            result.put("hasPrev", current > 1);
+            result.put("hasNext", current < index.chapters().size());
+            result.put("prevChapter", current > 1 ? chapterTitle(index.chapters().get(current - 2), current - 1) : "");
+            result.put("nextChapter", current < index.chapters().size() ? chapterTitle(index.chapters().get(current), current + 1) : "");
+            result.put("paragraphIndex", order <= 0 && progress.order() == current ? progress.paragraphIndex() : 0);
+            result.put("scrollOffset", order <= 0 && progress.order() == current ? progress.scrollOffset() : 0);
+            return result;
+        }
+    }
+
+    public Map<String, Object> catalog(String bookId) {
+        BookIndex index = requireIndex(bookId);
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (int i = 0; i < index.chapters().size(); i++) {
+            items.add(Map.of("order", i + 1, "title", chapterTitle(index.chapters().get(i), i + 1)));
+        }
+        return Map.of("bookId", bookId, "title", index.title(), "chapterCount", items.size(),
+                "progressChapter", progressChapter(bookId), "chapters", items);
+    }
+
+    public int progressChapter(String bookId) { return progress(bookId).order(); }
+
+    private ReadProgress progress(String bookId) {
+        validateId(bookId);
+        List<ReadProgress> rows = jdbc.query("""
+                SELECT chapter_order, paragraph_index, scroll_offset, updated_at
+                  FROM fanqie_read_progress WHERE book_id = ?
+                """, (rs, row) -> new ReadProgress(rs.getInt(1), rs.getInt(2), rs.getInt(3), rs.getLong(4)), bookId);
+        return rows.isEmpty() ? new ReadProgress(0, 0, 0, 0) : rows.getFirst();
+    }
+
+    /** 由客户端在正文实际显示、滚动停下或离开阅读页时保存。 */
+    public void saveProgress(String bookId, int order, int paragraphIndex, int scrollOffset) {
+        BookIndex index = requireIndex(bookId);
+        if (order < 1 || order > index.chapters().size() || paragraphIndex < 0 || paragraphIndex > 100000
+                || scrollOffset < 0 || scrollOffset > 100000) {
+            throw new BusinessException(400, "阅读位置不正确");
+        }
+        jdbc.update("""
+                INSERT INTO fanqie_read_progress (book_id, chapter_order, paragraph_index, scroll_offset, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(book_id) DO UPDATE SET chapter_order = excluded.chapter_order,
+                    paragraph_index = excluded.paragraph_index, scroll_offset = excluded.scroll_offset,
+                    updated_at = excluded.updated_at
+                """, bookId, order, paragraphIndex, scrollOffset, System.currentTimeMillis());
+    }
+
+    private BookSummary summary(BookIndex index) {
+        ReadProgress progress = progress(index.bookId());
+        long words = index.chapters().stream().mapToLong(FanqieClient.ChapterEntry::wordNumber).sum();
+        return new BookSummary(index.bookId(), index.title(), index.author(), index.cover(), index.chapters().size(),
+                words, Math.max(index.updatedAt(), progress.updatedAt()), progress.order());
+    }
+
+    private BookIndex requireIndex(String bookId) {
+        BookIndex index = loadIndex(bookId);
+        if (index == null) throw new BusinessException(404, "请先从搜索结果打开这本小说");
+        return index;
+    }
+
+    private BookIndex loadIndex(String bookId) {
+        validateId(bookId);
+        synchronized (cache) {
+            BookIndex index = cache.get(bookId);
+            if (index != null) return index;
+        }
+        Path file = bookDir(bookId).resolve("catalog.json");
+        if (!Files.isRegularFile(file)) return null;
+        try {
+            BookIndex index = json.readValue(Files.readString(file, StandardCharsets.UTF_8), BookIndex.class);
+            if (!bookId.equals(index.bookId()) || index.chapters() == null || index.chapters().isEmpty()
+                    || index.chapters().stream().anyMatch(c -> !validId(c.itemId()))) return null;
+            synchronized (cache) { cache.put(bookId, index); }
+            return index;
+        } catch (IOException | RuntimeException error) {
+            log.warn("读取番茄小说 {} 的目录缓存失败：{}", bookId, error.getMessage());
+            return null;
+        }
+    }
+
+    private void writeIndex(BookIndex index) {
+        try {
+            atomicWrite(bookDir(index.bookId()).resolve("catalog.json"), json.writeValueAsString(index));
+            synchronized (cache) { cache.put(index.bookId(), index); }
+        } catch (IOException error) {
+            throw new BusinessException(500, "保存小说目录失败，请重试");
+        }
+    }
+
+    private static void atomicWrite(Path target, String content) throws IOException {
+        Files.createDirectories(target.getParent());
+        Path temp = Files.createTempFile(target.getParent(), ".fanqie-", ".tmp");
+        try {
+            Files.writeString(temp, content, StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException error) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally { Files.deleteIfExists(temp); }
+    }
+
+    @FunctionalInterface
+    private interface RemoteCall<T> { T get() throws IOException, InterruptedException; }
+
+    /** 共用设备串行访问，快速拒绝排队；密钥或配额失败时最多重建一次。 */
+    private <T> T remote(RemoteCall<T> call) {
+        boolean locked = false;
+        try {
+            locked = remoteLock.tryLock(1, TimeUnit.SECONDS);
+            if (!locked) throw new BusinessException(503, "小说服务正在加载其他章节，请稍后重试");
+            try {
+                return call.get();
+            } catch (IOException | RuntimeException error) {
+                if (error instanceof BusinessException business) throw business;
+                client.resetSession();
+                return call.get();
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(503, "小说加载已中断，请重试");
+        } catch (IOException | RuntimeException error) {
+            if (error instanceof BusinessException business) throw business;
+            client.resetSession();
+            log.warn("番茄小说接口暂时不可用：{}", error.getMessage());
+            throw new BusinessException(502, "小说服务暂时无法加载，请稍后重试");
+        } finally { if (locked) remoteLock.unlock(); }
+    }
+
+    private Object bookLock(String bookId) { return bookLocks[(bookId.hashCode() & Integer.MAX_VALUE) % bookLocks.length]; }
+    private Path bookDir(String bookId) { return root.resolve(bookId); }
+    private static boolean validId(String id) { return id != null && id.matches("[0-9]{6,24}"); }
+    private static void validateId(String id) {
+        if (!validId(id)) throw new BusinessException(400, "小说书号不正确");
+    }
+    private static String metadata(String value, String fallback, int limit) {
+        if (value == null || value.isBlank()) return fallback;
+        String trimmed = value.trim();
+        return trimmed.substring(0, Math.min(trimmed.length(), limit));
+    }
+    private static String chapterTitle(FanqieClient.ChapterEntry entry, int order) {
+        return entry.title() == null || entry.title().isBlank() ? "第 " + order + " 章" : entry.title();
+    }
+}

@@ -22,6 +22,7 @@ sealed interface AppSheet {
     /** defaultSeason 非空时使用订阅季号直接下载，省略参数配置。 */
     data class Films(val card: FilmCard, val data: LoadState<JsonObject>, val defaultSeason: Int? = null,
         val onlineData: LoadState<JsonObject> = LoadState(JsonObject(emptyMap()))) : AppSheet
+    data class FanqieShelf(val data: LoadState<List<FanqieBookShelf>>) : AppSheet
     data class Btbtla(val card: BtbtlaCard, val detail: LoadState<JsonObject>,
         val magnets: Map<String, String> = emptyMap(), val downloaded: Set<String> = emptySet()) : AppSheet
     data class Episode(val card: FilmCard, val source: String, val item: PlayItem) : AppSheet
@@ -46,6 +47,20 @@ data class ChatState(val session: Session? = null, val messages: List<ChatMessag
     val hasEarlier: Boolean = false, val error: String? = null, val processing: Boolean = false)
 /** 消息分页大小：与接口 limit 和本地缓存的一页保持一致。 */
 private const val CHAT_PAGE_SIZE = 50
+/** 番茄小说阅读页状态：当前章正文 + 目录（按需加载）+ 翻页界面状态。 */
+data class FanqieReaderState(
+    val bookId: String, val title: String, val order: Int = 0,
+    val author: String = "", val cover: String = "", val prepared: Boolean = false,
+    val progressError: String? = null,
+    val chapter: FanqieChapter? = null, val loading: Boolean = false, val error: String? = null,
+    val tocVisible: Boolean = false,
+    /** 目录只在第一次打开抽屉时拉取，之后复用。 */
+    val toc: FanqieCatalog? = null, val tocLoading: Boolean = false, val tocError: String? = null,
+) {
+    val chapterTitle get() = chapter?.chapterTitle.orEmpty().ifBlank { title }
+    val paragraphs get() = chapter?.paragraphs.orEmpty()
+}
+
 data class AppState(
     val auth: AuthState = AuthState(), val tab: MainTab = MainTab.Functions,
     val sessions: LoadState<List<Session>> = LoadState(emptyList()), val chat: ChatState = ChatState(),
@@ -67,6 +82,8 @@ data class AppState(
     /** 收藏菜单只在「我的」页连点标题的隐藏入口进入时显示，「网站直达」不显示。 */
     val browserBookmarksEnabled: Boolean = false,
     val mine: MineOverview = MineOverview(), val serverStatusVisible: Boolean = false,
+    /** 阅读页：非空时展示番茄小说阅读界面（全屏二级页）。 */
+    val reader: FanqieReaderState? = null,
 ) {
     fun build(project: AndroidBuildProject) = if (project == AndroidBuildProject.Huluwa) androidBuild else terminalBuddyBuild
     fun updateBuild(project: AndroidBuildProject, transform: (AndroidBuildState) -> AndroidBuildState): AppState =
@@ -217,6 +234,17 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var pollingJob: Job? = null
     private var upgradeDownloadJob: Job? = null
     private var chatJob: Job? = null
+    private var readerJob: Job? = null
+    private var tocJob: Job? = null
+    private var readerGeneration = 0
+    private data class ReaderPosition(val generation: Int, val bookId: String, val order: Int,
+        val paragraphIndex: Int, val scrollOffset: Int)
+    private data class ReaderProgressSave(val position: ReaderPosition, val completion: CompletableDeferred<Unit>)
+    private val readerProgressSaves = Channel<ReaderProgressSave>(Channel.UNLIMITED)
+    private var readerProgressBarrier: CompletableDeferred<Unit>? = null
+    private var readerPosition: ReaderPosition? = null
+    private var queuedReaderPosition: ReaderPosition? = null
+    private var readerProgressJob: Job? = null
     private var sessionCacheJob: Job? = null
     private var authJob: Job? = null
     private var mutationJob: Job? = null
@@ -227,6 +255,33 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var processingStarted = 0L
 
     init {
+        // 进度请求串行提交，避免翻章和退出时的网络乱序把新位置覆盖回旧位置。
+        viewModelScope.launch {
+            for (save in readerProgressSaves) {
+                val position = save.position
+                try {
+                    if (position.generation != generation || !session.loggedIn) continue
+                    repository.saveFanqieProgress(position.bookId, position.order,
+                        position.paragraphIndex, position.scrollOffset)
+                    if (position.generation == generation) mutable.update { current ->
+                        val reader = current.reader
+                        if (reader != null && reader.bookId == position.bookId) current.copy(reader = reader.copy(progressError = null)) else current
+                    }
+                } catch (error: CancellationException) { throw error }
+                catch (error: Throwable) {
+                    if (queuedReaderPosition == position) queuedReaderPosition = null
+                    if (position.generation == generation) {
+                        mutable.update { current ->
+                            val reader = current.reader
+                            if (reader != null && reader.bookId == position.bookId) current.copy(reader = reader.copy(
+                                progressError = "阅读位置暂未同步，联网后可点击重试",
+                            )) else current
+                        }
+                        if (error is ApiException && error.code == 401) handleError(error)
+                    }
+                } finally { save.completion.complete(Unit) }
+            }
+        }
         restoreSessionList()
         viewModelScope.launch {
             // 只观察实际展示的列表；轮询结果未变化时不重复落盘。
@@ -349,7 +404,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun resetSetup() { mutable.update { it.copy(auth = it.auth.copy(setup = false, error = null)) } }
     fun logout(message: String? = null) {
-        generation++; stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
+        generation++; cancelReaderLoads(); readerProgressJob?.cancel(); readerPosition = null; queuedReaderPosition = null
+        stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); sheetJob?.cancel(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
         appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
@@ -363,6 +419,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (error is ApiException && error.code == 401) logout("登录已过期，请重新登录") else notify(error.userMessage())
     }
     fun setForeground(active: Boolean) {
+        if (!active) flushReaderProgress()
         foreground = active
         foregroundState.value = active
         if (active && session.loggedIn) startForegroundWork() else stopForegroundWork()
@@ -399,10 +456,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         upgradeDownloadJob?.cancel(); upgradeDownloadJob = null
         mutable.update { it.copy(realtime = false) }
     }
-    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false) }; refreshCurrent(false) }
+    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false, reader = null) }; refreshCurrent(false) }
 
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false) } }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false, reader = null) } }
     fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "", browserBookmarksEnabled = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
@@ -454,7 +511,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun openServerStatus() {
         closeChat(); dismissSheet()
-        mutable.update { it.copy(serverStatusVisible = true) }
+        mutable.update { it.copy(serverStatusVisible = true, reader = null) }
         refreshServer()
     }
     fun closeServerStatus() { mutable.update { it.copy(serverStatusVisible = false) } }
@@ -805,10 +862,11 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var chatGeneration = 0
     private var localId = -1L
     fun openSession(session: Session) {
+        closeReader()
         if (session.isLocal) {
             closeChat()
             dismissSheet()
-            mutable.update { it.copy(chat = ChatState(session = session), serverStatusVisible = false) }
+            mutable.update { it.copy(chat = ChatState(session = session), serverStatusVisible = false, reader = null) }
             val service = session.managementService
             if (service != null) refreshManagement(service) else if (session.kind == "upgrade") checkAppUpdate()
             return
@@ -818,7 +876,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val current = chatGeneration
         // 先同步切到会话页（保证转场立即开始）；进程内已有这一页时直接同步渲染，第一帧就是完整内容。
         val warm = repository.warmMessages(session.id)
-        mutable.update { it.copy(serverStatusVisible = false, chat = ChatState(session = session, messages = warm.orEmpty(), loading = warm == null,
+        mutable.update { it.copy(serverStatusVisible = false, reader = null, chat = ChatState(session = session, messages = warm.orEmpty(), loading = warm == null,
             hasEarlier = warm != null && warm.size >= CHAT_PAGE_SIZE)) }
         chatJob = viewModelScope.launch {
             // 没有进程内缓存时再读磁盘，命中即关闭加载态；随后请求服务器在后台无感刷新。
@@ -849,6 +907,172 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun closeChat() { chatGeneration++; chatJob?.cancel(); mutable.update { it.copy(chat = ChatState()) } }
+
+    // ------------------------------------------------------------------ 番茄小说阅读
+
+    /** 点击书目立即进入原生阅读页，按需加载当前章。 */
+    fun requestFanqieRead(book: FanqieBook) = openReader(book.bookId, book.title, book.author, book.cover)
+
+    fun openReader(bookId: String, title: String, author: String = "", cover: String = "") {
+        flushReaderProgress()
+        cancelReaderLoads()
+        readerPosition = null
+        dismissSheet()
+        mutable.update { it.copy(reader = FanqieReaderState(bookId, title, author = author, cover = cover, loading = true)) }
+        loadChapter(bookId, 0)
+    }
+
+    private fun cancelReaderLoads() {
+        readerGeneration++
+        readerJob?.cancel(); readerJob = null
+        tocJob?.cancel(); tocJob = null
+    }
+
+    fun closeReader() {
+        flushReaderProgress()
+        cancelReaderLoads()
+        readerPosition = null
+        mutable.update { it.copy(reader = null) }
+    }
+
+    fun readChapter(order: Int) {
+        val reader = mutable.value.reader ?: return
+        if (reader.loading || order < 1 || order > (reader.chapter?.chapterCount ?: 0)) return
+        flushReaderProgress()
+        readerPosition = null
+        readerJob?.cancel(); tocJob?.cancel()
+        readerGeneration++
+        mutable.update { it.copy(reader = reader.copy(order = order, loading = true, error = null, tocVisible = false, tocLoading = false)) }
+        loadChapter(reader.bookId, order)
+    }
+
+    fun toggleReaderToc() {
+        val reader = mutable.value.reader ?: return
+        if (reader.loading) return
+        val open = !reader.tocVisible
+        mutable.update { it.copy(reader = reader.copy(tocVisible = open)) }
+        if (open && reader.toc == null && !reader.tocLoading) loadCatalog(reader.bookId)
+    }
+
+    private fun loadCatalog(bookId: String) {
+        tocJob?.cancel()
+        val epoch = readerGeneration
+        mutable.update { current ->
+            val reader = current.reader ?: return@update current
+            if (reader.bookId != bookId) current else current.copy(reader = reader.copy(tocLoading = true, tocError = null))
+        }
+        tocJob = viewModelScope.launch {
+            try {
+                val toc = repository.fanqieCatalog(bookId)
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val reader = current.reader ?: return@update current
+                    current.copy(reader = reader.copy(toc = toc, tocLoading = false, tocError = null))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val reader = current.reader ?: return@update current
+                    current.copy(reader = reader.copy(tocLoading = false, tocError = error.userMessage()))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun retryReaderToc() { mutable.value.reader?.let { loadCatalog(it.bookId) } }
+
+    fun refreshReaderBook() {
+        val reader = mutable.value.reader ?: return
+        if (reader.loading) return
+        flushReaderProgress()
+        cancelReaderLoads()
+        readerPosition = null
+        mutable.update { it.copy(reader = reader.copy(order = 0, prepared = false, loading = true,
+            error = null, toc = null, tocVisible = false, tocLoading = false, tocError = null)) }
+        loadChapter(reader.bookId, 0)
+    }
+
+    fun retryReader() {
+        val reader = mutable.value.reader ?: return
+        readerJob?.cancel(); tocJob?.cancel()
+        readerGeneration++
+        mutable.update { it.copy(reader = reader.copy(loading = true, error = null, tocLoading = false)) }
+        loadChapter(reader.bookId, reader.order)
+    }
+
+    private fun loadChapter(bookId: String, order: Int) {
+        val epoch = readerGeneration
+        readerJob = viewModelScope.launch {
+            try {
+                val initial = mutable.value.reader ?: return@launch
+                if (!initial.prepared) {
+                    repository.openFanqieBook(bookId, initial.title, initial.author, initial.cover)
+                    if (epoch != readerGeneration) return@launch
+                    mutable.update { current -> current.copy(reader = current.reader?.copy(prepared = true)) }
+                }
+                // 快速退出再打开同一本书时，先等上一份位置提交结束再请求续读。
+                if (order <= 0) readerProgressBarrier?.await()
+                if (epoch != readerGeneration) return@launch
+                val data = repository.readFanqieChapter(bookId, order)
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val reader = current.reader ?: return@update current
+                    current.copy(reader = reader.copy(loading = false, error = null, chapter = data, order = data.order))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (epoch != readerGeneration) return@launch
+                mutable.update { current ->
+                    val reader = current.reader ?: return@update current
+                    current.copy(reader = reader.copy(loading = false, error = error.userMessage()))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    /** 列表位置仅存到私有字段，滚动时不触发整页重组。 */
+    fun rememberReaderPosition(bookId: String, order: Int, paragraphIndex: Int, scrollOffset: Int) {
+        val reader = mutable.value.reader ?: return
+        if (reader.bookId != bookId || reader.chapter?.order != order || reader.loading || reader.error != null) return
+        val position = ReaderPosition(generation, bookId, order, paragraphIndex, scrollOffset)
+        if (position == readerPosition) return
+        readerPosition = position
+        readerProgressJob?.cancel()
+        readerProgressJob = viewModelScope.launch { delay(750); flushReaderProgress() }
+    }
+
+    fun flushReaderProgress() {
+        readerProgressJob?.cancel(); readerProgressJob = null
+        val position = readerPosition ?: return
+        if (position == queuedReaderPosition) return
+        val completion = CompletableDeferred<Unit>()
+        readerProgressBarrier = completion
+        queuedReaderPosition = position
+        if (readerProgressSaves.trySend(ReaderProgressSave(position, completion)).isFailure) {
+            queuedReaderPosition = null
+            completion.complete(Unit)
+        }
+    }
+
+    fun showFanqieShelf() {
+        showSheet(AppSheet.FanqieShelf(LoadState(emptyList(), loading = true)))
+        val epoch = sheetGeneration
+        sheetJob = viewModelScope.launch {
+            try {
+                val books = repository.fanqieBooks()
+                if (epoch == sheetGeneration) mutable.update { it.copy(sheet = AppSheet.FanqieShelf(LoadState(books, loaded = true))) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                if (epoch == sheetGeneration) {
+                    mutable.update { it.copy(sheet = AppSheet.FanqieShelf(LoadState(emptyList(), error = error.userMessage(), loaded = true))) }
+                    if (error is ApiException && error.code == 401) handleError(error)
+                }
+            }
+        }
+    }
 
     fun checkAppUpdate() = refresh("app-upgrade") {
         try { appUpdates.checkLatest() }

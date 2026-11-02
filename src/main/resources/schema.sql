@@ -155,6 +155,15 @@ VALUES ('btbtla', 'BT影视', 'btbtla', datetime('now', 'localtime'), datetime('
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('fanqie', '番茄小说', 'fanqie', datetime('now', 'localtime'), datetime('now', 'localtime'));
 
+-- 番茄小说阅读位置：章节、正文列表位置与滚动偏移；目录和单章正文缓存在 fanqie/<书号>/。
+CREATE TABLE IF NOT EXISTS fanqie_read_progress (
+    book_id       TEXT PRIMARY KEY,
+    chapter_order INTEGER NOT NULL DEFAULT 1,
+    paragraph_index INTEGER NOT NULL DEFAULT 0,
+    scroll_offset INTEGER NOT NULL DEFAULT 0,
+    updated_at    INTEGER NOT NULL
+);
+
 -- 内置会话：qBittorrent 下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('magnet', 'qBittorrent 下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));

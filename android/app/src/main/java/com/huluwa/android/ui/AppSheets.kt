@@ -36,6 +36,10 @@ import com.huluwa.android.data.text
         media?.let { url -> MediaViewer(url, true) { media = null } }
         return
     }
+    if (sheet is AppSheet.FanqieShelf) {
+        FanqieShelfSheet(sheet, vm)
+        return
+    }
     if (sheet is AppSheet.Btbtla) {
         BtbtlaResources(sheet, ui, vm)
         return

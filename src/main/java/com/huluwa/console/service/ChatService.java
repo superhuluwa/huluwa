@@ -97,6 +97,10 @@ public class ChatService {
     private static final int DPD_SHOW_MAX = DongPianSearchService.DEFAULT_MAX;
     /** 番茄小说单条搜索最多展示的书目数 */
     private static final int FANQIE_SHOW_MAX = FanqieSearchService.DEFAULT_MAX;
+    /** 兼容手动输入书号的阅读指令；安卓搜索卡直接打开原生阅读页。 */
+    private static final String FANQIE_READ_PREFIX = "阅读 ";
+    /** 番茄小说会话内的继续阅读指令：不带书号，取最近一本。 */
+    private static final String FANQIE_CONTINUE = "继续阅读";
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
@@ -112,6 +116,7 @@ public class ChatService {
     private final DongPianSearchService dongPianSearchService;
     private final BtbtlaSearchService btbtlaSearchService;
     private final FanqieSearchService fanqieSearchService;
+    private final FanqieLibraryService fanqieLibraryService;
     private final MovieCatalogService movieCatalogService;
     private final QBittorrentService qBittorrentService;
     private final MessageService messageService;
@@ -127,6 +132,7 @@ public class ChatService {
                        DongPianSearchService dongPianSearchService,
                        BtbtlaSearchService btbtlaSearchService,
                        FanqieSearchService fanqieSearchService,
+                       FanqieLibraryService fanqieLibraryService,
                        MovieCatalogService movieCatalogService,
                        QBittorrentService qBittorrentService, MessageService messageService,
                        MovieSubscriptionService movieSubscriptionService,
@@ -139,6 +145,7 @@ public class ChatService {
         this.dongPianSearchService = dongPianSearchService;
         this.btbtlaSearchService = btbtlaSearchService;
         this.fanqieSearchService = fanqieSearchService;
+        this.fanqieLibraryService = fanqieLibraryService;
         this.movieCatalogService = movieCatalogService;
         this.qBittorrentService = qBittorrentService;
         this.messageService = messageService;
@@ -413,8 +420,20 @@ public class ChatService {
             } else if ("btbtla".equals(kind)) {
                 replies.addAll(runBtbtlaSearch(sessionId, text));
             } else if ("fanqie".equals(kind)) {
-                // 番茄小说会话：submit = 按书名搜索（站点接口，不参与订阅追更）
-                replies.addAll(runFanqieSearch(sessionId, normalizeFanqieKeyword(text)));
+                // 番茄小说会话：搜索书目，也支持手动阅读和继续阅读指令
+                String readBook = fanqieReadBookId(text);
+                if (readBook != null) {
+                    replies.addAll(runFanqieRead(sessionId, readBook));
+                } else if (FANQIE_CONTINUE.equals(text)) {
+                    List<FanqieLibraryService.BookSummary> books = fanqieLibraryService.list();
+                    if (books.isEmpty()) {
+                        replies.add(append(sessionId, "bot", "text", "还没有阅读记录，发送书名或作者搜索后点击书目即可阅读。", null, null));
+                    } else {
+                        replies.add(fanqieReaderMessage(sessionId, books.getFirst()));
+                    }
+                } else {
+                    replies.addAll(runFanqieSearch(sessionId, normalizeFanqieKeyword(text)));
+                }
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
                 replies.addAll(runMagnetTask(sessionId, text));
@@ -597,6 +616,38 @@ public class ChatService {
                     : append(sessionId, "bot", "image", item.cover(), caption, payload));
         }
         return replies;
+    }
+
+    /** 兼容手动输入「阅读 <bookId>」，纯数字书号才作为指令解析。 */
+    static String fanqieReadBookId(String text) {
+        String value = text == null ? "" : text.trim();
+        if (!value.startsWith(FANQIE_READ_PREFIX)) return null;
+        String bookId = value.substring(FANQIE_READ_PREFIX.length()).trim();
+        return bookId.matches("[0-9]{6,24}") ? bookId : null;
+    }
+
+    private List<ChatMessage> runFanqieRead(String sessionId, String bookId) {
+        FanqieClient.Book known = fanqieSearchService.findCached(bookId);
+        FanqieLibraryService.BookSummary book = fanqieLibraryService.open(bookId,
+                known == null ? "" : known.bookName(), known == null ? "" : known.author(),
+                known == null ? "" : known.thumbUrl());
+        return List.of(fanqieReaderMessage(sessionId, book));
+    }
+
+    private ChatMessage fanqieReaderMessage(String sessionId, FanqieLibraryService.BookSummary book) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("kind", "fanqie-reader");
+        meta.put("bookId", book.bookId());
+        meta.put("title", book.title());
+        meta.put("author", book.author());
+        meta.put("cover", book.cover());
+        meta.put("progressChapter", book.progressChapter());
+        String caption = "《" + book.title() + "》" + (book.author().isBlank() ? "" : "  " + book.author())
+                + "\n点击即可在 App 内阅读，共 " + book.chapterCount() + " 章。"
+                + (book.progressChapter() > 0 ? "\n上次读到第 " + book.progressChapter() + " 章。" : "");
+        return book.cover().isBlank()
+                ? append(sessionId, "bot", "text", caption, null, toJson(meta))
+                : append(sessionId, "bot", "image", book.cover(), caption, toJson(meta));
     }
 
     /**

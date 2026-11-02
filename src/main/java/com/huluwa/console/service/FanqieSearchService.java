@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +16,7 @@ import java.util.Map;
  * 番茄小说会话的搜索适配。
  *
  * <p>会话内发送的关键字走番茄小说的 App 搜索接口（{@link FanqieClient#searchMore}），
- * 返回书目列表。会话设备与 content_key 缓存在本服务内，避免每次搜索都重新注册设备；
+ * 返回书目列表。会话设备缓存在本服务内，搜索无需交换正文密钥；
  * 服务端限流或密钥失效时清空缓存，下次搜索自动重建。</p>
  */
 @Service
@@ -30,12 +31,15 @@ public class FanqieSearchService {
 
     private static final Logger log = LoggerFactory.getLogger(FanqieSearchService.class);
 
-    private final FanqieClient client = new FanqieClient();
+    private final FanqieClient client = new FanqieClient(Duration.ofSeconds(12), 1);
+    /** 最近一次搜索到的书目，按 bookId 索引，供「立即阅读」复用书名与封面。 */
+    private final Map<String, FanqieClient.Book> recent = new LinkedHashMap<>();
+    private static final int RECENT_LIMIT = 200;
 
     /**
      * 搜索书目。
      *
-     * <p>多线程共用同一个客户端实例：注册、换密钥与搜索串行执行，避免并发设备注册。
+     * <p>多线程共用同一个客户端实例：注册与搜索串行执行，避免并发设备注册。
      * 失败时丢弃会话（下次调用重建），再把异常抛给上层转成错误气泡。</p>
      */
     public synchronized List<FanqieClient.Book> search(String keyword) {
@@ -47,13 +51,18 @@ public class FanqieSearchService {
             throw new BusinessException(400, "关键字过长，请输入 " + MAX_KEYWORD_LENGTH + " 个字符以内");
         }
         try {
-            client.ensureSession();
-            return client.searchMore(query, SEARCH_PAGES, 10);
+            return remember(client.searchMore(query, SEARCH_PAGES, 10));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(503, "番茄小说搜索已中断，请重试");
         } catch (Exception first) {
             log.warn("番茄小说搜索失败，重建会话后重试：{}", first.getMessage());
             try {
-                client.renewSession();
-                return client.searchMore(query, SEARCH_PAGES, 10);
+                client.resetSession();
+                return remember(client.searchMore(query, SEARCH_PAGES, 10));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new BusinessException(503, "番茄小说搜索已中断，请重试");
             } catch (Exception second) {
                 // 会话已不可用，下次调用时重新注册
                 reset();
@@ -62,14 +71,26 @@ public class FanqieSearchService {
         }
     }
 
-    /** 丢弃当前设备会话，下次搜索重新注册设备。 */
-    private void reset() {
-        try {
-            client.renewSession();
-        } catch (Exception ex) {
-            log.warn("番茄小说重建会话失败：{}", ex.getMessage());
+    /** 记录搜索结果，供「立即阅读」的卡片复用书名与封面。 */
+    private List<FanqieClient.Book> remember(List<FanqieClient.Book> books) {
+        for (FanqieClient.Book book : books) {
+            recent.remove(book.bookId());
+            recent.put(book.bookId(), book);
         }
+        while (recent.size() > RECENT_LIMIT) {
+            String oldest = recent.keySet().iterator().next();
+            recent.remove(oldest);
+        }
+        return books;
     }
+
+    /** 按书号取最近搜索到的书目信息；未命中返回 null。 */
+    public synchronized FanqieClient.Book findCached(String bookId) {
+        return recent.get(bookId);
+    }
+
+    /** 丢弃当前设备会话，下次搜索重新注册设备。 */
+    private void reset() { client.resetSession(); }
 
     /** 书目卡片的结构化载荷（安卓端按 kind=fanqie-book 渲染独立卡片）。 */
     public Map<String, Object> payload(FanqieClient.Book book) {
