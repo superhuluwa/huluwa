@@ -202,7 +202,7 @@ data class FanqieBookShelf(
     }
 }
 
-/** 书架后台更新的单本进度，下载数来自服务端正文缓存。 */
+/** 书架后台下载的单本进度，下载数来自服务端正文缓存。 */
 data class FanqieBookUpdate(val bookId: String, val title: String, val chapterCount: Int,
     val downloadedChapterCount: Int, val newChapters: Int, val downloadedChapters: Int,
     val failedChapters: Int, val error: String?) {
@@ -217,16 +217,17 @@ data class FanqieBookUpdate(val bookId: String, val title: String, val chapterCo
 data class FanqieShelfUpdateStatus(val startedAt: Long, val running: Boolean, val totalBooks: Int,
     val checkedBooks: Int, val currentBookId: String, val currentTitle: String,
     val books: List<FanqieBookUpdate>, val error: String?) {
-    val summary: String get() = when {
-        running -> if (totalBooks == 0) "正在读取书架…" else
-            "已检查 $checkedBooks/$totalBooks 本，已下载 ${books.sumOf { it.downloadedChapters }} 章" +
-                currentTitle.takeIf(String::isNotBlank)?.let { "\n正在更新：《$it》" }.orEmpty()
-        error != null -> error
-        startedAt == 0L -> ""
-        totalBooks == 0 -> "书架里没有可更新的小说"
-        else -> "检查完成，发现 ${books.sumOf { it.newChapters }} 章更新，补充下载 ${books.sumOf { it.downloadedChapters }} 章" +
-            books.count { it.error != null || it.failedChapters > 0 }.takeIf { it > 0 }
-                ?.let { "；$it 本未完成，可再次检查更新" }.orEmpty()
+    val summary: String get() {
+        val incomplete = books.count { it.error != null || it.failedChapters > 0 || it.downloadedChapterCount < it.chapterCount }
+        return when {
+            running -> if (currentTitle.isNotBlank()) "正在下载《$currentTitle》…" else "正在准备下载…"
+            error != null -> error
+            startedAt == 0L -> ""
+            totalBooks == 0 -> "没有可下载的小说"
+            else -> (if (incomplete > 0) "下载结束" else "下载完成") +
+                "，已缓存 ${books.sumOf { it.downloadedChapterCount }}/${books.sumOf { it.chapterCount }}章" +
+                incomplete.takeIf { it > 0 }?.let { "；$it 本未完成，请点击下载重试" }.orEmpty()
+        }
     }
     companion object {
         fun from(raw: JsonObject) = FanqieShelfUpdateStatus(raw.number("startedAt")?.toLong() ?: 0L,

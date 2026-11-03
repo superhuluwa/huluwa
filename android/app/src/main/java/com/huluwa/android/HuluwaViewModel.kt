@@ -74,6 +74,7 @@ data class FanqieShelfState(
     val selecting: Boolean = false, val selectedIds: Set<String> = emptySet(),
     val deleting: Boolean = false, val deleteError: String? = null,
     val updates: FanqieShelfUpdateStatus? = null, val updateStarting: Boolean = false, val updateError: String? = null,
+    val downloadStartingBookId: String? = null,
 ) {
     val updating get() = updateStarting || updates?.running == true
 }
@@ -337,7 +338,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     } catch (error: CancellationException) { throw error }
                     catch (error: Throwable) {
                         mutable.update { current -> current.copy(fanqieShelf = current.fanqieShelf?.copy(
-                            updateError = "更新状态暂未同步：${error.userMessage()}")) }
+                            updateError = "下载状态暂未同步：${error.userMessage()}")) }
                         if (error is ApiException && error.code == 401) handleError(error)
                     }
                     delay(if (mode == 2) 2_000L else 10_000L)
@@ -1260,14 +1261,16 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun checkFanqieShelfUpdates() {
+    fun downloadFanqieBook(bookId: String) {
         val shelf = mutable.value.fanqieShelf ?: return
-        if (shelf.updating || shelf.deleting || shelf.selecting || shelf.books.data.isEmpty() || shelfUpdateJob?.isActive == true) return
+        if (shelf.updating || shelf.deleting || shelf.selecting || shelf.books.loading ||
+            shelf.books.data.none { it.bookId == bookId } || shelfUpdateJob?.isActive == true) return
         val epoch = generation
-        mutable.update { it.copy(fanqieShelf = shelf.copy(updateStarting = true, updateError = null)) }
+        mutable.update { it.copy(fanqieShelf = shelf.copy(updateStarting = true, updateError = null,
+            downloadStartingBookId = bookId)) }
         shelfUpdateJob = viewModelScope.launch {
             try {
-                val status = repository.checkFanqieShelfUpdates()
+                val status = repository.downloadFanqieBook(bookId)
                 if (epoch == generation) applyFanqieShelfUpdate(status, notifyOnComplete = true)
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
@@ -1277,7 +1280,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } finally {
                 if (epoch == generation) mutable.update { current ->
-                    current.copy(fanqieShelf = current.fanqieShelf?.copy(updateStarting = false))
+                    current.copy(fanqieShelf = current.fanqieShelf?.copy(updateStarting = false, downloadStartingBookId = null))
                 }
             }
         }

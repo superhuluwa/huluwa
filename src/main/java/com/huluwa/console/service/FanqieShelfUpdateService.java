@@ -21,7 +21,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-/** 书架一键更新：单任务后台下载，已有正文跳过，离开客户端不影响任务。 */
+/** 书架后台下载：支持整架更新与单本完整缓存，已有正文跳过，离开客户端不影响任务。 */
 @Service
 public class FanqieShelfUpdateService {
     private static final Logger log = LoggerFactory.getLogger(FanqieShelfUpdateService.class);
@@ -50,28 +50,48 @@ public class FanqieShelfUpdateService {
     public synchronized UpdateStatus checkUpdates() {
         if (stopping) throw new BusinessException(503, "服务正在停止，请稍后重试");
         if (status.running()) return status;
+        return start(null);
+    }
+
+    /** 单本下载刷新目录并补齐全部正文；同一本书的重复请求复用正在运行的任务。 */
+    public synchronized UpdateStatus downloadBook(String bookId) {
+        if (stopping) throw new BusinessException(503, "服务正在停止，请稍后重试");
+        if (status.running()) {
+            if (status.totalBooks() == 1 && status.books().stream().anyMatch(book -> book.bookId().equals(bookId))) return status;
+            throw new BusinessException(409, "已有小说正在下载，请完成后再试");
+        }
+        var index = library.indexForUpdate(bookId);
+        return start(new BookUpdate(bookId, index.title(), index.chapters().size(),
+                library.downloadedChapterIds(index).size(), 0, 0, 0, null));
+    }
+
+    private UpdateStatus start(BookUpdate book) {
         long startedAt = Math.max(System.currentTimeMillis(), status.startedAt() + 1);
-        status = new UpdateStatus(startedAt, true, 0, 0, "", "", List.of(), null);
-        try { worker.execute(() -> run(startedAt)); }
+        int total = book == null ? 0 : 1;
+        List<BookUpdate> books = book == null ? List.of() : List.of(book);
+        status = new UpdateStatus(startedAt, true, total, 0,
+                book == null ? "" : book.bookId(), book == null ? "" : book.title(), books, null);
+        try { worker.execute(() -> run(startedAt, book)); }
         catch (RejectedExecutionException error) {
-            status = new UpdateStatus(startedAt, false, 0, 0, "", "", List.of(), "更新任务暂时无法启动，请重试");
+            status = new UpdateStatus(startedAt, false, total, 0, "", "", books, "下载任务暂时无法启动，请重试");
             throw new BusinessException(503, status.error());
         }
         return status;
     }
 
-    private void run(long startedAt) {
+    private void run(long startedAt, BookUpdate requestedBook) {
         Map<String, BookUpdate> results = new LinkedHashMap<>();
         int total = 0;
         int checked = 0;
         String failure = null;
         try {
-            List<FanqieLibraryService.BookSummary> books = library.list();
+            List<BookUpdate> books = requestedBook == null ? library.list().stream()
+                    .map(book -> new BookUpdate(book.bookId(), book.title(), book.chapterCount(),
+                            book.downloadedChapterCount(), 0, 0, 0, null)).toList() : List.of(requestedBook);
             total = books.size();
             for (var book : books) {
                 ensureRunning();
-                results.put(book.bookId(), new BookUpdate(book.bookId(), book.title(), book.chapterCount(),
-                        book.downloadedChapterCount(), 0, 0, 0, null));
+                results.put(book.bookId(), book);
                 publish(startedAt, true, total, checked, book.bookId(), book.title(), results, null);
                 int completed = checked;
                 int bookCount = total;
@@ -84,7 +104,7 @@ public class FanqieShelfUpdateService {
                 } catch (InterruptedException error) { throw error; }
                 catch (Exception error) {
                     log.warn("番茄小说 {} 检查更新失败：{}", book.bookId(), error.getMessage());
-                    String message = error instanceof BusinessException ? error.getMessage() : "检查更新失败，请重试";
+                    String message = error instanceof BusinessException ? error.getMessage() : "下载失败，请重试";
                     results.put(book.bookId(), results.get(book.bookId()).withError(message));
                 }
                 checked++;
@@ -92,10 +112,10 @@ public class FanqieShelfUpdateService {
             }
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
-            failure = "更新已中断，已下载章节保留，可再次检查更新";
+            failure = "下载已中断，已缓存章节保留，可重试下载";
         } catch (Exception error) {
             log.warn("番茄小说书架更新失败：{}", error.getMessage());
-            failure = error instanceof BusinessException ? error.getMessage() : "检查更新失败，请重试";
+            failure = error instanceof BusinessException ? error.getMessage() : "下载失败，请重试";
         } finally {
             publish(startedAt, false, total, checked, "", "", results, failure);
         }
@@ -134,10 +154,10 @@ public class FanqieShelfUpdateService {
                 log.warn("番茄小说 {} 章节 {} 更新下载失败：{}", bookId, chapter.itemId(), error.getMessage());
                 failed++;
                 consecutiveFailures++;
-                lastError = "部分章节下载失败，可再次检查更新重试";
+                lastError = "部分章节下载失败，可重试下载";
                 if (consecutiveFailures >= 3) {
                     failed += pending.size() - i - 1;
-                    lastError = "连续下载失败，剩余章节可再次检查更新重试";
+                    lastError = "连续下载失败，剩余章节可重试下载";
                 }
             }
             result = new BookUpdate(bookId, index.title(), index.chapters().size(), downloaded.size(),

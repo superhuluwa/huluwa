@@ -38,6 +38,11 @@ public class FanqieController {
         return ApiResult.ok(updates.checkUpdates());
     }
 
+    @PostMapping("/books/{bookId}/download")
+    public ApiResult<FanqieShelfUpdateService.UpdateStatus> downloadBook(@PathVariable String bookId) {
+        return ApiResult.ok(updates.downloadBook(bookId));
+    }
+
     @GetMapping("/books/update-status")
     public ApiResult<FanqieShelfUpdateService.UpdateStatus> updateStatus() {
         return ApiResult.ok(updates.status());

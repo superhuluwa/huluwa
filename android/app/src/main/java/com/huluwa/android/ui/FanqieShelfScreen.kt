@@ -15,7 +15,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,7 +29,7 @@ import com.huluwa.android.FanqieShelfState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.FanqieBookShelf
 
-/** 独立书架管理页：每行三本，服务端下载进度、一键更新和批量管理。 */
+/** 独立书架管理页：每行三本，服务端缓存进度、整本下载和批量管理。 */
 @Composable fun FanqieShelfScreen(state: FanqieShelfState, vm: HuluwaViewModel, snackbar: SnackbarHostState) {
     val grid = rememberLazyGridState()
     val books = state.books.data
@@ -53,9 +52,6 @@ import com.huluwa.android.data.FanqieBookShelf
                         Text("书架管理", style = MaterialTheme.typography.titleMedium)
                         Text(if (state.selecting) "已选择 ${state.selectedIds.size} 本" else "共 ${books.size} 本小说",
                             style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
-                    }
-                    IconButton(vm::refreshFanqieShelf, enabled = !state.books.loading && !state.deleting) {
-                        Icon(Icons.Outlined.Refresh, "刷新书架")
                     }
                     TextButton(vm::toggleShelfSelection,
                         enabled = books.isNotEmpty() && !state.deleting && (!state.updating || state.selecting)) {
@@ -85,21 +81,16 @@ import com.huluwa.android.data.FanqieBookShelf
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(vm::checkFanqieShelfUpdates, Modifier.fillMaxWidth(),
-                    enabled = books.isNotEmpty() && !state.books.loading && !state.selecting && !state.deleting && !state.updating) {
-                    if (state.updating) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (state.updating) "正在检查并下载…" else "一键检查更新")
-                }
-                val summary = if (state.updateStarting) "正在启动更新…" else updates?.summary.orEmpty()
-                if (summary.isNotBlank()) Text(summary, Modifier.fillMaxWidth(),
-                    color = if (updates?.error != null) HuluwaColors.Danger else HuluwaColors.Muted,
-                    style = MaterialTheme.typography.bodySmall)
-                state.updateError?.let { error ->
-                    Text(error, Modifier.fillMaxWidth(), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+            val summary = if (state.updateStarting) "正在启动下载…" else updates?.summary.orEmpty()
+            if (summary.isNotBlank() || state.updateError != null) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (summary.isNotBlank()) Text(summary, Modifier.fillMaxWidth(),
+                        color = if (updates?.error != null) HuluwaColors.Danger else HuluwaColors.Muted,
+                        style = MaterialTheme.typography.bodySmall)
+                    state.updateError?.let { error ->
+                        Text(error, Modifier.fillMaxWidth(), color = HuluwaColors.Danger, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
             if (state.books.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -125,7 +116,12 @@ import com.huluwa.android.data.FanqieBookShelf
                 horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 items(books, key = { it.bookId }) { book ->
                     ShelfBook(book, state.selecting, book.bookId in state.selectedIds, state.deleting,
-                        updating = state.updating, updateError = bookUpdates[book.bookId]?.error,
+                        updating = state.updating,
+                        downloading = (state.updateStarting && state.downloadStartingBookId == book.bookId) ||
+                            (updates?.running == true && updates.currentBookId == book.bookId),
+                        downloadEnabled = !state.books.loading,
+                        updateError = bookUpdates[book.bookId]?.error,
+                        onDownload = { vm.downloadFanqieBook(book.bookId) },
                         onOpen = { vm.openReader(book.bookId, book.title, book.author, book.cover) },
                         onSelect = { vm.selectShelfBook(book.bookId) },
                         onDelete = { vm.deleteShelfBooks(setOf(book.bookId)) })
@@ -137,7 +133,8 @@ import com.huluwa.android.data.FanqieBookShelf
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable private fun ShelfBook(book: FanqieBookShelf, selecting: Boolean, selected: Boolean, busy: Boolean,
-    updating: Boolean, updateError: String?, onOpen: () -> Unit, onSelect: () -> Unit, onDelete: () -> Unit) {
+    updating: Boolean, downloading: Boolean, downloadEnabled: Boolean, updateError: String?,
+    onDownload: () -> Unit, onOpen: () -> Unit, onSelect: () -> Unit, onDelete: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
         .combinedClickable(enabled = !busy, onClick = { if (selecting) onSelect() else onOpen() },
             onLongClickLabel = "选择小说", onLongClick = if (updating) null else onSelect), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -158,9 +155,18 @@ import com.huluwa.android.data.FanqieBookShelf
             minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(book.author.ifBlank { "未知作者" }, Modifier.fillMaxWidth(), color = HuluwaColors.Muted,
             style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("服务端已下载 ${book.downloadedChapterCount} / ${book.chapterCount} 章", Modifier.fillMaxWidth(),
+        Text("已缓存 ${book.downloadedChapterCount}/${book.chapterCount}章", Modifier.fillMaxWidth(),
             color = HuluwaColors.Pine, style = MaterialTheme.typography.labelSmall, maxLines = 2,
             overflow = TextOverflow.Ellipsis)
+        if (!selecting) FilledTonalButton(onDownload, Modifier.fillMaxWidth().heightIn(min = 36.dp),
+            enabled = downloadEnabled && !busy && !updating,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+            if (downloading) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(if (downloading) "下载中" else "下载", style = MaterialTheme.typography.labelMedium)
+        }
         if (updateError != null) Text(updateError, Modifier.fillMaxWidth(), color = HuluwaColors.Danger,
             style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
