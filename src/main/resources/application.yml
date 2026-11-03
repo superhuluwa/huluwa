@@ -68,6 +68,10 @@ huluwa:
     # 留空则首次启动自动生成并持久化到数据库
     secret: ''
     expire-hours: 72
+  source:
+    # 书源接口的对外地址（如 http://taihe.678120.cn:8086）。
+    # 留空时按请求的 Host / X-Forwarded-* 头推断；反向代理改写 Host 时请显式配置。
+    public-url: ''
   frp:
     # frpc 容器名：状态查询、热加载与重启都作用于它（docker restart frpc）
     container: frpc

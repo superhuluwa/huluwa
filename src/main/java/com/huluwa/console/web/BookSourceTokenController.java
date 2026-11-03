@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.security.BookSourceTokenService;
 import com.huluwa.console.service.source.BookSource;
+import com.huluwa.console.service.source.BookSourceOrigin;
 import com.huluwa.console.service.source.BookSourceRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ContentDisposition;
@@ -29,12 +30,14 @@ public class BookSourceTokenController {
 
     private final BookSourceTokenService tokens;
     private final BookSourceRegistry registry;
+    private final BookSourceOrigin origins;
     private final ObjectMapper json;
 
     public BookSourceTokenController(BookSourceTokenService tokens, BookSourceRegistry registry,
-                                     ObjectMapper json) {
+                                     BookSourceOrigin origins, ObjectMapper json) {
         this.tokens = tokens;
         this.registry = registry;
+        this.origins = origins;
         this.json = json;
     }
 
@@ -79,7 +82,7 @@ public class BookSourceTokenController {
                                          @RequestParam(defaultValue = "false") boolean download,
                                          HttpServletRequest request) throws JsonProcessingException {
         BookSource source = registry.require(sourceId);
-        String origin = normalizeOrigin(baseUrl, request);
+        String origin = origins.resolve(baseUrl, request);
         String token = tokens.issue(source.id());
         if (download) {
             byte[] body = json.writeValueAsBytes(LegadoBookSource.json(source, origin, token));
@@ -94,6 +97,7 @@ public class BookSourceTokenController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("origin", origin);
         data.put("token", token);
+        // 顶层数组，与下载文件结构保持一致，方便直接复制保存。
         data.put("json", LegadoBookSource.json(source, origin, token));
         // 不带 download 时仍返回统一信封；方法签名是 byte[]，这里按 JSON 序列化后再返回
         return ResponseEntity.ok()
@@ -102,25 +106,4 @@ public class BookSourceTokenController {
                 .body(json.writeValueAsBytes(ApiResult.ok(data)));
     }
 
-    /** 优先使用传入地址；否则按反向代理头推断当前对外地址。 */
-    static String normalizeOrigin(String baseUrl, HttpServletRequest request) {
-        String origin = baseUrl == null ? "" : baseUrl.trim();
-        if (origin.isEmpty()) {
-            String proto = firstHeader(request, "X-Forwarded-Proto");
-            String host = firstHeader(request, "X-Forwarded-Host");
-            String scheme = proto.isEmpty() ? request.getScheme() : proto;
-            String authority = host.isEmpty() ? request.getHeader("Host") : host;
-            if (authority == null || authority.isBlank()) authority = request.getServerName() + ":" + request.getServerPort();
-            origin = scheme + "://" + authority;
-        }
-        while (origin.endsWith("/")) origin = origin.substring(0, origin.length() - 1);
-        return origin;
-    }
-
-    private static String firstHeader(HttpServletRequest request, String name) {
-        String value = request.getHeader(name);
-        if (value == null || value.isBlank()) return "";
-        int comma = value.indexOf(',');
-        return (comma >= 0 ? value.substring(0, comma) : value).trim();
-    }
 }

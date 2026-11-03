@@ -4,7 +4,9 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.source.BookExportService;
 import com.huluwa.console.service.source.BookSource;
+import com.huluwa.console.service.source.BookSourceOrigin;
 import com.huluwa.console.service.source.BookSourceRegistry;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
@@ -35,10 +37,13 @@ public class BookSourceController {
 
     private final BookSourceRegistry registry;
     private final BookExportService exports;
+    private final BookSourceOrigin origins;
 
-    public BookSourceController(BookSourceRegistry registry, BookExportService exports) {
+    public BookSourceController(BookSourceRegistry registry, BookExportService exports,
+                                BookSourceOrigin origins) {
         this.registry = registry;
         this.exports = exports;
+        this.origins = origins;
     }
 
     /** 当前可用的书源。 */
@@ -61,15 +66,17 @@ public class BookSourceController {
                                                  @RequestParam(defaultValue = "") String key,
                                                  @RequestParam(required = false) String cursor,
                                                  @RequestParam(required = false) Integer page,
-                                                 @RequestParam(defaultValue = "20") int size) {
+                                                 @RequestParam(defaultValue = "20") int size,
+                                                 HttpServletRequest request) {
         BookSource source = registry.require(sourceId);
         String position = cursor != null && !cursor.isBlank()
                 ? cursor
                 : (page == null ? null : String.valueOf(Math.max(1, page)));
         BookSource.SearchResult result = source.search(key, position, size);
+        String origin = origins.resolve(null, request);
         List<Map<String, Object>> books = new ArrayList<>(result.books().size());
         for (BookSource.BookInfo book : result.books()) {
-            books.add(describeBook(sourceId, book));
+            books.add(describeBook(origin, sourceId, book));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("books", books);
@@ -79,30 +86,34 @@ public class BookSourceController {
 
     /** 书籍详情；书籍不在书架时实时查一次上游。 */
     @GetMapping("/{sourceId}/books/{bookId}")
-    public ApiResult<Map<String, Object>> book(@PathVariable String sourceId, @PathVariable String bookId) {
+    public ApiResult<Map<String, Object>> book(@PathVariable String sourceId, @PathVariable String bookId,
+                                               HttpServletRequest request) {
         BookSource.BookInfo book = registry.require(sourceId).book(bookId);
         if (book == null) throw new BusinessException(404, "书籍不存在");
-        return ApiResult.ok(describeBook(sourceId, book));
+        return ApiResult.ok(describeBook(origins.resolve(null, request),
+                sourceId, book));
     }
 
     /**
      * 完整目录。
      *
-     * <p>除了统一字段，每条还带一个相对路径 <code>url</code>，
-     * 让开源阅读这类只能按 JSONPath 取值的阅读器直接拿到可请求的章节地址。</p>
+     * <p>除统一字段外，每条还带完整的 <code>url</code>，
+     * 让只能按 JSONPath 取值的阅读器直接得到可请求的章节地址。</p>
      */
     @GetMapping("/{sourceId}/books/{bookId}/chapters")
     public ApiResult<List<Map<String, Object>>> chapters(@PathVariable String sourceId,
-                                                         @PathVariable String bookId) {
+                                                         @PathVariable String bookId,
+                                                         HttpServletRequest request) {
         List<BookSource.Chapter> chapters = registry.require(sourceId).chapters(bookId);
+        String origin = origins.resolve(null, request);
         List<Map<String, Object>> items = new ArrayList<>(chapters.size());
         for (BookSource.Chapter chapter : chapters) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("chapterId", chapter.chapterId());
             item.put("title", chapter.title());
             item.put("order", chapter.order());
-            // 与 bookSourceUrl（以 / 结尾）拼接得到完整章节地址。
-            item.put("url", sourceId + "/books/" + bookId + "/chapters/" + chapter.chapterId());
+            item.put("url", origin + "/api/sources/" + sourceId
+                    + "/books/" + bookId + "/chapters/" + chapter.chapterId());
             items.add(item);
         }
         return ApiResult.ok(items);
@@ -130,8 +141,8 @@ public class BookSourceController {
         return ApiResult.ok(exports.status(taskId));
     }
 
-    /** 书目统一输出为扁平字段，并附上相对 bookSourceUrl 根路径的 bookUrl。 */
-    private static Map<String, Object> describeBook(String sourceId, BookSource.BookInfo book) {
+    /** 书目统一输出为扁平字段，并附上完整可请求的 bookUrl。 */
+    private static Map<String, Object> describeBook(String origin, String sourceId, BookSource.BookInfo book) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("bookId", book.bookId());
         item.put("name", book.name());
@@ -142,7 +153,7 @@ public class BookSourceController {
         item.put("lastChapterName", book.lastChapterName());
         item.put("wordCount", book.wordCount());
         item.put("finished", book.finished());
-        item.put("bookUrl", sourceId + "/books/" + book.bookId());
+        item.put("bookUrl", origin + "/api/sources/" + sourceId + "/books/" + book.bookId());
         return item;
     }
 

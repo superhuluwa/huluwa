@@ -6,6 +6,7 @@ import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.security.BookSourceTokenService;
 import com.huluwa.console.service.source.BookSource;
+import com.huluwa.console.service.source.BookSourceOrigin;
 import com.huluwa.console.service.source.BookSourceRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ContentDisposition;
@@ -42,11 +43,13 @@ public class PublicBookSourceController {
 
     private final BookSourceRegistry registry;
     private final BookSourceTokenService tokens;
+    private final BookSourceOrigin origins;
     private final ObjectMapper json;
     private final Map<String, Deque<Long>> hits = new ConcurrentHashMap<>();
 
     public PublicBookSourceController(BookSourceRegistry registry, BookSourceTokenService tokens,
-                                      ObjectMapper json) {
+                                      BookSourceOrigin origins, ObjectMapper json) {
+        this.origins = origins;
         this.registry = registry;
         this.tokens = tokens;
         this.json = json;
@@ -84,7 +87,7 @@ public class PublicBookSourceController {
                                            HttpServletRequest request) throws JsonProcessingException {
         BookSource source = registry.require(sourceId);
         checkRate(request);
-        String origin = BookSourceTokenController.normalizeOrigin(baseUrl, request);
+        String origin = origins.resolve(baseUrl, request);
         int valid = Math.max(1, Math.min(days, BookSourceTokenService.EXPIRE_DAYS));
         String token = tokens.issue(source.id(), valid);
         byte[] body = json.writeValueAsBytes(LegadoBookSource.json(source, origin, token));
