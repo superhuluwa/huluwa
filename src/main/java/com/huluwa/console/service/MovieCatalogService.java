@@ -97,7 +97,12 @@ public class MovieCatalogService {
             }
             detailUrl = matches.getFirst().url();
         }
-        return isOnline ? online.detail(detailUrl) : subscriptions.detailMagnets(detailUrl, title);
+        return isOnline ? online.detail(detailUrl) : subscriptions.detailMagnets(detailUrl, title, true);
+    }
+
+    /** 只补充本地状态，缓存读取及轮询均不触发站点请求。 */
+    Map<String, Object> withCurrentMagnetState(Map<String, Object> payload, String title) {
+        return subscriptions.withCurrentMagnetState(payload, title);
     }
 
     private List<MovieSearchService.MovieItem> matches(List<MovieSearchService.MovieItem> items, String title, String year) {

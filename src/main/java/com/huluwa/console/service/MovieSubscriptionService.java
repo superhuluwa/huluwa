@@ -1205,13 +1205,17 @@ public class MovieSubscriptionService {
      * @param seriesTitle 片名（搜索结果里的名字，作为剧名与目录名基准）
      */
     public Map<String, Object> detailMagnets(String detailUrl, String seriesTitle) {
+        return detailMagnets(detailUrl, seriesTitle, false);
+    }
+
+    Map<String, Object> detailMagnets(String detailUrl, String seriesTitle, boolean refresh) {
         String url = movieSearchService.absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
         if (url.isBlank() || "null".equals(url)) {
             throw new BusinessException(400, "缺少电影港详情页链接，无法获取资源列表");
         }
         MovieSearchService.DetailPage detail;
         try {
-            detail = movieSearchService.fetchDetail(url);
+            detail = refresh ? movieSearchService.fetchDetail(url, true) : movieSearchService.fetchDetail(url);
         } catch (Exception e) {
             throw new BusinessException(502, "抓取详情页失败：" + safeMessage(e));
         }
@@ -1222,37 +1226,58 @@ public class MovieSubscriptionService {
         if (title == null) {
             title = movieSearchService.idFrom(url) == null ? "未命名剧集" : ("电影港 " + movieSearchService.idFrom(url));
         }
-        Subscription subscription = findRowByUrl(url) == null ? null : toSubscription(findRowByUrl(url));
-        if (subscription != null) {
-            title = subscription.title();
-        }
-
-        Set<String> downloaded = downloadedKeys();
         // 「资源列表」按集数倒序（最新一集在最前）：详情页原顺序保留给订阅巡检，不在这里改动
         List<MovieSearchService.MagnetItem> magnets = new ArrayList<>(detail.magnets());
         magnets.sort(MovieSubscriptionService::compareEpisodeDesc);
         List<Map<String, Object>> items = new ArrayList<>();
         for (MovieSearchService.MagnetItem item : magnets) {
-            String key = item.hash() == null ? item.magnet() : item.hash();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("title", item.title());
             row.put("magnet", item.magnet());
             row.put("hash", item.hash());
             row.put("quality", item.quality());
             row.put("episode", item.episode());
-            row.put("downloaded", downloaded.contains(key));
             items.add(row);
         }
         Map<String, Object> data = new LinkedHashMap<>();
-        String tool = subscriptionDownloader(findRowByUrl(url));
         data.put("url", url);
         data.put("title", title);
         data.put("siteTitle", detail.title());
+        data.put("count", items.size());
+        data.put("magnets", items);
+        return withCurrentMagnetState(data, seriesTitle);
+    }
+
+    /** 站点资源可以长期缓存，下载、订阅及下载器设置始终使用本地最新状态。 */
+    Map<String, Object> withCurrentMagnetState(Map<String, Object> snapshot, String seriesTitle) {
+        Map<String, Object> data = new LinkedHashMap<>(snapshot);
+        String url = text(string(data.get("url")));
+        if (url == null) return data; // 按片名匹配未命中时，仍返回该来源的空列表。
+        Map<String, Object> row = findRowByUrl(url);
+        Subscription subscription = row == null ? null : toSubscription(row);
+        String title = text(seriesTitle);
+        if (title == null) title = text(string(data.get("title")));
+        if (title == null) title = "未命名剧集";
+        if (subscription != null) title = subscription.title();
+        String tool = subscriptionDownloader(row);
+        data.put("title", title);
         data.put("subscribed", subscription != null && subscription.enabled());
         data.put("subscriptionId", subscription == null ? null : subscription.id());
         data.put("savePath", displaySavePath(tool, title));
         data.put("downloader", tool);
-        data.put("count", items.size());
+        Set<String> downloaded = downloadedKeys();
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (data.get("magnets") instanceof List<?> magnets) {
+            for (Object value : magnets) {
+                if (!(value instanceof Map<?, ?> item)) continue;
+                Map<String, Object> current = new LinkedHashMap<>();
+                item.forEach((key, field) -> current.put(String.valueOf(key), field));
+                String hash = text(string(item.get("hash")));
+                String key = hash == null ? string(item.get("magnet")) : hash.toLowerCase(Locale.ROOT);
+                current.put("downloaded", downloaded.contains(key));
+                items.add(current);
+            }
+        }
         data.put("magnets", items);
         return data;
     }

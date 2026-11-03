@@ -55,9 +55,10 @@ import kotlinx.serialization.json.*
     val card = sheet.card
     val movieSources = if (card.isMovie) sheet.onlineData.data.rows("playSources").map { PlaySource.from(it.asObject()) }
         .sortedBy { if (it.name.trim().equals("dyttm3u8", ignoreCase = true)) 0 else 1 } else emptyList()
-    var selectedSource by rememberSaveable(card.key()) { mutableIntStateOf(0) }
-    val selectedMovieSource = selectedSource.coerceIn(0, movieSources.size)
-    val online = card.isMovie && selectedMovieSource > 0
+    // 按线路名保留选择，后台刷新增加或重排线路时仍显示用户当前选中的线路。
+    var selectedMovieLine by rememberSaveable(card.key()) { mutableStateOf("") }
+    val selectedMovieSource = movieSources.indexOfFirst { it.name == selectedMovieLine }
+    val online = card.isMovie && selectedMovieSource >= 0
     val magnetScroll = rememberLazyListState()
     val onlineScroll = rememberLazyListState()
     val scroll = if (card.isMovie && online) onlineScroll else magnetScroll
@@ -100,20 +101,20 @@ import kotlinx.serialization.json.*
                             }
                             if (card.isMovie) {
                                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilmSourceChip("磁力", sheet.data.data.rows("magnets").size, selectedMovieSource == 0) { selectedSource = 0 }
-                                    movieSources.forEachIndexed { index, source ->
-                                        FilmSourceChip(source.name, source.items.size, selectedMovieSource == index + 1) { selectedSource = index + 1 }
+                                    FilmSourceChip("磁力", sheet.data.data.rows("magnets").size, !online) { selectedMovieLine = "" }
+                                    movieSources.forEach { source ->
+                                        FilmSourceChip(source.name, source.items.size, selectedMovieLine == source.name) { selectedMovieLine = source.name }
                                     }
                                 }
                                 if (!online) {
                                     Feedback(sheet.onlineData.error, { vm.reloadFilmResources(card) })
-                                    if (sheet.data.loaded && !sheet.onlineData.loaded) {
+                                    if (sheet.data.loaded && !sheet.data.loading && sheet.onlineData.loading) {
                                         LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 12.dp), color = HuluwaColors.Pine)
                                     }
                                 }
                             }
                             Feedback(resources.error, { vm.reloadFilmResources(card) })
-                            if (!resources.loaded || (!card.isMovie && resources.loading)) {
+                            if (!resources.loaded || resources.loading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = HuluwaColors.Pine)
                                 if (resources.loaded) Text("正在同步最新剧集…", Modifier.padding(top = 6.dp),
                                     style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -122,7 +123,7 @@ import kotlinx.serialization.json.*
                     }
                     if (resources.loaded && !(resources.error != null && resources.data.isEmpty())) {
                         when {
-                            card.isMovie && online -> hlsSourceItems(resourceCard, movieSources[selectedMovieSource - 1], sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
+                            card.isMovie && online -> hlsSourceItems(resourceCard, movieSources[selectedMovieSource], sheet.defaultSeason, busy, vm, onPlay) { url -> copy(url, "资源地址") }
                             isHls -> {
                                 if (sources.isEmpty()) item(key = "empty") { EmptyHint("该资源没有解析到可用地址") }
                                 else {

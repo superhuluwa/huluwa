@@ -154,7 +154,7 @@ public class MovieHlsService {
                 + "&" + path + "=" + query.get(path) + "&bf=" + query.get("bf");
     }
 
-    private static String detailUrl(String value) {
+    static String detailUrl(String value) {
         URI uri = siteUri(value);
         if (!DETAIL_PATH.matcher(uri.getPath()).matches() || uri.getQuery() != null) {
             throw new BusinessException(400, "请使用电影港新版（66vod.com）的影片详情页链接");

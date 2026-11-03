@@ -1,7 +1,7 @@
 package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
-import com.huluwa.console.service.MovieCatalogService;
+import com.huluwa.console.service.VideoResourceCacheService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -13,17 +13,18 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/chat/movie")
 public class MovieCatalogController {
-    private final MovieCatalogService movies;
+    private final VideoResourceCacheService cache;
 
-    public MovieCatalogController(MovieCatalogService movies) {
-        this.movies = movies;
+    public MovieCatalogController(VideoResourceCacheService cache) {
+        this.cache = cache;
     }
 
     @GetMapping("/resources")
     public ApiResult<Map<String, Object>> resources(@RequestParam String type,
                                                    @RequestParam(defaultValue = "") String url,
                                                    @RequestParam String title,
-                                                   @RequestParam(defaultValue = "") String year) {
-        return ApiResult.ok(movies.resources(type, url, title, year));
+                                                   @RequestParam(defaultValue = "") String year,
+                                                   @RequestParam(defaultValue = "false") boolean cachedOnly) {
+        return ApiResult.ok(cache.movieResources(type, url, title, year, cachedOnly));
     }
 }

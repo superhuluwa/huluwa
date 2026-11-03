@@ -149,7 +149,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         }).requireSuccess()
         return Subscription.from(response.asObject().child("subscription"), card.subscriptionSource)
     }
-    /** 电影港磁力 / 在线标签独立请求，老卡片缺少另一来源地址时由后端按片名匹配。 */
+    /** 各来源先读缓存并后台刷新；轮询只读快照，老卡片缺少地址时由后端按片名匹配。 */
     suspend fun filmResources(card: FilmCard, online: Boolean = false, cachedOnly: Boolean = false): JsonObject {
         if (!card.isMovie) return api.get("hls", "detail", query = buildMap {
             put("resId", card.id); put("cachedOnly", cachedOnly.toString())
@@ -160,6 +160,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         } else if (card.isMovieHls) "" else card.url
         return api.get("chat", "movie", "resources", query = mapOf(
             "type" to if (online) "online" else "magnet", "url" to url, "title" to card.title, "year" to card.year,
+            "cachedOnly" to cachedOnly.toString(),
         )).asObject()
     }
     /** 首次请求返回目录缓存并启动刷新，轮询只读取缓存，避免反复触发抓站。 */

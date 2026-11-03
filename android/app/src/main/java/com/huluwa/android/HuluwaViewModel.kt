@@ -1977,7 +1977,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         showSheet(AppSheet.Films(card, LoadState(JsonObject(emptyMap())), defaultSeason))
         reloadFilmResources(card)
     }
-    /** 两个来源并行抓取，各自保留数据、加载和错误状态。 */
+    /** 两个来源并行读取缓存并后台刷新，分别轮询快照，保留各自数据、加载和错误状态。 */
     fun reloadFilmResources(card: FilmCard) {
         val sheet = mutable.value.sheet as? AppSheet.Films ?: return
         if (sheet.card.key() != card.key() || sheetJob?.isActive == true) return
@@ -1992,12 +1992,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 try {
                     var result = repository.filmResources(card, online)
                     while (current == sheetGeneration) {
-                        val refreshing = !card.isMovie && result.flag("refreshing")
+                        val refreshing = result.flag("refreshing")
                         mutable.update { old ->
                             val active = old.sheet as? AppSheet.Films ?: return@update old
                             if (active.card.key() != card.key()) return@update old
-                            val loaded = if (card.isMovie) LoadState(result, loaded = true) else resourceSnapshot(result)
-                            old.copy(sheet = if (online) active.copy(onlineData = loaded) else active.copy(data = loaded))
+                            val loaded = resourceSnapshot(result)
+                            if ((if (online) active.onlineData else active.data) == loaded) old
+                            else old.copy(sheet = if (online) active.copy(onlineData = loaded) else active.copy(data = loaded))
                         }
                         if (!refreshing) break
                         delay(1200)

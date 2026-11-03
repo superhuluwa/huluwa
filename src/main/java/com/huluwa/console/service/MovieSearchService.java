@@ -198,7 +198,8 @@ public class MovieSearchService {
         return fetchDetail(detailUrl, false);
     }
 
-    private DetailPage fetchDetail(String detailUrl, boolean refresh) {
+    /** 资源目录后台刷新与订阅巡检可绕过已完成的短期缓存，共享正在进行的抓取。 */
+    DetailPage fetchDetail(String detailUrl, boolean refresh) {
         String url = absoluteUrl(detailUrl == null ? "" : detailUrl.trim());
         if (url.isBlank() || "null".equals(url)) {
             return new DetailPage("", List.of());

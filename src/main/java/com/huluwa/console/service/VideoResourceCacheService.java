@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -19,7 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-/** 懂片帝、电影天堂的持久化资源快照；先读旧值，后台刷新，轮询只读数据库。 */
+/** 懂片帝、电影天堂和电影港的持久化资源快照；先读旧值，后台刷新，轮询只读数据库。 */
 @Service
 public class VideoResourceCacheService {
     private static final Logger log = LoggerFactory.getLogger(VideoResourceCacheService.class);
@@ -28,6 +29,7 @@ public class VideoResourceCacheService {
     private final ObjectMapper json;
     private final DongPianSearchService dpd;
     private final DyttSearchService dytt;
+    private final MovieCatalogService movies;
     private final ExecutorService detailWorkers = Executors.newFixedThreadPool(2,
             Thread.ofPlatform().daemon().name("video-detail-refresh-", 0).factory());
     // 长剧线路补齐与目录刷新分开，避免后台解析阻塞其它作品的目录请求。
@@ -37,15 +39,38 @@ public class VideoResourceCacheService {
     private final Map<Key, CompletableFuture<Void>> refreshes = new ConcurrentHashMap<>();
 
     public VideoResourceCacheService(JdbcTemplate jdbc, ObjectMapper json,
-                                     DongPianSearchService dpd, DyttSearchService dytt) {
+                                     DongPianSearchService dpd, DyttSearchService dytt, MovieCatalogService movies) {
         this.jdbc = jdbc;
         this.json = json;
         this.dpd = dpd;
         this.dytt = dytt;
+        this.movies = movies;
     }
 
     private record Key(String source, String provider, String resId, String line) { }
     private record Snapshot(Map<String, Object> payload, String error) { }
+
+    /** 磁力与在线分别缓存；旧卡片缺少地址时，按片名和年份保存匹配结果。 */
+    public Map<String, Object> movieResources(String type, String url, String title, String year, boolean cachedOnly) {
+        if (!"magnet".equals(type) && !"online".equals(type)) {
+            throw new BusinessException(400, "请选择磁力或在线资源");
+        }
+        String name = title == null ? "" : title.trim();
+        String released = year == null ? "" : year.trim();
+        String address = url == null ? "" : url.trim();
+        if (address.isBlank()) {
+            HlsSupport.required(name, "影片名称");
+        } else {
+            address = "online".equals(type) ? MovieHlsService.detailUrl(address) : MovieSearchService.absoluteUrl(address);
+        }
+        String detailUrl = address;
+        // 两站的数字编号不通用；有地址时使用完整 URL，无地址时保留片名和年份的边界。
+        String id = detailUrl.isBlank() ? "title:" + json.valueToTree(List.of(name, released)) : "url:" + detailUrl;
+        var payload = load(new Key("movie", type, id, ""), cachedOnly, detailWorkers,
+                save -> save.accept(movies.resources(type, detailUrl, name, released)));
+        // 下载记录、订阅和保存目录读当前数据库及配置，不能跟随站点快照一起变旧。
+        return "magnet".equals(type) ? movies.withCurrentMagnetState(payload, name) : payload;
+    }
 
     public Map<String, Object> dyttDetail(String apiUrl, String requestedId, boolean cachedOnly) {
         String provider = HlsSupport.providerUrl(apiUrl);
