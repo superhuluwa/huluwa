@@ -688,15 +688,27 @@ public class ChatService {
         return stripped.isEmpty() ? value : stripped;
     }
 
+    /**
+     * 按书号直达：取详情后渲染成与通用搜索一致的书目卡（封面 + 作者 + 分类 + 简介 + 最新章节）。
+     *
+     * <p>会话不负责加书架，由阅读页的按钮决定；这里也不预先打开目录，
+     * 避免为了显示一张卡片就去拉整本目录。</p>
+     */
     private List<ChatMessage> runFanqieRead(String sessionId, String bookId) {
-        // 分享链接直达时最近搜索结果里没有这本书，先取详情补全书名、作者和封面
-        FanqieClient.Book known = fanqieSearchService.findCached(bookId);
-        if (known == null) known = fanqieSearchService.describe(bookId);
-        // 会话只负责进入阅读页：书不自动加入书架，由阅读页右上角按钮决定。
-        FanqieLibraryService.BookSummary book = fanqieLibraryService.open(bookId,
-                known == null ? "" : known.bookName(), known == null ? "" : known.author(),
-                known == null ? "" : known.thumbUrl(), false);
-        return List.of(fanqieReaderMessage(sessionId, book));
+        // 分享链接直达时最近搜索结果里没有这本书，靠详情接口补全书名、作者、封面与简介。
+        FanqieClient.Book book = fanqieSearchService.findCached(bookId);
+        if (book == null) book = fanqieSearchService.describe(bookId);
+        if (book == null) throw new BusinessException(404, "没有找到这本书，请稍后重试");
+        return List.of(fanqieBookCard(sessionId, book));
+    }
+
+    /** 书目卡：通用搜索与分享直达共用同一种气泡形态（kind=fanqie-book）。 */
+    private ChatMessage fanqieBookCard(String sessionId, FanqieClient.Book book) {
+        String caption = FanqieSearchService.caption(book);
+        String payload = toJson(fanqieSearchService.payload(book));
+        return book.thumbUrl().isBlank()
+                ? append(sessionId, "bot", "text", caption, null, payload)
+                : append(sessionId, "bot", "image", book.thumbUrl(), caption, payload);
     }
 
     private ChatMessage fanqieReaderMessage(String sessionId, FanqieLibraryService.BookSummary book) {
@@ -731,11 +743,7 @@ public class ChatService {
         String target = title.trim();
         for (FanqieClient.Book book : found) {
             if (book.bookName() != null && book.bookName().trim().equals(target)) {
-                String payload = toJson(fanqieSearchService.payload(book));
-                return List.of(book.thumbUrl().isBlank()
-                        ? append(sessionId, "bot", "text", FanqieSearchService.caption(book), null, payload)
-                        : append(sessionId, "bot", "image", book.thumbUrl(),
-                                FanqieSearchService.caption(book), payload));
+                return List.of(fanqieBookCard(sessionId, book));
             }
         }
         // 没有精确同名结果时保留完整搜索结果，用户仍可从列表里挑。
@@ -748,11 +756,7 @@ public class ChatService {
         replies.add(append(sessionId, "bot", "text",
                 "书名「" + title + "」没有精确匹配，找到 " + found.size() + " 本相关书籍，展示前 " + shown + " 本。", null, null));
         for (FanqieClient.Book book : found.subList(0, shown)) {
-            String payload = toJson(fanqieSearchService.payload(book));
-            replies.add(book.thumbUrl().isBlank()
-                    ? append(sessionId, "bot", "text", FanqieSearchService.caption(book), null, payload)
-                    : append(sessionId, "bot", "image", book.thumbUrl(),
-                            FanqieSearchService.caption(book), payload));
+            replies.add(fanqieBookCard(sessionId, book));
         }
         return replies;
     }
@@ -780,11 +784,7 @@ public class ChatService {
         replies.add(append(sessionId, "bot", "text",
                 "关键字「" + keyword + "」找到 " + found.size() + " 本书，展示前 " + shown + " 本。", null, null));
         for (FanqieClient.Book book : found.subList(0, shown)) {
-            String caption = FanqieSearchService.caption(book);
-            String payload = toJson(fanqieSearchService.payload(book));
-            replies.add(book.thumbUrl().isBlank()
-                    ? append(sessionId, "bot", "text", caption, null, payload)
-                    : append(sessionId, "bot", "image", book.thumbUrl(), caption, payload));
+            replies.add(fanqieBookCard(sessionId, book));
         }
         return replies;
     }
