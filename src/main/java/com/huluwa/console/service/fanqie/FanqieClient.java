@@ -178,6 +178,10 @@ public final class FanqieClient {
     public record Fetched(String itemId, String title, String text, long chars, String error) {
     }
 
+    /** 一页搜索结果：书目列表 + 下一页游标（passback，null 表示没有更多）。 */
+    public record SearchPage(List<Book> books, String cursor) {
+    }
+
     // ==================================================================
     // 一、AES 与压缩
     // ==================================================================
@@ -1164,6 +1168,7 @@ public final class FanqieClient {
                 }
                 b = fallback;
             }
+            // 只有 search_high_light 的单元格没有书号，无法定位书籍，直接丢弃。
             String bid = text(b.path("book_id"));
             if (bid.isEmpty()) {
                 bid = text(cell.path("book_id"));
@@ -1171,23 +1176,36 @@ public final class FanqieClient {
             if (bid.isEmpty()) {
                 continue;
             }
-            Integer status = numIntOrNull(b.path("creation_status"));
-            String name = text(b.path("book_name"));
-            if (name.isEmpty() && hl.isObject()) {
-                name = text(hl.path("title").path("text"));
-            }
-            String abs = text(b.path("abstract"));
-            if (abs.isEmpty() && hl.isObject()) {
-                abs = text(hl.path("abstract").path("text"));
-            }
-            out.add(new Book(bid, name, text(b.path("author")), abs,
-                    numLong(b.path("word_number")), status,
-                    status != null && status == 1,
-                    numDouble(b.path("score")), numLong(b.path("read_count")),
-                    text(b.path("category")), text(b.path("thumb_url")),
-                    text(b.path("last_chapter_title"))));
+            out.add(toBook(b, hl, bid));
         }
         return out;
+    }
+
+    /** 解析单个书目节点；详情接口与搜索结果共用同一套字段名。 */
+    private static List<Book> parseBookNode(JsonNode node) {
+        if (node == null || !node.isObject()) return List.of();
+        String bid = text(node.path("book_id"));
+        if (bid.isEmpty()) return List.of();
+        return List.of(toBook(node, null, bid));
+    }
+
+    /** 按番茄书目字段组装 {@link Book}，高亮节点仅在搜索结果里提供兜底文本。 */
+    private static Book toBook(JsonNode b, JsonNode highlight, String bookId) {
+        Integer status = numIntOrNull(b.path("creation_status"));
+        String name = text(b.path("book_name"));
+        if (name.isEmpty() && highlight != null && highlight.isObject()) {
+            name = text(highlight.path("title").path("text"));
+        }
+        String abs = text(b.path("abstract"));
+        if (abs.isEmpty() && highlight != null && highlight.isObject()) {
+            abs = text(highlight.path("abstract").path("text"));
+        }
+        return new Book(bookId, name, text(b.path("author")), abs,
+                numLong(b.path("word_number")), status,
+                status != null && status == 1,
+                numDouble(b.path("score")), numLong(b.path("read_count")),
+                text(b.path("category")), text(b.path("thumb_url")),
+                text(b.path("last_chapter_title")));
     }
 
     /** 取一页搜索结果，返回 (书目列表, 下一页 passback 令牌或 null)。 */
@@ -1201,6 +1219,17 @@ public final class FanqieClient {
                 offset = 0;
             }
         }
+        return searchPage(keyword, offset, count, passback);
+    }
+
+    /**
+     * 取一页搜索结果。
+     *
+     * @param offset   上游 offset 参数
+     * @param passback 上游 passback 令牌，可为 null
+     */
+    private Map.Entry<List<Book>, String> searchPage(String keyword, int offset, int count, String passback)
+            throws IOException, InterruptedException {
         JsonNode res = searchRaw(keyword, offset, count, 3, passback);
         int code = res.path("code").asInt(0);
         if (res.hasNonNull("code") && code != 0) {
@@ -1236,6 +1265,42 @@ public final class FanqieClient {
             return searchPage(keyword, count, token).getKey();
         }
         return searchPage(keyword, count, null).getKey();
+    }
+
+    /**
+     * 取一页搜索结果。
+     *
+     * <p>offset 与 passback 都直接透传给上游：passback 是上游续页令牌，offset 决定结果窗口。
+     * 书源层按页码换算 offset 直接请求，因此不依赖上一次响应，可任意跳页。</p>
+     */
+    public SearchPage searchOnePage(String keyword, int offset, int count, String passback)
+            throws IOException, InterruptedException {
+        Map.Entry<List<Book>, String> page = searchPage(keyword, offset, count, passback);
+        return new SearchPage(List.copyOf(page.getKey()), page.getValue());
+    }
+
+    /**
+     * 解析书籍详情。
+     *
+     * <p>详情接口返回 <code>data.book_info</code>（旧版本为 <code>data.book_data</code>），
+     * 字段与搜索结果一致，因此复用 {@link #parseSearchCells} 的取值逻辑。</p>
+     *
+     * @return 解析成功返回书目，接口不可用或字段缺失时返回 null（调用方回退到搜索结果里缓存的书目）
+     */
+    public Book detailBook(String bookId) throws IOException, InterruptedException {
+        JsonNode res = detail(bookId);
+        if (res.path("code").asInt(0) != 0) {
+            throw new IllegalStateException("详情获取失败：" + text(res.path("message")));
+        }
+        JsonNode data = res.path("data");
+        JsonNode info = data.path("book_info");
+        if (!info.isObject()) info = data.path("book_data");
+        if (!info.isObject()) info = data;
+        if (!info.isObject()) return null;
+        List<Book> parsed = parseBookNode(info);
+        if (parsed.isEmpty()) return null;
+        Book book = parsed.getFirst();
+        return book.bookId().isEmpty() ? null : book;
     }
 
     /** 翻多页搜索（用 passback 令牌），按 book_id 去重。 */

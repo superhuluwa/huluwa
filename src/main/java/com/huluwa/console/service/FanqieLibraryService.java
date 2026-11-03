@@ -231,6 +231,26 @@ public class FanqieLibraryService {
     /** 更新任务只短暂持有书籍锁，网络请求由独立后台客户端完成。 */
     BookIndex indexForUpdate(String bookId) { return requireIndex(bookId); }
 
+    /** 书源使用：书号非法或书籍不在书架时返回 null，不抛异常。 */
+    public BookIndex findIndex(String bookId) {
+        if (!validId(bookId)) return null;
+        try { return loadIndex(bookId); }
+        catch (RuntimeException error) { return null; }
+    }
+
+    /** 书源使用：读取已缓存的一章正文，未缓存返回 null。 */
+    public String cachedChapter(String bookId, String itemId) {
+        if (!validId(bookId) || !validId(itemId)) return null;
+        Path file = bookDir(bookId).resolve(itemId + ".txt");
+        try {
+            if (!Files.isRegularFile(file) || Files.size(file) == 0) return null;
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            log.warn("读取番茄小说 {} 章节 {} 缓存失败：{}", bookId, itemId, error.getMessage());
+            return null;
+        }
+    }
+
     BookIndex refreshCatalog(String bookId, List<FanqieClient.ChapterEntry> chapters) {
         validateId(bookId);
         List<FanqieClient.ChapterEntry> normalized = normalizeChapters(chapters);
@@ -243,7 +263,7 @@ public class FanqieLibraryService {
         }
     }
 
-    Set<String> downloadedChapterIds(BookIndex index) {
+    public Set<String> downloadedChapterIds(BookIndex index) {
         Set<String> validIds = index.chapters().stream().map(FanqieClient.ChapterEntry::itemId)
                 .collect(java.util.stream.Collectors.toSet());
         Set<String> downloaded = new LinkedHashSet<>();
@@ -262,7 +282,7 @@ public class FanqieLibraryService {
         }
     }
 
-    boolean chapterDownloaded(String bookId, String itemId) {
+    public boolean chapterDownloaded(String bookId, String itemId) {
         validateId(bookId);
         validateId(itemId);
         Path file = bookDir(bookId).resolve(itemId + ".txt");
@@ -270,7 +290,7 @@ public class FanqieLibraryService {
         catch (IOException error) { throw new BusinessException(500, "读取章节缓存失败，请重试"); }
     }
 
-    boolean cacheChapter(String bookId, String itemId, String content) {
+    public boolean cacheChapter(String bookId, String itemId, String content) {
         validateId(bookId);
         validateId(itemId);
         if (content == null || content.isBlank()) throw new BusinessException(502, "章节正文为空，请重试");

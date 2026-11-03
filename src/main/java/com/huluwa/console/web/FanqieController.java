@@ -1,13 +1,26 @@
 package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
+import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.FanqieLibraryService;
 import com.huluwa.console.service.FanqieShelfUpdateService;
+import com.huluwa.console.service.source.BookExportService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotEmpty;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -17,10 +30,13 @@ import java.util.Map;
 public class FanqieController {
     private final FanqieLibraryService library;
     private final FanqieShelfUpdateService updates;
+    private final BookExportService exports;
 
-    public FanqieController(FanqieLibraryService library, FanqieShelfUpdateService updates) {
+    public FanqieController(FanqieLibraryService library, FanqieShelfUpdateService updates,
+                            BookExportService exports) {
         this.library = library;
         this.updates = updates;
+        this.exports = exports;
     }
 
     public record OpenRequest(@Size(max = 300) String title, @Size(max = 300) String author,
@@ -80,5 +96,32 @@ public class FanqieController {
     public ApiResult<Void> progress(@PathVariable String bookId, @RequestBody ProgressRequest request) {
         library.saveProgress(bookId, request.order(), request.paragraphIndex(), request.scrollOffset());
         return ApiResult.ok();
+    }
+
+    /** 导出整本 TXT（异步）：先取任务状态，完成后从 /exports/{taskId}/download 下载。 */
+    @PostMapping("/books/{bookId}/export")
+    public ApiResult<BookExportService.ExportStatus> export(@PathVariable String bookId) {
+        return ApiResult.ok(exports.export(bookId));
+    }
+
+    @GetMapping("/exports/{taskId}")
+    public ApiResult<BookExportService.ExportStatus> exportStatus(@PathVariable String taskId) {
+        return ApiResult.ok(exports.status(taskId));
+    }
+
+    /** 下载已完成的 TXT；走登录鉴权，安卓端和网页端无需书源令牌。 */
+    @GetMapping("/exports/{taskId}/download")
+    public ResponseEntity<Resource> exportDownload(@PathVariable String taskId) throws IOException {
+        Path file = exports.file(taskId);
+        if (file == null) throw new BusinessException(404, "导出文件尚未生成或已过期");
+        BookExportService.ExportStatus status = exports.status(taskId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/plain; charset=utf-8"))
+                .contentLength(Files.size(file))
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(status.fileName(), StandardCharsets.UTF_8).build().toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(new FileSystemResource(file));
     }
 }
