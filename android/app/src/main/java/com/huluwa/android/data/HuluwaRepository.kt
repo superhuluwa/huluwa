@@ -197,6 +197,12 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun fanqieBooks(): List<FanqieBookShelf> =
         api.get("fanqie", "books").asArray().mapNotNull { FanqieBookShelf.from(it.asObject()) }
 
+    suspend fun checkFanqieShelfUpdates(): FanqieShelfUpdateStatus =
+        FanqieShelfUpdateStatus.from(api.post("fanqie", "books", "check-updates").asObject())
+
+    suspend fun fanqieShelfUpdateStatus(): FanqieShelfUpdateStatus =
+        FanqieShelfUpdateStatus.from(api.get("fanqie", "books", "update-status").asObject())
+
     suspend fun deleteFanqieBooks(bookIds: Set<String>): FanqieDeleteResult =
         FanqieDeleteResult.from(api.post("fanqie", "books", "delete", body = jsonBody {
             putJsonArray("bookIds") { bookIds.forEach { add(JsonPrimitive(it)) } }

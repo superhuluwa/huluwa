@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -51,7 +52,7 @@ public class FanqieLibraryService {
     public record BookIndex(String bookId, String title, String author, String cover,
                             List<FanqieClient.ChapterEntry> chapters, long updatedAt) { }
     public record BookSummary(String bookId, String title, String author, String cover,
-                              int chapterCount, long totalChars, long updatedAt, int progressChapter) { }
+                              int chapterCount, long totalChars, long updatedAt, int progressChapter, int downloadedChapterCount) { }
     public record ReadProgress(int order, int paragraphIndex, int scrollOffset, long updatedAt) { }
 
     /** 只准备目录即可进入阅读，无需等整本下载；重开书籍时更新连载目录。 */
@@ -61,13 +62,7 @@ public class FanqieLibraryService {
             BookIndex existing = loadIndex(bookId);
             List<FanqieClient.ChapterEntry> chapters;
             try {
-                chapters = remote(() -> client.catalog(bookId)).stream()
-                        .filter(c -> c.itemId().matches("[0-9]{6,24}"))
-                        .sorted(Comparator.comparingLong(FanqieClient.ChapterEntry::order))
-                        .collect(java.util.stream.Collectors.toMap(FanqieClient.ChapterEntry::itemId,
-                                c -> c, (first, duplicate) -> first, LinkedHashMap::new))
-                        .values().stream().toList();
-                if (chapters.isEmpty()) throw new BusinessException(502, "这本书暂无可阅读章节，请稍后重试");
+                chapters = normalizeChapters(remote(() -> client.catalog(bookId)));
             } catch (BusinessException error) {
                 // 已缓存的书即使上游暂时不可达，也可以继续阅读。
                 if (existing == null) throw error;
@@ -230,7 +225,76 @@ public class FanqieLibraryService {
         ReadProgress progress = progress(index.bookId());
         long words = index.chapters().stream().mapToLong(FanqieClient.ChapterEntry::wordNumber).sum();
         return new BookSummary(index.bookId(), index.title(), index.author(), index.cover(), index.chapters().size(),
-                words, Math.max(index.updatedAt(), progress.updatedAt()), progress.order());
+                words, Math.max(index.updatedAt(), progress.updatedAt()), progress.order(), downloadedChapterIds(index).size());
+    }
+
+    /** 更新任务只短暂持有书籍锁，网络请求由独立后台客户端完成。 */
+    BookIndex indexForUpdate(String bookId) { return requireIndex(bookId); }
+
+    BookIndex refreshCatalog(String bookId, List<FanqieClient.ChapterEntry> chapters) {
+        validateId(bookId);
+        List<FanqieClient.ChapterEntry> normalized = normalizeChapters(chapters);
+        synchronized (bookLock(bookId)) {
+            BookIndex existing = requireIndex(bookId);
+            BookIndex updated = new BookIndex(bookId, existing.title(), existing.author(), existing.cover(),
+                    normalized, existing.updatedAt());
+            writeIndex(updated);
+            return updated;
+        }
+    }
+
+    Set<String> downloadedChapterIds(BookIndex index) {
+        Set<String> validIds = index.chapters().stream().map(FanqieClient.ChapterEntry::itemId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> downloaded = new LinkedHashSet<>();
+        Path dir = bookDir(index.bookId());
+        if (!Files.isDirectory(dir)) return downloaded;
+        try (var files = Files.list(dir)) {
+            for (Path file : files.toList()) {
+                String name = file.getFileName().toString();
+                if (!name.endsWith(".txt")) continue;
+                String itemId = name.substring(0, name.length() - 4);
+                if (validIds.contains(itemId) && Files.isRegularFile(file) && Files.size(file) > 0) downloaded.add(itemId);
+            }
+            return downloaded;
+        } catch (IOException error) {
+            throw new BusinessException(500, "读取已下载章节数量失败，请重试");
+        }
+    }
+
+    boolean chapterDownloaded(String bookId, String itemId) {
+        validateId(bookId);
+        validateId(itemId);
+        Path file = bookDir(bookId).resolve(itemId + ".txt");
+        try { return Files.isRegularFile(file) && Files.size(file) > 0; }
+        catch (IOException error) { throw new BusinessException(500, "读取章节缓存失败，请重试"); }
+    }
+
+    boolean cacheChapter(String bookId, String itemId, String content) {
+        validateId(bookId);
+        validateId(itemId);
+        if (content == null || content.isBlank()) throw new BusinessException(502, "章节正文为空，请重试");
+        synchronized (bookLock(bookId)) {
+            BookIndex current = requireIndex(bookId);
+            if (current.chapters().stream().noneMatch(c -> c.itemId().equals(itemId))) {
+                throw new BusinessException(409, "章节目录已变更，请重新检查更新");
+            }
+            if (chapterDownloaded(bookId, itemId)) return false;
+            try { atomicWrite(bookDir(bookId).resolve(itemId + ".txt"), content); }
+            catch (IOException error) { throw new BusinessException(500, "保存章节失败，请重试"); }
+            return true;
+        }
+    }
+
+    private static List<FanqieClient.ChapterEntry> normalizeChapters(List<FanqieClient.ChapterEntry> chapters) {
+        List<FanqieClient.ChapterEntry> normalized = chapters.stream()
+                .filter(c -> validId(c.itemId()))
+                .sorted(Comparator.comparingLong(FanqieClient.ChapterEntry::order))
+                .collect(java.util.stream.Collectors.toMap(FanqieClient.ChapterEntry::itemId,
+                        c -> c, (first, duplicate) -> first, LinkedHashMap::new))
+                .values().stream().toList();
+        if (normalized.isEmpty()) throw new BusinessException(502, "这本书暂无可阅读章节，请稍后重试");
+        return normalized;
     }
 
     private BookIndex requireIndex(String bookId) {

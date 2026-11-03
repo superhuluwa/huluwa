@@ -2,6 +2,7 @@ package com.huluwa.console.web;
 
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.service.FanqieLibraryService;
+import com.huluwa.console.service.FanqieShelfUpdateService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotEmpty;
@@ -15,8 +16,12 @@ import java.util.Map;
 @RequestMapping("/api/fanqie")
 public class FanqieController {
     private final FanqieLibraryService library;
+    private final FanqieShelfUpdateService updates;
 
-    public FanqieController(FanqieLibraryService library) { this.library = library; }
+    public FanqieController(FanqieLibraryService library, FanqieShelfUpdateService updates) {
+        this.library = library;
+        this.updates = updates;
+    }
 
     public record OpenRequest(@Size(max = 300) String title, @Size(max = 300) String author,
                               @Size(max = 2048) String cover) { }
@@ -26,6 +31,16 @@ public class FanqieController {
     @GetMapping("/books")
     public ApiResult<List<FanqieLibraryService.BookSummary>> books() {
         return ApiResult.ok(library.list());
+    }
+
+    @PostMapping("/books/check-updates")
+    public ApiResult<FanqieShelfUpdateService.UpdateStatus> checkUpdates() {
+        return ApiResult.ok(updates.checkUpdates());
+    }
+
+    @GetMapping("/books/update-status")
+    public ApiResult<FanqieShelfUpdateService.UpdateStatus> updateStatus() {
+        return ApiResult.ok(updates.status());
     }
 
     @PostMapping("/books/delete")

@@ -184,6 +184,7 @@ data class FanqieTocItem(val order: Int, val title: String) {
 data class FanqieBookShelf(
     val bookId: String, val title: String, val author: String, val cover: String,
     val chapterCount: Int, val totalChars: Long, val progressChapter: Int,
+    val downloadedChapterCount: Int = 0,
 ) {
     val progressLabel get() = when {
         progressChapter < 1 -> "尚未开始阅读"
@@ -196,8 +197,42 @@ data class FanqieBookShelf(
             if (id.isBlank() || raw.text("title").isBlank()) return null
             return FanqieBookShelf(id, raw.text("title"), raw.text("author"), raw.text("cover"),
                 raw.number("chapterCount")?.toInt() ?: 0, raw.number("totalChars")?.toLong() ?: 0L,
-                raw.number("progressChapter")?.toInt() ?: 0)
+                raw.number("progressChapter")?.toInt() ?: 0, raw.number("downloadedChapterCount")?.toInt() ?: 0)
         }
+    }
+}
+
+/** 书架后台更新的单本进度，下载数来自服务端正文缓存。 */
+data class FanqieBookUpdate(val bookId: String, val title: String, val chapterCount: Int,
+    val downloadedChapterCount: Int, val newChapters: Int, val downloadedChapters: Int,
+    val failedChapters: Int, val error: String?) {
+    companion object {
+        fun from(raw: JsonObject) = FanqieBookUpdate(raw.text("bookId"), raw.text("title"),
+            raw.number("chapterCount")?.toInt() ?: 0, raw.number("downloadedChapterCount")?.toInt() ?: 0,
+            raw.number("newChapters")?.toInt() ?: 0, raw.number("downloadedChapters")?.toInt() ?: 0,
+            raw.number("failedChapters")?.toInt() ?: 0, raw.text("error").ifBlank { null })
+    }
+}
+
+data class FanqieShelfUpdateStatus(val startedAt: Long, val running: Boolean, val totalBooks: Int,
+    val checkedBooks: Int, val currentBookId: String, val currentTitle: String,
+    val books: List<FanqieBookUpdate>, val error: String?) {
+    val summary: String get() = when {
+        running -> if (totalBooks == 0) "正在读取书架…" else
+            "已检查 $checkedBooks/$totalBooks 本，已下载 ${books.sumOf { it.downloadedChapters }} 章" +
+                currentTitle.takeIf(String::isNotBlank)?.let { "\n正在更新：《$it》" }.orEmpty()
+        error != null -> error
+        startedAt == 0L -> ""
+        totalBooks == 0 -> "书架里没有可更新的小说"
+        else -> "检查完成，发现 ${books.sumOf { it.newChapters }} 章更新，补充下载 ${books.sumOf { it.downloadedChapters }} 章" +
+            books.count { it.error != null || it.failedChapters > 0 }.takeIf { it > 0 }
+                ?.let { "；$it 本未完成，可再次检查更新" }.orEmpty()
+    }
+    companion object {
+        fun from(raw: JsonObject) = FanqieShelfUpdateStatus(raw.number("startedAt")?.toLong() ?: 0L,
+            raw.flag("running"), raw.number("totalBooks")?.toInt() ?: 0, raw.number("checkedBooks")?.toInt() ?: 0,
+            raw.text("currentBookId"), raw.text("currentTitle"), raw.rows("books").map { FanqieBookUpdate.from(it.asObject()) },
+            raw.text("error").ifBlank { null })
     }
 }
 
