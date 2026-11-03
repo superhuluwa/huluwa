@@ -40,7 +40,9 @@ public class FanqieController {
     }
 
     public record OpenRequest(@Size(max = 300) String title, @Size(max = 300) String author,
-                              @Size(max = 2048) String cover) { }
+                              @Size(max = 2048) String cover,
+                              /** 默认 true 保持旧版客户端与网页端行为；App 阅读页传 false。 */
+                              Boolean addToShelf) { }
     public record DeleteRequest(@NotEmpty @Size(max = 500) List<String> bookIds) { }
     public record ProgressRequest(int order, int paragraphIndex, int scrollOffset) { }
 
@@ -77,7 +79,23 @@ public class FanqieController {
     @PostMapping("/books/{bookId}/open")
     public ApiResult<FanqieLibraryService.BookSummary> open(@PathVariable String bookId,
                                                            @Valid @RequestBody OpenRequest request) {
-        return ApiResult.ok(library.open(bookId, request.title(), request.author(), request.cover()));
+        boolean addToShelf = request.addToShelf() == null || request.addToShelf();
+        return ApiResult.ok(library.open(bookId, request.title(), request.author(), request.cover(), addToShelf));
+    }
+
+    /** 加入书架：只翻转书架标记，不重新拉取目录。 */
+    @PostMapping("/books/{bookId}/shelf")
+    public ApiResult<FanqieLibraryService.BookSummary> addToShelf(@PathVariable String bookId,
+                                                                 @Valid @RequestBody(required = false) OpenRequest request) {
+        return ApiResult.ok(library.addToShelf(bookId,
+                request == null ? "" : request.title(), request == null ? "" : request.author(),
+                request == null ? "" : request.cover()));
+    }
+
+    /** 移出书架：保留目录与正文缓存，只从书架列表隐藏。 */
+    @DeleteMapping("/books/{bookId}/shelf")
+    public ApiResult<FanqieLibraryService.BookSummary> removeFromShelf(@PathVariable String bookId) {
+        return ApiResult.ok(library.removeFromShelf(bookId));
     }
 
     /** order<=0 时恢复到最近一次保存的章节和滚动位置。 */

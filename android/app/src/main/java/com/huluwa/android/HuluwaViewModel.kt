@@ -62,6 +62,8 @@ data class FanqieReaderState(
     val adjacentLoading: Set<Int> = emptySet(), val adjacentErrors: Map<Int, String> = emptyMap(),
     val scrollRequest: FanqieReaderScrollRequest? = null,
     val tocVisible: Boolean = false,
+    /** 当前书是否在书架里；打开书籍后由服务端返回，阅读页右上角据此显示加入或移出。 */
+    val inShelf: Boolean = false, val shelfChanging: Boolean = false, val shelfError: String? = null,
     /** 目录只在第一次打开抽屉时拉取，之后复用。 */
     val toc: FanqieCatalog? = null, val tocLoading: Boolean = false, val tocError: String? = null,
 ) {
@@ -1157,6 +1159,37 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
 
     fun retryReaderToc() { mutable.value.reader?.let { loadCatalog(it.bookId) } }
 
+    /** 阅读页右上角：加入或移出书架；只切换书架标记，目录与正文缓存保留。 */
+    fun toggleReaderShelf() {
+        val reader = mutable.value.reader ?: return
+        if (!reader.prepared || reader.loading || reader.shelfChanging) return
+        val add = !reader.inShelf
+        mutable.update { current -> current.copy(reader = current.reader?.copy(shelfChanging = true, shelfError = null)) }
+        viewModelScope.launch {
+            try {
+                val inShelf = if (add) repository.addFanqieToShelf(reader.bookId, reader.title, reader.author, reader.cover)
+                    else repository.removeFanqieFromShelf(reader.bookId)
+                mutable.update { current ->
+                    val active = current.reader ?: return@update current
+                    if (active.bookId != reader.bookId) current
+                    else current.copy(reader = active.copy(inShelf = inShelf, shelfChanging = false))
+                }
+                notify(if (inShelf) "已加入书架" else "已移出书架")
+                // 书架页正开着时同步列表，避免返回后仍显示旧状态。
+                if (mutable.value.fanqieShelf != null) refreshFanqieShelf()
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { current ->
+                    val active = current.reader ?: return@update current
+                    // 失败原因直接显示在阅读页顶部，与进度保存失败的样式保持一致。
+                    if (active.bookId != reader.bookId) current
+                    else current.copy(reader = active.copy(shelfChanging = false, shelfError = error.userMessage()))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
     fun refreshReaderBook() {
         val reader = mutable.value.reader ?: return
         if (reader.loading) return
@@ -1183,9 +1216,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val initial = mutable.value.reader ?: return@launch
                 if (!initial.prepared) {
-                    repository.openFanqieBook(bookId, initial.title, initial.author, initial.cover)
+                    val inShelf = repository.openFanqieBook(bookId, initial.title, initial.author, initial.cover)
                     if (epoch != readerGeneration) return@launch
-                    mutable.update { current -> current.copy(reader = current.reader?.copy(prepared = true)) }
+                    mutable.update { current -> current.copy(reader = current.reader?.copy(prepared = true, inShelf = inShelf)) }
                 }
                 // 快速退出再打开同一本书时，先等上一份位置提交结束再请求续读。
                 if (order <= 0) readerProgressBarrier?.await()

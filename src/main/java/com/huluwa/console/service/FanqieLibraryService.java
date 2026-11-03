@@ -50,13 +50,29 @@ public class FanqieLibraryService {
     }
 
     public record BookIndex(String bookId, String title, String author, String cover,
-                            List<FanqieClient.ChapterEntry> chapters, long updatedAt) { }
+                            List<FanqieClient.ChapterEntry> chapters, long updatedAt, Boolean inShelf) {
+        public BookIndex {
+            // 旧版本缓存的目录没有 inShelf 字段，按已加入书架处理，避免升级后书架清空。
+            if (inShelf == null) inShelf = true;
+        }
+    }
     public record BookSummary(String bookId, String title, String author, String cover,
-                              int chapterCount, long totalChars, long updatedAt, int progressChapter, int downloadedChapterCount) { }
+                              int chapterCount, long totalChars, long updatedAt, int progressChapter,
+                              int downloadedChapterCount, boolean inShelf) { }
     public record ReadProgress(int order, int paragraphIndex, int scrollOffset, long updatedAt) { }
 
     /** 只准备目录即可进入阅读，无需等整本下载；重开书籍时更新连载目录。 */
     public BookSummary open(String bookId, String title, String author, String cover) {
+        return open(bookId, title, author, cover, true);
+    }
+
+    /**
+     * 打开书籍并缓存目录。
+     *
+     * <p>阅读页进入时传 {@code addToShelf=false}：目录仍然落盘（阅读、导出、书源都依赖它），
+     * 但书籍不会出现在书架里，是否收藏由阅读页右上角的「加入书架」决定。</p>
+     */
+    public BookSummary open(String bookId, String title, String author, String cover, boolean addToShelf) {
         validateId(bookId);
         synchronized (bookLock(bookId)) {
             BookIndex existing = loadIndex(bookId);
@@ -69,17 +85,56 @@ public class FanqieLibraryService {
                 chapters = existing.chapters();
                 log.info("番茄小说 {} 暂时沿用缓存目录：{}", bookId, error.getMessage());
             }
+            // 只读打开时沿用原有的书架状态，避免刷新目录顺手把书加进书架。
+            boolean inShelf = addToShelf || (existing != null && existing.inShelf());
             BookIndex index = new BookIndex(bookId,
                     metadata(title, existing == null ? "书号 " + bookId : existing.title(), 300),
                     metadata(author, existing == null ? "" : existing.author(), 300),
                     metadata(cover, existing == null ? "" : existing.cover(), 2048),
-                    List.copyOf(chapters), System.currentTimeMillis());
+                    List.copyOf(chapters), System.currentTimeMillis(), inShelf);
             writeIndex(index);
             return summary(index);
         }
     }
 
+    /** 加入书架：目录缺失时先打开书籍，已有目录只翻转书架标记。 */
+    public BookSummary addToShelf(String bookId, String title, String author, String cover) {
+        validateId(bookId);
+        synchronized (bookLock(bookId)) {
+            BookIndex existing = loadIndex(bookId);
+            if (existing == null) return open(bookId, title, author, cover, true);
+            if (existing.inShelf()) return summary(existing);
+            BookIndex updated = new BookIndex(existing.bookId(), existing.title(), existing.author(), existing.cover(),
+                    existing.chapters(), existing.updatedAt(), true);
+            writeIndex(updated);
+            return summary(updated);
+        }
+    }
+
+    /** 移出书架：保留目录与正文缓存，只把书籍从书架列表隐藏，下次打开仍可续读。 */
+    public BookSummary removeFromShelf(String bookId) {
+        validateId(bookId);
+        synchronized (bookLock(bookId)) {
+            BookIndex existing = requireIndex(bookId);
+            if (!existing.inShelf()) return summary(existing);
+            BookIndex updated = new BookIndex(existing.bookId(), existing.title(), existing.author(), existing.cover(),
+                    existing.chapters(), existing.updatedAt(), false);
+            writeIndex(updated);
+            return summary(updated);
+        }
+    }
+
+    /** 书架列表只返回已加入书架的书籍；未收藏的阅读缓存不展示。 */
     public List<BookSummary> list() {
+        return allBooks().stream().filter(BookSummary::inShelf).toList();
+    }
+
+    /** 最近打开或阅读过的书（含未加入书架的），用于会话里的「继续阅读」。 */
+    public List<BookSummary> recent() {
+        return allBooks();
+    }
+
+    private List<BookSummary> allBooks() {
         List<BookSummary> books = new ArrayList<>();
         if (!Files.isDirectory(root)) return books;
         try (var dirs = Files.list(root)) {
@@ -225,7 +280,8 @@ public class FanqieLibraryService {
         ReadProgress progress = progress(index.bookId());
         long words = index.chapters().stream().mapToLong(FanqieClient.ChapterEntry::wordNumber).sum();
         return new BookSummary(index.bookId(), index.title(), index.author(), index.cover(), index.chapters().size(),
-                words, Math.max(index.updatedAt(), progress.updatedAt()), progress.order(), downloadedChapterIds(index).size());
+                words, Math.max(index.updatedAt(), progress.updatedAt()), progress.order(),
+                downloadedChapterIds(index).size(), index.inShelf());
     }
 
     /** 更新任务只短暂持有书籍锁，网络请求由独立后台客户端完成。 */
@@ -257,7 +313,7 @@ public class FanqieLibraryService {
         synchronized (bookLock(bookId)) {
             BookIndex existing = requireIndex(bookId);
             BookIndex updated = new BookIndex(bookId, existing.title(), existing.author(), existing.cover(),
-                    normalized, existing.updatedAt());
+                    normalized, existing.updatedAt(), existing.inShelf());
             writeIndex(updated);
             return updated;
         }

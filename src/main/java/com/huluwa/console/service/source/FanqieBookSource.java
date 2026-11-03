@@ -103,7 +103,7 @@ public class FanqieBookSource implements BookSource {
      * 取书籍目录索引；不在书架时先按书号打开。
      *
      * <p>外部阅读器的流程是「搜索结果 → 目录 → 正文」，不会经过 App 的「加入书架」，
-     * 因此这里自动调用 open 完成目录缓存，书籍也随之出现在书架里。</p>
+     * 因此这里自动调用 open 完成目录缓存，但书籍不会因此出现在书架里。</p>
      */
     private FanqieLibraryService.BookIndex prepare(String bookId) {
         FanqieLibraryService.BookIndex index = library.findIndex(bookId);
@@ -115,10 +115,11 @@ public class FanqieBookSource implements BookSource {
                 index = library.findIndex(bookId);
                 if (index != null) return index;
                 FanqieClient.Book known = searchService.findCached(bookId);
+                // 外部阅读器只缓存目录，不替用户把书加入书架。
                 library.open(bookId,
                         known == null ? "" : known.bookName(),
                         known == null ? "" : known.author(),
-                        known == null ? "" : known.thumbUrl());
+                        known == null ? "" : known.thumbUrl(), false);
                 index = library.findIndex(bookId);
             }
         } finally {

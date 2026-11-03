@@ -430,7 +430,8 @@ public class ChatService {
                 if (readBook != null) {
                     replies.addAll(runFanqieRead(sessionId, readBook));
                 } else if (FANQIE_CONTINUE.equals(text)) {
-                    List<FanqieLibraryService.BookSummary> books = fanqieLibraryService.list();
+                    // 「继续阅读」取最近读过的书，未加入书架的临时阅读记录也算在内。
+                    List<FanqieLibraryService.BookSummary> books = fanqieLibraryService.recent();
                     if (books.isEmpty()) {
                         replies.add(append(sessionId, "bot", "text", "还没有阅读记录，发送书名或作者搜索后点击书目即可阅读。", null, null));
                     } else {
@@ -686,9 +687,10 @@ public class ChatService {
         // 分享链接直达时最近搜索结果里没有这本书，先取详情补全书名、作者和封面
         FanqieClient.Book known = fanqieSearchService.findCached(bookId);
         if (known == null) known = fanqieSearchService.describe(bookId);
+        // 会话只负责进入阅读页：书不自动加入书架，由阅读页右上角按钮决定。
         FanqieLibraryService.BookSummary book = fanqieLibraryService.open(bookId,
                 known == null ? "" : known.bookName(), known == null ? "" : known.author(),
-                known == null ? "" : known.thumbUrl());
+                known == null ? "" : known.thumbUrl(), false);
         return List.of(fanqieReaderMessage(sessionId, book));
     }
 

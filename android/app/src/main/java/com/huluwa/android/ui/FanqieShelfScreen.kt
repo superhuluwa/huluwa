@@ -106,7 +106,7 @@ import com.huluwa.android.data.FanqieBookShelf
             }
             if (books.isEmpty() && !state.books.loading && state.books.error == null && !state.deleting) {
                 Box(Modifier.fillMaxSize().padding(32.dp), Alignment.Center) {
-                    Text("书架里还没有小说\n返回番茄小说会话，搜索并打开书目即可加入书架",
+                    Text("书架里还没有小说\n在番茄小说会话中搜索并打开书目，点阅读页右上角的「加入书架」即可收藏",
                         color = HuluwaColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 }
             } else LazyVerticalGrid(columns = GridCells.Fixed(3), state = grid,

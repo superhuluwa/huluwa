@@ -171,12 +171,26 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
             require(it.startsWith("magnet:?xt=urn:btih:")) { "该资源没有返回有效磁力链接" }
         }
 
-    /** 准备目录并刷新连载章节，正文等真正阅读时再加载。 */
-    suspend fun openFanqieBook(bookId: String, title: String, author: String, cover: String) {
+    /**
+     * 打开书籍：只准备目录并缓存正文入口，不把书加入书架。
+     *
+     * 返回服务端当前的书架状态；书籍本来就已收藏时保持收藏，
+     * 首次阅读时由阅读页右上角的「加入书架」按钮决定是否收藏。
+     */
+    suspend fun openFanqieBook(bookId: String, title: String, author: String, cover: String): Boolean =
         api.post("fanqie", "books", bookId, "open", body = jsonBody {
+            put("title", title); put("author", author); put("cover", cover); put("addToShelf", false)
+        }).asObject().flag("inShelf")
+
+    /** 阅读页加入书架，返回操作后的书架状态。 */
+    suspend fun addFanqieToShelf(bookId: String, title: String, author: String, cover: String): Boolean =
+        api.post("fanqie", "books", bookId, "shelf", body = jsonBody {
             put("title", title); put("author", author); put("cover", cover)
-        })
-    }
+        }).asObject().flag("inShelf")
+
+    /** 阅读页移出书架：目录和正文缓存保留，只从书架列表隐藏。 */
+    suspend fun removeFanqieFromShelf(bookId: String): Boolean =
+        api.delete("fanqie", "books", bookId, "shelf").asObject().flag("inShelf")
 
     suspend fun saveFanqieProgress(bookId: String, order: Int, paragraphIndex: Int, scrollOffset: Int) {
         api.put("fanqie", "books", bookId, "progress", body = jsonBody {

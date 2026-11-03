@@ -20,10 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.TextFormat
@@ -112,7 +113,13 @@ import kotlinx.coroutines.flow.filterNotNull
                                 else -> "番茄小说"
                             }, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                         }
-                        IconButton(vm::refreshReaderBook, enabled = !state.loading) { Icon(Icons.Outlined.Refresh, "刷新章节") }
+                        IconButton(vm::toggleReaderShelf, enabled = state.prepared && !state.loading && !state.shelfChanging) {
+                            if (state.shelfChanging) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Icon(
+                                if (state.inShelf) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,
+                                if (state.inShelf) "移出书架" else "加入书架",
+                                tint = if (state.inShelf) HuluwaColors.Pine else LocalContentColor.current)
+                        }
                         IconButton(vm::toggleReaderToc, enabled = chapter != null && !state.loading) {
                             Icon(Icons.AutoMirrored.Outlined.List, "目录")
                         }
@@ -120,6 +127,10 @@ import kotlinx.coroutines.flow.filterNotNull
                     state.progressError?.let { error ->
                         Text(error, Modifier.fillMaxWidth().clickable { vm.flushReaderProgress() }
                             .padding(horizontal = 20.dp, vertical = 6.dp),
+                            color = HuluwaColors.Danger, style = MaterialTheme.typography.labelSmall)
+                    }
+                    state.shelfError?.let { error ->
+                        Text(error, Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                             color = HuluwaColors.Danger, style = MaterialTheme.typography.labelSmall)
                     }
                 }
