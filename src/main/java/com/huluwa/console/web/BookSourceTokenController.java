@@ -95,7 +95,11 @@ public class BookSourceTokenController {
         data.put("origin", origin);
         data.put("token", token);
         data.put("json", LegadoBookSource.json(source, origin, token));
-        return ResponseEntity.ok(ApiResult.ok(data));
+        // 不带 download 时仍返回统一信封；方法签名是 byte[]，这里按 JSON 序列化后再返回
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/json; charset=utf-8"))
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(json.writeValueAsBytes(ApiResult.ok(data)));
     }
 
     /** 优先使用传入地址；否则按反向代理头推断当前对外地址。 */
