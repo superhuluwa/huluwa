@@ -8,8 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,16 +58,24 @@ import kotlinx.coroutines.flow.first
         } else vm.saveImageToGallery(url)
     }
     val reconnecting = rememberReconnecting(vm)
-    val list = rememberLazyListState()
+    val list = rememberChatListState(session.id, displayMessages, chat.processing)
     var content by rememberSaveable(session.id) { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var activeVideoId by remember(session.id) { mutableStateOf<Long?>(null) }
-    var initialized by remember(session.id) { mutableStateOf(false) }
-    val nearBottom by remember { derivedStateOf { list.firstVisibleItemIndex <= 2 } }
-    LaunchedEffect(session.id, chat.messages.lastOrNull()?.id, chat.processing) {
-        if (chat.messages.isNotEmpty() && (!initialized || nearBottom || chat.messages.last().mine)) {
-            list.scrollToItem(0); initialized = true
+    var initialized by rememberSaveable(session.id) { mutableStateOf(false) }
+    val latestMessage = chat.messages.lastOrNull()
+    // 返回阅读页或书架前的会话时，以当前快照开始观察，避免把页面重建当成新消息。
+    var observedMessageId by remember(session.id) { mutableStateOf(latestMessage?.id) }
+    var observedProcessing by remember(session.id) { mutableStateOf(chat.processing) }
+    val nearBottom by remember(list) { derivedStateOf { list.firstVisibleItemIndex <= 2 } }
+    LaunchedEffect(session.id, latestMessage?.id, chat.processing) {
+        val changed = latestMessage?.id != observedMessageId || chat.processing != observedProcessing
+        observedMessageId = latestMessage?.id
+        observedProcessing = chat.processing
+        if (latestMessage != null && (!initialized || (changed && (nearBottom || latestMessage.mine)))) {
+            list.scrollToItem(0)
+            initialized = true
         }
     }
     // 列表仅保留当前点击的视频；完全滑出可见区域后恢复封面，避免滚回时自动播放。
@@ -145,6 +154,35 @@ import kotlinx.coroutines.flow.first
         }
     }
     media?.let { (url, video) -> MediaViewer(url, video) { media = null } }
+}
+
+/** 保存消息锚点与卡片内偏移，离开期间有新消息插入时也恢复到原来的内容。 */
+@Composable private fun rememberChatListState(sessionId: String, messages: List<ChatMessage>, processing: Boolean): LazyListState {
+    val currentMessages by rememberUpdatedState(messages)
+    val currentProcessing by rememberUpdatedState(processing)
+    val saver = remember(sessionId) {
+        listSaver<LazyListState, Any>(
+            save = { list ->
+                val anchor = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == list.firstVisibleItemIndex }?.key
+                listOf(anchor ?: "", list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset)
+            },
+            restore = { saved ->
+                val prefix = if (currentProcessing) 1 else 0
+                val index = when (val anchor = saved[0]) {
+                    is Long -> {
+                        val messageIndex = currentMessages.indexOfLast { it.id == anchor }
+                        if (messageIndex >= 0) currentMessages.lastIndex - messageIndex + prefix else null
+                    }
+                    "processing" -> 0
+                    "history" -> currentMessages.size + prefix
+                    else -> null
+                }
+                LazyListState(firstVisibleItemIndex = index ?: (saved[1] as Int),
+                    firstVisibleItemScrollOffset = saved[2] as Int)
+            },
+        )
+    }
+    return rememberSaveable(sessionId, saver = saver) { LazyListState() }
 }
 
 @Composable private fun MessageBubble(
