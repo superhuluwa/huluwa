@@ -204,10 +204,15 @@ public class FanqieSearchService {
 
     // ------------------------------------------------------------------ 分享链接
 
-    /** 跟随短链用的客户端：只取 302 的 Location，不下载分享页正文。 */
+    /**
+     * 跟随短链用的客户端：只取 302 的 Location，不下载分享页正文。
+     *
+     * <p>必须 {@link HttpClient.Redirect#NEVER}：自动跟随会在内部吃掉重定向，
+     * 拿到的 Location 永远是 null，书号也就永远解析不出来。</p>
+     */
     private final HttpClient shareHttp = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
     /** 短链跳转的最大次数（changdunovel → book-share → zlink，实测 1~2 跳）。 */
     private static final int SHARE_MAX_HOPS = 4;
@@ -233,6 +238,11 @@ public class FanqieSearchService {
         if (direct != null) {
             return direct;
         }
+        return followShortLink(url);
+    }
+
+    /** 逐跳跟随 302，每一跳的地址里出现书号就立即返回；不做域名校验，方便单测用本地服务验证。 */
+    String followShortLink(String url) {
         String current = url;
         for (int hop = 0; hop < SHARE_MAX_HOPS && current != null; hop++) {
             String location;
