@@ -1182,7 +1182,7 @@ public final class FanqieClient {
     }
 
     /** 解析单个书目节点；详情接口与搜索结果共用同一套字段名。 */
-    private static List<Book> parseBookNode(JsonNode node) {
+    static List<Book> parseBookNode(JsonNode node) {
         if (node == null || !node.isObject()) return List.of();
         String bid = text(node.path("book_id"));
         if (bid.isEmpty()) return List.of();
@@ -1190,7 +1190,7 @@ public final class FanqieClient {
     }
 
     /** 按番茄书目字段组装 {@link Book}，高亮节点仅在搜索结果里提供兜底文本。 */
-    private static Book toBook(JsonNode b, JsonNode highlight, String bookId) {
+    static Book toBook(JsonNode b, JsonNode highlight, String bookId) {
         Integer status = numIntOrNull(b.path("creation_status"));
         String name = text(b.path("book_name"));
         if (name.isEmpty() && highlight != null && highlight.isObject()) {

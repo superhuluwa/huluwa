@@ -102,7 +102,7 @@ public class FanqieSearchService {
      * 因此阅读器可以任意跳到某一页，也不会因为服务端实例重启而失效。</p>
      */
     public record SearchCursor(int page) {
-        static SearchCursor parse(String raw) {
+        public static SearchCursor parse(String raw) {
             if (raw == null || raw.isBlank()) return new SearchCursor(1);
             String head = raw.indexOf(':') >= 0 ? raw.substring(0, raw.indexOf(':')) : raw;
             try {
@@ -112,7 +112,7 @@ public class FanqieSearchService {
             }
         }
 
-        int offset(int size) { return (page - 1) * size; }
+        public int offset(int size) { return (page - 1) * size; }
     }
 
     /**
