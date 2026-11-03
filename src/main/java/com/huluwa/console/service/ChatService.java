@@ -444,15 +444,20 @@ public class ChatService {
                     boolean hasLink = FanqieShareLinks.hasLink(text);
                     if (sharedBook != null) {
                         try {
+                            // 命中书号时只回一条阅读记录；不再追加搜索结果卡片。
                             replies.addAll(runFanqieRead(sessionId, sharedBook));
                         } catch (Exception error) {
-                            // 书号能解析但打不开（已下架 / 目录接口失败）时退回书名搜索
-                            log.warn("番茄分享书号 {} 打开失败，改用书名搜索：{}", sharedBook, error.getMessage());
-                            replies.addAll(runFanqieSearch(sessionId, fanqieSearchKeyword(text)));
+                            // 书号能解析但打不开（已下架 / 上游限流）：仍只回一条提示，
+                            // 回退到书名搜索会刷出整页卡片，反而更难定位。
+                            log.warn("番茄分享书号 {} 打开失败：{}", sharedBook, error.getMessage());
+                            String name = shareTitle == null ? "这本书" : "《" + shareTitle + "》";
+                            replies.add(append(sessionId, "bot", "error",
+                                    name + "暂时打不开：" + safeMessage(error) + "，请稍后重试。", null, null));
                         }
                     } else if (hasLink && shareTitle != null) {
-                        // 番茄链接解析不到书号、但分享文案带书名：按书名搜索
-                        replies.addAll(runFanqieSearch(sessionId, shareTitle));
+                        // 番茄链接解析不到书号、但分享文案带书名：按书名搜一次，
+                        // 书名能对上时只留那一条，否则保留搜索结果。
+                        replies.addAll(runFanqieShareSearch(sessionId, shareTitle));
                     } else if (hasLink) {
                         replies.add(append(sessionId, "bot", "text",
                                 "这条番茄分享链接没能定位到书籍，请把带书名的分享文案整段发给我，或直接发送书名、作者。", null, null));
@@ -708,6 +713,48 @@ public class ChatService {
         return book.cover().isBlank()
                 ? append(sessionId, "bot", "text", caption, null, toJson(meta))
                 : append(sessionId, "bot", "image", book.cover(), caption, toJson(meta));
+    }
+
+    /**
+     * 分享文案带书名但没解析到书号时：按书名搜一次，书名完全对上的只保留一条。
+     *
+     * <p>番茄分享的《书名》就是全书唯一标题，上游模糊搜索却会带出大量同前缀的书
+     * （《有钱后，我每天都很快乐》能搜出 19 本），所以命中精确书名后直接收敛成一条。</p>
+     */
+    private List<ChatMessage> runFanqieShareSearch(String sessionId, String title) {
+        List<FanqieClient.Book> found;
+        try {
+            found = fanqieSearchService.search(title);
+        } catch (Exception e) {
+            return List.of(append(sessionId, "bot", "error", "搜索失败：" + safeMessage(e), null, null));
+        }
+        String target = title.trim();
+        for (FanqieClient.Book book : found) {
+            if (book.bookName() != null && book.bookName().trim().equals(target)) {
+                String payload = toJson(fanqieSearchService.payload(book));
+                return List.of(book.thumbUrl().isBlank()
+                        ? append(sessionId, "bot", "text", FanqieSearchService.caption(book), null, payload)
+                        : append(sessionId, "bot", "image", book.thumbUrl(),
+                                FanqieSearchService.caption(book), payload));
+            }
+        }
+        // 没有精确同名结果时保留完整搜索结果，用户仍可从列表里挑。
+        if (found.isEmpty()) {
+            return List.of(append(sessionId, "bot", "text",
+                    "未搜索到《" + title + "》，换个书名或作者名试试。", null, null));
+        }
+        List<ChatMessage> replies = new ArrayList<>();
+        int shown = Math.min(found.size(), FANQIE_SHOW_MAX);
+        replies.add(append(sessionId, "bot", "text",
+                "书名「" + title + "」没有精确匹配，找到 " + found.size() + " 本相关书籍，展示前 " + shown + " 本。", null, null));
+        for (FanqieClient.Book book : found.subList(0, shown)) {
+            String payload = toJson(fanqieSearchService.payload(book));
+            replies.add(book.thumbUrl().isBlank()
+                    ? append(sessionId, "bot", "text", FanqieSearchService.caption(book), null, payload)
+                    : append(sessionId, "bot", "image", book.thumbUrl(),
+                            FanqieSearchService.caption(book), payload));
+        }
+        return replies;
     }
 
     /**
