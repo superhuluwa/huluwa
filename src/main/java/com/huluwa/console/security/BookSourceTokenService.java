@@ -43,15 +43,21 @@ public class BookSourceTokenService {
 
     public BookSourceTokenService(ConfigService configs) { this.configs = configs; }
 
-    /** 签发指定书源的访问令牌。 */
+    /** 签发指定书源的访问令牌（默认有效期）。 */
     public String issue(String sourceId) {
+        return issue(sourceId, EXPIRE_DAYS);
+    }
+
+    /** 签发指定有效期的书源令牌，天数会被限制在 1 天到 {@link #EXPIRE_DAYS} 之间。 */
+    public String issue(String sourceId, int days) {
         Instant now = Instant.now();
+        int valid = Math.max(1, Math.min(days, EXPIRE_DAYS));
         return Jwts.builder()
                 .subject(sourceId)
                 .claim(CLAIM_SCOPE, SCOPE)
                 .claim(CLAIM_VERSION, currentVersion())
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(Duration.ofDays(EXPIRE_DAYS))))
+                .expiration(Date.from(now.plus(Duration.ofDays(valid))))
                 .signWith(key())
                 .compact();
     }

@@ -28,6 +28,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/auth/login",
                         "/api/auth/status",
                         "/api/auth/setup",
+                        // 含书源下载页与公开生成接口（/api/public/book-sources/**）
                         "/api/public/**",
                         "/api/android/agents/**",
                         "/api/terminalbuddy/android/agents/**",

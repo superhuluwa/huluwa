@@ -67,18 +67,22 @@ public class BookSourceController {
                 ? cursor
                 : (page == null ? null : String.valueOf(Math.max(1, page)));
         BookSource.SearchResult result = source.search(key, position, size);
+        List<Map<String, Object>> books = new ArrayList<>(result.books().size());
+        for (BookSource.BookInfo book : result.books()) {
+            books.add(describeBook(sourceId, book));
+        }
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("books", result.books());
+        data.put("books", books);
         data.put("nextCursor", result.nextCursor());
         return ApiResult.ok(data);
     }
 
     /** 书籍详情；书籍不在书架时实时查一次上游。 */
     @GetMapping("/{sourceId}/books/{bookId}")
-    public ApiResult<BookSource.BookInfo> book(@PathVariable String sourceId, @PathVariable String bookId) {
+    public ApiResult<Map<String, Object>> book(@PathVariable String sourceId, @PathVariable String bookId) {
         BookSource.BookInfo book = registry.require(sourceId).book(bookId);
         if (book == null) throw new BusinessException(404, "书籍不存在");
-        return ApiResult.ok(book);
+        return ApiResult.ok(describeBook(sourceId, book));
     }
 
     /**
@@ -97,7 +101,8 @@ public class BookSourceController {
             item.put("chapterId", chapter.chapterId());
             item.put("title", chapter.title());
             item.put("order", chapter.order());
-            item.put("url", "books/" + bookId + "/chapters/" + chapter.chapterId());
+            // 与 bookSourceUrl（以 / 结尾）拼接得到完整章节地址。
+            item.put("url", sourceId + "/books/" + bookId + "/chapters/" + chapter.chapterId());
             items.add(item);
         }
         return ApiResult.ok(items);
@@ -123,6 +128,22 @@ public class BookSourceController {
     @GetMapping("/exports/{taskId}")
     public ApiResult<BookExportService.ExportStatus> exportStatus(@PathVariable String taskId) {
         return ApiResult.ok(exports.status(taskId));
+    }
+
+    /** 书目统一输出为扁平字段，并附上相对 bookSourceUrl 根路径的 bookUrl。 */
+    private static Map<String, Object> describeBook(String sourceId, BookSource.BookInfo book) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("bookId", book.bookId());
+        item.put("name", book.name());
+        item.put("author", book.author());
+        item.put("intro", book.intro());
+        item.put("kind", book.kind());
+        item.put("coverUrl", book.coverUrl());
+        item.put("lastChapterName", book.lastChapterName());
+        item.put("wordCount", book.wordCount());
+        item.put("finished", book.finished());
+        item.put("bookUrl", sourceId + "/books/" + book.bookId());
+        return item;
     }
 
     @GetMapping("/exports/{taskId}/download")

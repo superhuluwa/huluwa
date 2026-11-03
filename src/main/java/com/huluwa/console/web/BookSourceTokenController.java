@@ -1,12 +1,19 @@
 package com.huluwa.console.web;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.ApiResult;
 import com.huluwa.console.security.BookSourceTokenService;
 import com.huluwa.console.service.source.BookSource;
 import com.huluwa.console.service.source.BookSourceRegistry;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,10 +29,13 @@ public class BookSourceTokenController {
 
     private final BookSourceTokenService tokens;
     private final BookSourceRegistry registry;
+    private final ObjectMapper json;
 
-    public BookSourceTokenController(BookSourceTokenService tokens, BookSourceRegistry registry) {
+    public BookSourceTokenController(BookSourceTokenService tokens, BookSourceRegistry registry,
+                                     ObjectMapper json) {
         this.tokens = tokens;
         this.registry = registry;
+        this.json = json;
     }
 
     /** 为指定书源签发令牌（重复调用会得到新令牌，旧令牌在过期前仍有效）。 */
@@ -58,27 +68,38 @@ public class BookSourceTokenController {
     /**
      * 生成可直接导入开源阅读（Legado）的书源 JSON。
      *
-     * <p>返回值不落库、不下发到公开接口，令牌只在登录态下取一次；
-     * 调用方需要自行保存这份 JSON，不要公开分享。</p>
+     * <p>返回值带长期书源令牌，只在登录态下返回；调用方不要公开分享。</p>
      *
      * @param baseUrl 可选，葫芦娃的公网地址；留空时按当前请求推断
+     * @param download 为 true 时直接作为 .json 文件下载，便于手机浏览器保存后导入
      */
     @GetMapping("/{sourceId}/legado")
-    public ApiResult<Map<String, Object>> legado(@PathVariable String sourceId,
-                                                 @RequestParam(required = false) String baseUrl,
-                                                 HttpServletRequest request) {
+    public ResponseEntity<byte[]> legado(@PathVariable String sourceId,
+                                         @RequestParam(required = false) String baseUrl,
+                                         @RequestParam(defaultValue = "false") boolean download,
+                                         HttpServletRequest request) throws JsonProcessingException {
         BookSource source = registry.require(sourceId);
         String origin = normalizeOrigin(baseUrl, request);
         String token = tokens.issue(source.id());
+        if (download) {
+            byte[] body = json.writeValueAsBytes(LegadoBookSource.json(source, origin, token));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("application/json; charset=utf-8"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                            .filename("huluwa-" + source.id() + "-legado.json", StandardCharsets.UTF_8)
+                            .build().toString())
+                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                    .body(body);
+        }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("origin", origin);
         data.put("token", token);
         data.put("json", LegadoBookSource.json(source, origin, token));
-        return ApiResult.ok(data);
+        return ResponseEntity.ok(ApiResult.ok(data));
     }
 
     /** 优先使用传入地址；否则按反向代理头推断当前对外地址。 */
-    private static String normalizeOrigin(String baseUrl, HttpServletRequest request) {
+    static String normalizeOrigin(String baseUrl, HttpServletRequest request) {
         String origin = baseUrl == null ? "" : baseUrl.trim();
         if (origin.isEmpty()) {
             String proto = firstHeader(request, "X-Forwarded-Proto");

@@ -8,8 +8,10 @@ import java.util.Map;
 /**
  * 生成开源阅读（Legado）书源 JSON。
  *
- * <p>书源接口返回的是扁平 JSON，因此这里全部用 JSONPath 规则，
- * 不需要另外提供 HTML 页面或 JS 规则。</p>
+ * <p>书源接口返回的是扁平 JSON，因此全部使用 JSONPath 规则，不需要 HTML 页面或 JS 规则。</p>
+ *
+ * <p>地址约定：bookSourceUrl 以 /api/sources/ 结尾，接口返回的 bookUrl、chapterUrl
+ * 都是相对该地址的路径（如 fanqie/books/xxx），阅读器按相对路径解析即可。</p>
  */
 final class LegadoBookSource {
 
@@ -17,10 +19,10 @@ final class LegadoBookSource {
 
     /**
      * @param origin 葫芦娃的对外地址，如 https://huluwa.example.com
-     * @param token  书源令牌；写进请求头，阅读器会给所有相对路径请求带上它
+     * @param token  书源令牌；写进请求头，阅读器会给所有请求带上它
      */
     static Map<String, Object> json(BookSource source, String origin, String token) {
-        String base = origin + "/api/sources/" + source.id();
+        String base = origin + "/api/sources/";
 
         Map<String, Object> search = new LinkedHashMap<>();
         search.put("bookList", "$.data.books[*]");
@@ -31,7 +33,8 @@ final class LegadoBookSource {
         search.put("coverUrl", "$.coverUrl");
         search.put("lastChapter", "$.lastChapterName");
         search.put("wordCount", "$.wordCount");
-        search.put("bookUrl", "$.bookId");
+        // 搜索接口返回可直接请求的相对路径
+        search.put("bookUrl", "$.bookUrl");
 
         Map<String, Object> bookInfo = new LinkedHashMap<>();
         bookInfo.put("name", "$.data.name");
@@ -45,8 +48,7 @@ final class LegadoBookSource {
         Map<String, Object> toc = new LinkedHashMap<>();
         toc.put("chapterList", "$.data[*]");
         toc.put("chapterName", "$.title");
-        // 章节地址使用接口直接返回的完整相对路径（见 BookSourceController 的 chapters 接口），
-        // 避免在规则里混用变量和 JSONPath。
+        // 目录接口每条自带完整相对路径，避免在规则里混用变量和 JSONPath。
         toc.put("chapterUrl", "$.url");
 
         Map<String, Object> content = new LinkedHashMap<>();
@@ -61,15 +63,15 @@ final class LegadoBookSource {
         json.put("enabled", true);
         // 阅读器只能配置静态请求头，令牌直接写在这份 JSON 里；生成接口只在登录态下返回。
         json.put("header", "{\"Authorization\":\"Bearer " + token + "\"}");
-        // 阅读器的 {{page}} 从 1 开始，正好对应接口的页码语义；返回空列表时它会自动停止翻页。
-        json.put("searchUrl", "/search?key={{key}}&page={{page}}");
+        // {{page}} 从 1 开始，对应接口的页码语义；返回空列表时阅读器自动停止翻页。
+        json.put("searchUrl", source.id() + "/search?key={{key}}&page={{page}}");
+
         json.put("ruleSearch", search);
-
-        json.put("bookUrlPattern", "^\\d{6,24}$");
         json.put("ruleBookInfo", bookInfo);
-
         json.put("ruleToc", toc);
         json.put("ruleContent", content);
+        // 详情页地址由搜索/目录返回，不需要再用正则从页面里抠书号。
+        json.put("bookUrlPattern", ".*/books/(\\d{6,24})$");
         return json;
     }
 }
