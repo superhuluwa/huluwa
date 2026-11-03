@@ -68,7 +68,8 @@ import kotlinx.coroutines.flow.first
             content = shared
             vm.consumeShare()
         }
-    }    var menu by remember { mutableStateOf(false) }
+    }
+    var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var activeVideoId by remember(session.id) { mutableStateOf<Long?>(null) }
     var initialized by rememberSaveable(session.id) { mutableStateOf(false) }
