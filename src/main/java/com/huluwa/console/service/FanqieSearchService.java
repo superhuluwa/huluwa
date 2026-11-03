@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +58,7 @@ public class FanqieSearchService {
             throw new BusinessException(400, "关键字过长，请输入 " + MAX_KEYWORD_LENGTH + " 个字符以内");
         }
         try {
-            return remember(client.searchMore(query, SEARCH_PAGES, 10));
+            return remember(byScoreDescending(client.searchMore(query, SEARCH_PAGES, 10)));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new BusinessException(503, "番茄小说搜索已中断，请重试");
@@ -65,7 +66,7 @@ public class FanqieSearchService {
             log.warn("番茄小说搜索失败，重建会话后重试：{}", first.getMessage());
             try {
                 client.resetSession();
-                return remember(client.searchMore(query, SEARCH_PAGES, 10));
+                return remember(byScoreDescending(client.searchMore(query, SEARCH_PAGES, 10)));
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 throw new BusinessException(503, "番茄小说搜索已中断，请重试");
@@ -88,6 +89,13 @@ public class FanqieSearchService {
             recent.remove(oldest);
         }
         return books;
+    }
+
+    /** 会话内搜索结果按评分从高到低排序；无评分的书目排在最后，同分保持原有顺序。 */
+    private static List<FanqieClient.Book> byScoreDescending(List<FanqieClient.Book> books) {
+        return books.stream()
+                .sorted(Comparator.comparingDouble(FanqieClient.Book::score).reversed())
+                .toList();
     }
 
     /** 按书号取最近搜索到的书目信息；未命中返回 null。 */

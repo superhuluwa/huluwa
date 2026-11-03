@@ -1,14 +1,19 @@
 package com.huluwa.android.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -21,7 +26,11 @@ import com.huluwa.android.data.FanqieReaderCard
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Poster(book.title, book.cover, size = DpSize(64.dp, 90.dp))
+            // 评分角标叠在封面右上角，替代原来挤在 meta 行里的文字
+            Box {
+                Poster(book.title, book.cover, size = DpSize(64.dp, 90.dp))
+                if (book.score > 0) FanqieScoreBadge(book.score, Modifier.align(Alignment.TopEnd))
+            }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(book.title, style = MaterialTheme.typography.titleMedium,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -46,6 +55,19 @@ import com.huluwa.android.data.FanqieReaderCard
                 Text("立即阅读", style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+}
+
+/** 封面右上角的评分角标：深色底 + 白色星标与分数，叠在封面上也能看清。 */
+@Composable private fun FanqieScoreBadge(score: Double, modifier: Modifier = Modifier) {
+    Row(modifier.padding(top = 4.dp, end = 4.dp)
+        .background(Color(0xCC1F2A22), RoundedCornerShape(7.dp))
+        .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        Icon(Icons.Filled.Star, null, Modifier.size(10.dp), tint = Color(0xFFFFC53D))
+        Text("%.1f".format(score), color = Color.White,
+            style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 

@@ -100,8 +100,7 @@ data class FanqieBook(
     val score: Double, val abstractText: String, val lastChapterTitle: String,
 ) {
     val meta get() = listOf(category, if (finished) "完结" else "连载中",
-        if (wordNumber > 0) "${wordNumber / 10000} 万字" else "",
-        if (score > 0) "评分 ${"%.1f".format(score)}" else "")
+        if (wordNumber > 0) "${wordNumber / 10000} 万字" else "")
         .filter(String::isNotBlank).joinToString(" · ")
     val summary get() = abstractText.replace(Regex("\\s+"), " ").trim()
     companion object {
