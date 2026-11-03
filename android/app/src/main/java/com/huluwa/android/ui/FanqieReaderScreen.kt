@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -47,6 +48,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.huluwa.android.FanqieReaderState
 import com.huluwa.android.HuluwaViewModel
+import com.huluwa.android.data.FanqieChapter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 
@@ -55,11 +57,33 @@ import kotlinx.coroutines.flow.filterNotNull
     val chapter = state.chapter
     val chapters = state.chapters
     val listState = rememberLazyListState()
+    val currentChapters by rememberUpdatedState(chapters)
+    var appliedChapters by remember(state.bookId) { mutableStateOf(chapters) }
+    var pendingAnchor by remember(state.bookId) { mutableStateOf<ReaderChapterAnchor?>(null) }
+    if (appliedChapters != chapters) {
+        val layout = listState.layoutInfo
+        // 连续两次更新也可能先于下一次布局，沿用尚未落实到布局的原始锚点。
+        val anchor = pendingAnchor?.takeIf { it.layout === layout } ?: layout.visibleItemsInfo
+            .firstOrNull { it.index == listState.firstVisibleItemIndex }
+            ?.let { ReaderChapterAnchor(it.key, listState.firstVisibleItemScrollOffset, layout) }
+        val index = anchor?.let { readerItemIndex(chapters, it.key) }
+        SideEffect {
+            if (!state.loading && state.error == null && state.scrollRequest == null &&
+                anchor != null && index != null) {
+                // 整章增删可能超出 LazyColumn 的 key 查找范围，必须在新布局前指定位置。
+                if (index != listState.firstVisibleItemIndex) {
+                    listState.requestScrollToItem(index, anchor.scrollOffset)
+                }
+                pendingAnchor = anchor
+            } else pendingAnchor = null
+            appliedChapters = chapters
+        }
+    }
     val atStart by remember(listState) { derivedStateOf { !listState.canScrollBackward } }
     val atEnd by remember(listState) { derivedStateOf { !listState.canScrollForward } }
     val showControls = !state.fullScreen || state.controlsVisible
     ReaderSystemBars(state.fullScreen)
-    // 续读与主动跳章才定位；后台插入上下章交给稳定的段落 key 保持原位置。
+    // 续读与主动跳章使用明确的定位请求；后台章节增删由上面的锚点处理。
     LaunchedEffect(state.bookId, state.scrollRequest, state.loading, state.error) {
         val request = state.scrollRequest ?: return@LaunchedEffect
         if (state.loading || state.error != null) return@LaunchedEffect
@@ -77,12 +101,18 @@ import kotlinx.coroutines.flow.filterNotNull
             val visible = listState.layoutInfo.visibleItemsInfo
             val first = visible.firstOrNull { it.index == listState.firstVisibleItemIndex }
             val position = first?.key?.let(::readerParagraphPosition)
-            val lastOrder = visible.asReversed().firstNotNullOfOrNull { readerParagraphPosition(it.key)?.first }
-            if (position != null && lastOrder != null) ReaderViewport(position.first, position.second,
-                listState.firstVisibleItemScrollOffset, lastOrder) else null
+            val last = visible.asReversed().firstOrNull { readerParagraphPosition(it.key) != null }
+            val lastOrder = last?.key?.let(::readerParagraphPosition)?.first
+            // 布局与章节数据必须一致，不能把旧布局中的下标当作新列表的阅读位置。
+            if (position != null && lastOrder != null && first != null && last != null &&
+                readerItemIndex(currentChapters, first.key) == first.index &&
+                readerItemIndex(currentChapters, last.key) == last.index) {
+                ReaderViewport(position.first, position.second, listState.firstVisibleItemScrollOffset,
+                    lastOrder, listState.isScrollInProgress)
+            } else null
         }.filterNotNull().distinctUntilChanged().collect { viewport ->
             vm.rememberReaderPosition(state.bookId, viewport.order, viewport.paragraphIndex, viewport.scrollOffset)
-            vm.preloadReaderChapters(state.bookId, viewport.order, viewport.lastOrder)
+            vm.preloadReaderChapters(state.bookId, viewport.order, viewport.lastOrder, viewport.scrolling)
         }
     }
     BackHandler {
@@ -228,9 +258,26 @@ import kotlinx.coroutines.flow.filterNotNull
     }
 }
 
-private data class ReaderViewport(val order: Int, val paragraphIndex: Int, val scrollOffset: Int, val lastOrder: Int)
+private data class ReaderViewport(val order: Int, val paragraphIndex: Int, val scrollOffset: Int,
+    val lastOrder: Int, val scrolling: Boolean)
 
-/** key 使用章节内段落索引，前面插入或移除章节后仍能准确续读。 */
+private data class ReaderChapterAnchor(val key: Any, val scrollOffset: Int, val layout: LazyListLayoutInfo)
+
+/** 使用完整章节窗口查找段落，不依赖 LazyColumn 仅覆盖附近条目的 key 索引。 */
+private fun readerItemIndex(chapters: List<FanqieChapter>, key: Any): Int? {
+    if (key == "latest") return if (chapters.lastOrNull()?.hasNext == false)
+        chapters.sumOf { it.paragraphs.size + 1 } else null
+    val (order, paragraphIndex) = readerParagraphPosition(key) ?: return null
+    var start = 0
+    for (chapter in chapters) {
+        if (chapter.order == order) return if (paragraphIndex in 0..chapter.paragraphs.size)
+            start + paragraphIndex else null
+        start += chapter.paragraphs.size + 1
+    }
+    return null
+}
+
+/** key 使用章节内段落索引，供锚点恢复与续读位置解析。 */
 private fun readerParagraphPosition(key: Any): Pair<Int, Int>? {
     val value = key as? String ?: return null
     val separator = value.indexOf(':')

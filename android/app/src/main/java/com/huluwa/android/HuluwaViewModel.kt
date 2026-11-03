@@ -258,6 +258,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var chatJob: Job? = null
     private var readerJob: Job? = null
     private val readerAdjacentJobs = mutableMapOf<Int, Job>()
+    private var readerScrollInProgress = false
+    private var readerPendingPreviousChapter: FanqieChapter? = null
     private var tocJob: Job? = null
     private var readerGeneration = 0
     private var shelfGeneration = 0
@@ -999,6 +1001,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         readerJob?.cancel(); readerJob = null
         readerAdjacentJobs.values.forEach { it.cancel() }
         readerAdjacentJobs.clear()
+        readerScrollInProgress = false
+        readerPendingPreviousChapter = null
         tocJob?.cancel(); tocJob = null
     }
 
@@ -1051,20 +1055,29 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         mutable.update { it.copy(reader = reader.copy(scrollRequest = null)) }
     }
 
-    /** 只围绕屏幕内的章节预取，保留前后少量正文；预取不修改阅读进度。 */
-    fun preloadReaderChapters(bookId: String, firstOrder: Int, lastOrder: Int) {
+    /** 只围绕屏幕内的章节预取；插入前章和清理缓存等滚动停止后再处理。 */
+    fun preloadReaderChapters(bookId: String, firstOrder: Int, lastOrder: Int, scrolling: Boolean) {
         val reader = mutable.value.reader ?: return
         if (reader.bookId != bookId || reader.loading || reader.error != null || reader.scrollRequest != null) return
+        readerScrollInProgress = scrolling
         val first = reader.chapters.firstOrNull { it.order == firstOrder } ?: return
         val last = reader.chapters.firstOrNull { it.order == lastOrder } ?: return
         if (firstOrder > lastOrder) return
-        val keepRange = (firstOrder - 2)..(lastOrder + 2)
-        val chapters = reader.chapters.filter { it.order in keepRange }
-        val errors = reader.adjacentErrors.filterKeys { it in keepRange }
-        if (chapters.size != reader.chapters.size || errors.size != reader.adjacentErrors.size) {
-            mutable.update { it.copy(reader = reader.copy(chapters = chapters, adjacentErrors = errors)) }
+        if (!scrolling) {
+            val keepRange = (firstOrder - 2)..(lastOrder + 2)
+            val pending = readerPendingPreviousChapter
+            readerPendingPreviousChapter = null
+            val loaded = if (pending != null && pending.order == reader.chapters.firstOrNull()?.order?.minus(1))
+                listOf(pending) + reader.chapters else reader.chapters
+            val chapters = loaded.filter { it.order in keepRange }
+            val loading = reader.adjacentLoading - listOfNotNull(pending?.order).toSet()
+            val errors = reader.adjacentErrors.filterKeys { it in keepRange }
+            if (chapters != reader.chapters || loading != reader.adjacentLoading || errors != reader.adjacentErrors) {
+                mutable.update { it.copy(reader = reader.copy(chapters = chapters,
+                    adjacentLoading = loading, adjacentErrors = errors)) }
+            }
         }
-        // 优先取下一章，同时准备上一章供向上回看。
+        // 尾部追加不改变已有段落下标，滚动中也可接上下一章。
         if (last.hasNext) loadAdjacentReaderChapter(bookId, last.order + 1)
         if (first.hasPrev) loadAdjacentReaderChapter(bookId, first.order - 1)
     }
@@ -1082,6 +1095,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (reader.bookId != bookId || reader.loading || reader.error != null || reader.scrollRequest != null ||
             order < 1 || order > (reader.chapter?.chapterCount ?: 0) ||
             reader.chapters.any { it.order == order } || order in readerAdjacentJobs ||
+            readerPendingPreviousChapter?.order == order ||
             (!retry && order in reader.adjacentErrors)) return
         val epoch = readerGeneration
         mutable.update { it.copy(reader = reader.copy(adjacentLoading = reader.adjacentLoading + order,
@@ -1090,6 +1104,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val data = repository.readFanqieChapter(bookId, order)
                 if (epoch != readerGeneration) return@launch
+                val reader = mutable.value.reader ?: return@launch
+                if (reader.bookId != bookId) return@launch
+                if (readerScrollInProgress && data.order == reader.chapters.firstOrNull()?.order?.minus(1)) {
+                    // 先缓存整章，避免拖动或惯性滚动期间插入前章改变段落下标。
+                    readerPendingPreviousChapter = data
+                    return@launch
+                }
                 mutable.update { current ->
                     val active = current.reader ?: return@update current
                     if (active.bookId != bookId) return@update current
