@@ -141,8 +141,14 @@ public class BookSourceController {
         return ApiResult.ok(exports.status(taskId));
     }
 
-    /** 书目统一输出为扁平字段，并附上完整可请求的 bookUrl。 */
+    /**
+     * 书目统一输出为扁平字段，并附上完整可请求的 bookUrl 与 tocUrl。
+     *
+     * <p>tocUrl 是必须的：阅读器会拿 bookUrl 的响应去跑目录规则，而详情接口返回的是
+     * 单个对象，`$.data[*]` 取不到数组；显式给出 tocUrl 后才会请求真正的目录接口。</p>
+     */
     private static Map<String, Object> describeBook(String origin, String sourceId, BookSource.BookInfo book) {
+        String bookBase = origin + "/api/sources/" + sourceId + "/books/" + book.bookId();
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("bookId", book.bookId());
         item.put("name", book.name());
@@ -153,7 +159,8 @@ public class BookSourceController {
         item.put("lastChapterName", book.lastChapterName());
         item.put("wordCount", book.wordCount());
         item.put("finished", book.finished());
-        item.put("bookUrl", origin + "/api/sources/" + sourceId + "/books/" + book.bookId());
+        item.put("bookUrl", bookBase);
+        item.put("tocUrl", bookBase + "/chapters");
         return item;
     }
 

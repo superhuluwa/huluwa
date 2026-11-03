@@ -53,6 +53,9 @@ final class LegadoBookSource {
         bookInfo.put("coverUrl", "$.data.coverUrl");
         bookInfo.put("lastChapter", "$.data.lastChapterName");
         bookInfo.put("wordCount", "$.data.wordCount");
+        // 目录在独立接口，必须显式指定；否则阅读器会拿详情页（单个对象）去跑目录规则，
+        // $.data[*] 取不到数组，结果就是「目录为空」。
+        bookInfo.put("tocUrl", "$.data.tocUrl");
 
         Map<String, Object> toc = new LinkedHashMap<>();
         toc.put("chapterList", "$.data[*]");

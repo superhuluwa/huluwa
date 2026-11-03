@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 番茄小说书源：把现有的搜索、目录、正文能力映射到统一书源契约。
@@ -21,6 +22,8 @@ public class FanqieBookSource implements BookSource {
 
     private final FanqieSearchService searchService;
     private final FanqieLibraryService library;
+    /** 按书号串行化「首次打开」，避免并发请求重复拉取上游目录。 */
+    private final ConcurrentHashMap<String, Object> openLocks = new ConcurrentHashMap<>();
 
     public FanqieBookSource(FanqieSearchService searchService, FanqieLibraryService library) {
         this.searchService = searchService;
@@ -105,12 +108,22 @@ public class FanqieBookSource implements BookSource {
     private FanqieLibraryService.BookIndex prepare(String bookId) {
         FanqieLibraryService.BookIndex index = library.findIndex(bookId);
         if (index != null) return index;
-        FanqieClient.Book known = searchService.findCached(bookId);
-        library.open(bookId,
-                known == null ? "" : known.bookName(),
-                known == null ? "" : known.author(),
-                known == null ? "" : known.thumbUrl());
-        index = library.findIndex(bookId);
+        // 阅读器会并发请求详情与目录，这里串行化，避免同一本书重复拉取上游目录。
+        Object lock = openLocks.computeIfAbsent(bookId, key -> new Object());
+        try {
+            synchronized (lock) {
+                index = library.findIndex(bookId);
+                if (index != null) return index;
+                FanqieClient.Book known = searchService.findCached(bookId);
+                library.open(bookId,
+                        known == null ? "" : known.bookName(),
+                        known == null ? "" : known.author(),
+                        known == null ? "" : known.thumbUrl());
+                index = library.findIndex(bookId);
+            }
+        } finally {
+            openLocks.remove(bookId, lock);
+        }
         if (index == null) throw new BusinessException(404, "书籍不存在或无法打开");
         return index;
     }
