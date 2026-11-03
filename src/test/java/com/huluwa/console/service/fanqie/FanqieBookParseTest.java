@@ -17,7 +17,7 @@ class FanqieBookParseTest {
 
     @Test
     void parsesDetailBookInfo() throws Exception {
-        // multi-detail 接口的 data.book_info 结构
+        // 旧版 multi-detail 接口的 data.book_info 结构
         var node = JSON.readTree("""
                 {"book_id":"7143038691944959011","book_name":"十日终焉","author":"杀虫队队员",
                  "abstract":"简介文本","word_number":123456,"creation_status":0,
@@ -97,5 +97,54 @@ class FanqieBookParseTest {
         assertEquals(7.5, book.score(), 1e-9);
         assertEquals(88, book.readCount());
         assertTrue(book.finished());
+    }
+
+    /**
+     * 实测 multi-detail 的 data 是书目对象数组，不是 book_info 包装对象。
+     * 之前只按对象取，导致分享直达时书名退化成「书号 xxx」、封面和简介全空。
+     */
+    @Test
+    void detailBookNodeAcceptsArrayData() throws Exception {
+        var data = JSON.readTree("""
+                [{"book_id":"7404527225137024025","book_name":"有钱后，我每天都很快乐",
+                  "author":"花家的宝贝","abstract":"简介","thumb_url":"https://x/c.jpg",
+                  "category":"都市脑洞","score":"6.7","creation_status":"1",
+                  "word_number":"621984","last_chapter_title":"第285章，三姐妹的邀约"}]
+                """);
+
+        var book = FanqieClient.parseBookNode(FanqieClient.detailBookNode(data)).getFirst();
+
+        assertEquals("7404527225137024025", book.bookId());
+        assertEquals("有钱后，我每天都很快乐", book.bookName());
+        assertEquals("花家的宝贝", book.author());
+        assertEquals("https://x/c.jpg", book.thumbUrl());
+        assertEquals("都市脑洞", book.category());
+        assertEquals(6.7, book.score(), 1e-9);
+        assertEquals(621984, book.wordNumber());
+    }
+
+    @Test
+    void detailBookNodeStillSupportsWrappedObjects() throws Exception {
+        var wrapped = JSON.readTree("""
+                {"book_info":{"book_id":"123456789012","book_name":"新结构"}}
+                """);
+        var legacy = JSON.readTree("""
+                {"book_data":{"book_id":"123456789012","book_name":"旧结构"}}
+                """);
+        var bare = JSON.readTree("""
+                {"book_id":"123456789012","book_name":"扁平结构"}
+                """);
+
+        assertEquals("新结构", FanqieClient.detailBookNode(wrapped).path("book_name").asText());
+        assertEquals("旧结构", FanqieClient.detailBookNode(legacy).path("book_name").asText());
+        assertEquals("扁平结构", FanqieClient.detailBookNode(bare).path("book_name").asText());
+    }
+
+    @Test
+    void detailBookNodeRejectsUnexpectedShapes() throws Exception {
+        assertNull(FanqieClient.detailBookNode(null));
+        assertNull(FanqieClient.detailBookNode(JSON.readTree("[]")));
+        assertNull(FanqieClient.detailBookNode(JSON.readTree("\"text\"")));
+        assertNull(FanqieClient.detailBookNode(JSON.readTree("{\"book_info\":\"bad\"}").path("book_info")));
     }
 }

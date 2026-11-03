@@ -1282,8 +1282,9 @@ public final class FanqieClient {
     /**
      * 解析书籍详情。
      *
-     * <p>详情接口返回 <code>data.book_info</code>（旧版本为 <code>data.book_data</code>），
-     * 字段与搜索结果一致，因此复用 {@link #parseSearchCells} 的取值逻辑。</p>
+     * <p>详情接口返回 <code>data</code>：实测是书目对象组成的数组（每个元素字段与搜索结果一致）；
+     * 旧版本为 <code>data.book_info</code> / <code>data.book_data</code> 单个对象。
+     * 两种结构都在这里兼容，解析逻辑复用 {@link #parseBookNode}。</p>
      *
      * @return 解析成功返回书目，接口不可用或字段缺失时返回 null（调用方回退到搜索结果里缓存的书目）
      */
@@ -1292,15 +1293,35 @@ public final class FanqieClient {
         if (res.path("code").asInt(0) != 0) {
             throw new IllegalStateException("详情获取失败：" + text(res.path("message")));
         }
-        JsonNode data = res.path("data");
-        JsonNode info = data.path("book_info");
-        if (!info.isObject()) info = data.path("book_data");
-        if (!info.isObject()) info = data;
-        if (!info.isObject()) return null;
+        JsonNode info = detailBookNode(res.path("data"));
+        if (info == null) return null;
         List<Book> parsed = parseBookNode(info);
         if (parsed.isEmpty()) return null;
         Book book = parsed.getFirst();
         return book.bookId().isEmpty() ? null : book;
+    }
+
+    /**
+     * 从详情响应的 <code>data</code> 里取出书目对象。
+     *
+     * <p>实测 <code>data</code> 是书目对象组成的数组；旧版本是
+     * <code>data.book_info</code> / <code>data.book_data</code> 单个对象。
+     * 数组里只取第一个对象（按书号请求，正常只会有一本）。</p>
+     *
+     * @return 书目对象；结构不认识时返回 null
+     */
+    static JsonNode detailBookNode(JsonNode data) {
+        if (data == null || data.isMissingNode() || data.isNull()) return null;
+        if (data.isArray()) {
+            for (JsonNode item : data) {
+                if (item.isObject()) return item;
+            }
+            return null;
+        }
+        if (!data.isObject()) return null;
+        JsonNode info = data.path("book_info");
+        if (!info.isObject()) info = data.path("book_data");
+        return info.isObject() ? info : data;
     }
 
     /** 翻多页搜索（用 passback 令牌），按 book_id 去重。 */
