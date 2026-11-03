@@ -400,6 +400,25 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun notify(text: String) { viewModelScope.launch { notices.send(text) } }
+
+    /** 系统分享进来的文本（番茄 App 的「分享 → 葫芦娃」），非空时由根组件打开番茄会话并预填输入框。 */
+    val pendingShare: StateFlow<String?> get() = mutablePendingShare
+    private val mutablePendingShare = MutableStateFlow<String?>(null)
+
+    /** 接收外部应用分享的文本；只暂存，不自动发送，由根组件切到番茄会话后预填输入框。 */
+    fun receiveShare(text: String?) {
+        val content = text?.trim().orEmpty()
+        if (content.isEmpty()) return
+        mutablePendingShare.value = content
+    }
+
+    /** 根组件预填完成后调用，清空待处理分享，避免重进页面重复预填。 */
+    fun consumeShare() { mutablePendingShare.value = null }
+
+    /** 系统分享的目标会话：优先用服务端下发的番茄会话，未就绪时用内置定义兜底。 */
+    fun shareTargetSession(): Session = mutable.value.sessions.data.firstOrNull { it.kind == "fanqie" }
+        ?: Session("fanqie", "番茄小说", "fanqie", 0, null)
+
     fun saveImageToGallery(url: String) {
         if (url in mutable.value.savingImageUrls) return
         val epoch = generation

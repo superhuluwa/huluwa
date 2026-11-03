@@ -54,6 +54,12 @@ private enum class RootPage { Home, Chat, ServerStatus }
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
     val onMineTitleTap = rememberHiddenBrowserTap(vm)
+    // 系统分享（番茄 App「分享 → 葫芦娃」）到达时切到番茄会话，文本由 ChatScreen 预填到输入框。
+    val pendingShare by vm.pendingShare.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingShare, ui.auth.loggedIn, ui.sessionCacheReady) {
+        if (pendingShare == null || !ui.auth.loggedIn || !ui.sessionCacheReady) return@LaunchedEffect
+        vm.openSession(vm.shareTargetSession())
+    }
     LifecycleStartEffect(ui.auth.loggedIn) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(ui.chat.session != null && ui.sheet == null && !ui.browserVisible && ui.reader == null && ui.fanqieShelf == null) { vm.closeChat() }

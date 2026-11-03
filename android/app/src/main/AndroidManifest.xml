@@ -25,11 +25,27 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- 其他应用「分享」文本进来（番茄 App 分享 → 葫芦娃），落到番茄会话并预填输入框 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <!-- 浏览器或 App 直接用葫芦娃打开番茄链接 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="changdunovel.com" />
+                <data android:scheme="https" android:host="fanqienovel.com" />
+                <data android:scheme="https" android:host="*.fanqienovel.com" />
             </intent-filter>
         </activity>
     </application>

@@ -2,11 +2,16 @@ package com.huluwa.console.service;
 
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.fanqie.FanqieClient;
+import com.huluwa.console.service.fanqie.FanqieShareLinks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -188,6 +193,73 @@ public class FanqieSearchService {
 
     /** 丢弃当前设备会话，下次搜索重新注册设备。 */
     private void reset() { client.resetSession(); }
+
+    // ------------------------------------------------------------------ 分享链接
+
+    /** 跟随短链用的客户端：只取 302 的 Location，不下载分享页正文。 */
+    private final HttpClient shareHttp = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(8))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+    /** 短链跳转的最大次数（changdunovel → book-share → zlink，实测 1~2 跳）。 */
+    private static final int SHARE_MAX_HOPS = 4;
+    /** 跟随短链时使用的移动端 UA，避免被站点的桌面重定向兜圈。 */
+    private static final String SHARE_UA =
+            "Mozilla/5.0 (Linux; Android 11; SM-G9750) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/120.0.0.0 Mobile Safari/537.36";
+
+    /**
+     * 解析分享链接里的书号。
+     *
+     * <p>番茄分享分两种形态：落地页直接带 {@code book_id} 查询参数（{@code /ug/pages/book-share?book_id=…}），
+     * 以及 {@code /t/xxxx} 短链。短链本身不含书号，必须跟随 302 拿到带参数的落地页；
+     * 跟随过程中任何一跳的地址里出现书号都立即返回，不依赖最终页面。</p>
+     *
+     * @return 书号；链接不是番茄域名、或跟随失败时返回 null
+     */
+    public String resolveShareUrl(String url) {
+        if (url == null || url.isBlank() || !FanqieShareLinks.isFanqieHost(url)) {
+            return null;
+        }
+        String direct = FanqieShareLinks.bookIdIn(url);
+        if (direct != null) {
+            return direct;
+        }
+        String current = url;
+        for (int hop = 0; hop < SHARE_MAX_HOPS && current != null; hop++) {
+            String location;
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(current))
+                        .timeout(Duration.ofSeconds(8))
+                        .header("User-Agent", SHARE_UA)
+                        .GET()
+                        .build();
+                HttpResponse<Void> response = shareHttp.send(request, HttpResponse.BodyHandlers.discarding());
+                location = response.headers().firstValue("location").orElse(null);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return null;
+            } catch (Exception error) {
+                log.warn("番茄分享短链跟随失败：{}", error.getMessage());
+                return null;
+            }
+            if (location == null) {
+                return null;
+            }
+            try {
+                current = URI.create(current).resolve(location).toString();
+            } catch (IllegalArgumentException error) {
+                log.warn("番茄分享短链跳转地址无法解析：{}", error.getMessage());
+                return null;
+            }
+            // Location 可能跳到非番茄域名（zlink / app 唤起链接），书号只从地址参数里取
+            String bookId = FanqieShareLinks.bookIdIn(current);
+            if (bookId != null) {
+                return bookId;
+            }
+        }
+        return null;
+    }
 
     /** 书目卡片的结构化载荷（安卓端按 kind=fanqie-book 渲染独立卡片）。 */
     public Map<String, Object> payload(FanqieClient.Book book) {

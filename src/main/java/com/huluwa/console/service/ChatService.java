@@ -3,6 +3,7 @@ package com.huluwa.console.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.fanqie.FanqieClient;
+import com.huluwa.console.service.fanqie.FanqieShareLinks;
 import com.huluwa.console.ws.ChatPushService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -424,7 +425,7 @@ public class ChatService {
             } else if ("btbtla".equals(kind)) {
                 replies.addAll(runBtbtlaSearch(sessionId, text));
             } else if ("fanqie".equals(kind)) {
-                // 番茄小说会话：搜索书目，也支持手动阅读和继续阅读指令
+                // 番茄小说会话：搜索书目，也支持分享链接、手动阅读和继续阅读指令
                 String readBook = fanqieReadBookId(text);
                 if (readBook != null) {
                     replies.addAll(runFanqieRead(sessionId, readBook));
@@ -436,7 +437,27 @@ public class ChatService {
                         replies.add(fanqieReaderMessage(sessionId, books.getFirst()));
                     }
                 } else {
-                    replies.addAll(runFanqieSearch(sessionId, normalizeFanqieKeyword(text)));
+                    // 分享口令（「推荐一部好书《书名》https://…」）先按书号直达，定位不到再退回书名搜索
+                    String sharedBook = fanqieShareBookId(text);
+                    String shareTitle = FanqieShareLinks.sharedTitle(text);
+                    boolean hasLink = FanqieShareLinks.hasLink(text);
+                    if (sharedBook != null) {
+                        try {
+                            replies.addAll(runFanqieRead(sessionId, sharedBook));
+                        } catch (Exception error) {
+                            // 书号能解析但打不开（已下架 / 目录接口失败）时退回书名搜索
+                            log.warn("番茄分享书号 {} 打开失败，改用书名搜索：{}", sharedBook, error.getMessage());
+                            replies.addAll(runFanqieSearch(sessionId, fanqieSearchKeyword(text)));
+                        }
+                    } else if (hasLink && shareTitle != null) {
+                        // 番茄链接解析不到书号、但分享文案带书名：按书名搜索
+                        replies.addAll(runFanqieSearch(sessionId, shareTitle));
+                    } else if (hasLink) {
+                        replies.add(append(sessionId, "bot", "text",
+                                "这条番茄分享链接没能定位到书籍，请把带书名的分享文案整段发给我，或直接发送书名、作者。", null, null));
+                    } else {
+                        replies.addAll(runFanqieSearch(sessionId, fanqieSearchKeyword(text)));
+                    }
                 }
             } else if ("magnet".equals(kind)) {
                 // 磁力会话：submit = 提交磁力给 qB（未配置时引导配置），状态 / 帮助为内置指令
@@ -630,8 +651,41 @@ public class ChatService {
         return bookId.matches("[0-9]{6,24}") ? bookId : null;
     }
 
+    /**
+     * 从分享口令里定位书号。
+     *
+     * <p>番茄 App 的分享文本形如「推荐一部好书《书名》https://changdunovel.com/t/xxxx/」，
+     * 落地页才带 book_id，因此短链需要跟随一次重定向。解析不到返回 null，
+     * 由调用方退回按书名搜索。</p>
+     */
+    private String fanqieShareBookId(String text) {
+        String url = FanqieShareLinks.firstUrl(text);
+        if (url == null) return null;
+        try {
+            return fanqieSearchService.resolveShareUrl(url);
+        } catch (Exception error) {
+            log.warn("番茄分享链接解析失败：{}", error.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 番茄搜索关键字：剥掉指令前缀后，若带分享链接则优先用书名号里的书名，
+     * 否则去掉链接再搜索，避免整段口令（含 URL）超过关键字长度上限。
+     */
+    static String fanqieSearchKeyword(String raw) {
+        String value = normalizeFanqieKeyword(raw);
+        if (!FanqieShareLinks.hasLink(value)) return value;
+        String title = FanqieShareLinks.sharedTitle(value);
+        if (title != null && !title.isBlank()) return title;
+        String stripped = FanqieShareLinks.stripLinks(value);
+        return stripped.isEmpty() ? value : stripped;
+    }
+
     private List<ChatMessage> runFanqieRead(String sessionId, String bookId) {
+        // 分享链接直达时最近搜索结果里没有这本书，先取详情补全书名、作者和封面
         FanqieClient.Book known = fanqieSearchService.findCached(bookId);
+        if (known == null) known = fanqieSearchService.describe(bookId);
         FanqieLibraryService.BookSummary book = fanqieLibraryService.open(bookId,
                 known == null ? "" : known.bookName(), known == null ? "" : known.author(),
                 known == null ? "" : known.thumbUrl());

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
 import com.huluwa.android.data.*
@@ -60,7 +61,14 @@ import kotlinx.coroutines.flow.first
     val reconnecting = rememberReconnecting(vm)
     val list = rememberChatListState(session.id, displayMessages, chat.processing)
     var content by rememberSaveable(session.id) { mutableStateOf("") }
-    var menu by remember { mutableStateOf(false) }
+    // 系统分享（番茄 App「分享 → 葫芦娃」）预填到输入框，等待用户确认后再发送。
+    val shared = vm.pendingShare.collectAsStateWithLifecycle().value
+    LaunchedEffect(session.id, shared) {
+        if (shared != null && session.kind == "fanqie") {
+            content = shared
+            vm.consumeShare()
+        }
+    }    var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var activeVideoId by remember(session.id) { mutableStateOf<Long?>(null) }
     var initialized by rememberSaveable(session.id) { mutableStateOf(false) }
@@ -119,7 +127,7 @@ import kotlinx.coroutines.flow.first
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(content, { content = it }, Modifier.weight(1f), maxLines = 4,
-                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; "movie-hls" -> "输入片名或新版详情链接…"; "dpd" -> "输入片名，按线路搜索…"; "btbtla" -> "输入片名，搜索高清磁力…"; "fanqie" -> "输入书名或作者，搜索番茄小说…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(when (session.kind) { "magnet", "xunlei", "xunlei-win" -> "粘贴下载链接…"; "video" -> "粘贴分享口令…"; "movie-hls" -> "输入片名或新版详情链接…"; "dpd" -> "输入片名，按线路搜索…"; "btbtla" -> "输入片名，搜索高清磁力…"; "fanqie" -> "输入书名、作者或粘贴分享链接…"; else -> "输入片名，试试搜点什么…" }, style = MaterialTheme.typography.bodySmall) },
                         textStyle = MaterialTheme.typography.bodyMedium, shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = HuluwaColors.Line, unfocusedContainerColor = HuluwaColors.Paper))
                     FilledIconButton({ val text = content.trim(); if (text.isNotEmpty()) { vm.send(text); content = "" } }, enabled = content.isNotBlank() && !chat.loading,
@@ -147,7 +155,7 @@ import kotlinx.coroutines.flow.first
                     TextButton(vm::loadEarlier, enabled = !chat.loadingEarlier) { Text(if (chat.loadingEarlier) "正在加载…" else "查看更早消息") }
                 }
                 if (!chat.loading && chat.messages.isEmpty() && chat.error == null) {
-                    if (session.kind == "fanqie") EmptyContent("搜索想看的小说", "发送书名或作者，点击搜索结果即可阅读；读过的书可从右上角书架管理继续", sessionIcon(session.kind))
+                    if (session.kind == "fanqie") EmptyContent("搜索想看的小说", "发送书名、作者或番茄分享链接即可；读过的书可从右上角书架管理继续", sessionIcon(session.kind))
                     else EmptyContent("发条消息，开始吧", "搜索影视、提交下载，都可以从这里开始", sessionIcon(session.kind))
                 }
             }
