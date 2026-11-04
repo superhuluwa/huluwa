@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.graphics.drawable.ColorDrawable
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.ViewConfiguration
@@ -49,10 +50,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.TimeBar
 import com.huluwa.android.R
 import com.huluwa.android.data.BrowserVideo
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import java.util.Locale
 
 private const val VIDEO_SWIPE_SEEK_MS = 5_000L
 
@@ -74,6 +77,8 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
     var controlsVisible by remember(media) { mutableStateOf(true) }
     var swipeFeedback by remember(media) { mutableStateOf<String?>(null) }
     var swipeSequence by remember(media) { mutableIntStateOf(0) }
+    var scrubPosition by remember(media) { mutableStateOf<Long?>(null) }
+    var scrubDuration by remember(media) { mutableLongStateOf(0) }
     LaunchedEffect(swipeSequence) {
         if (swipeSequence > 0) {
             delay(800)
@@ -95,6 +100,8 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
     }
     val views = remember(player) { arrayOfNulls<PlayerView>(2) }
     val activeView = remember(player) { arrayOfNulls<PlayerView>(1) }
+    val scrubView = remember(player) { arrayOfNulls<PlayerView>(1) }
+    val scrubCleanups = remember(player) { mutableMapOf<PlayerView, () -> Unit>() }
     LaunchedEffect(fullscreenRequest) { if (fullscreenRequest > 0) fullscreen = true }
     LaunchedEffect(suspended) { if (suspended) player.pause() }
     DisposableEffect(player, lifecycle) {
@@ -138,6 +145,17 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         controllerShowTimeoutMs = 3000
                         keepScreenOn = true
+                        scrubCleanups[this] = trackProgressScrubbing { position ->
+                            if (position != null) {
+                                scrubView[0] = this
+                                scrubPosition = position.coerceAtLeast(0)
+                                scrubDuration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
+                                swipeFeedback = null
+                            } else if (scrubView[0] === this) {
+                                scrubView[0] = null
+                                scrubPosition = null
+                            }
+                        }
                         enableFiveSecondSwipe(player, allowed = { !latestSuspended }) { forward ->
                             swipeFeedback = if (forward) "快进 5 秒" else "后退 5 秒"
                             swipeSequence++
@@ -164,6 +182,7 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
                 modifier = Modifier.fillMaxSize(),
                 onReset = null,
                 onRelease = { view ->
+                    scrubCleanups.remove(view)?.invoke()
                     // 全屏窗口关闭时立即把同一个播放实例接回网页视图。
                     if (activeView[0] === view) {
                         val replacement = if (inFullscreen) views[0] else null
@@ -174,7 +193,10 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
                 },
                 update = { view -> if (inFullscreen || !fullscreen) attach(view) },
             )
-            swipeFeedback?.let { message ->
+            val feedback = scrubPosition?.let { position ->
+                "${browserVideoTime(position)} / ${if (scrubDuration > 0) browserVideoTime(scrubDuration) else "--:--"}"
+            } ?: swipeFeedback
+            feedback?.let { message ->
                 Surface(
                     modifier = Modifier.align(Alignment.Center),
                     color = Color.Black.copy(alpha = .72f),
@@ -220,6 +242,41 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
 }
 
 
+
+
+/** 保留原生定位行为，只补充拖动时间提示，并临时移除覆盖整幅画面的暗色背景。 */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun PlayerView.trackProgressScrubbing(onPosition: (Long?) -> Unit): () -> Unit {
+    val timeBar = findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress) ?: return {}
+    val controlsBackground = findViewById<View>(androidx.media3.ui.R.id.exo_controls_background)
+    val originalBackground = controlsBackground?.background
+    val listener = object : TimeBar.OnScrubListener {
+        override fun onScrubStart(timeBar: TimeBar, position: Long) {
+            // 替换背景而非 alpha，控件自己的淡入淡出动画也不会让拖动中的画面变暗。
+            controlsBackground?.background = ColorDrawable(android.graphics.Color.TRANSPARENT)
+            onPosition(position)
+        }
+        override fun onScrubMove(timeBar: TimeBar, position: Long) {
+            onPosition(position)
+        }
+        override fun onScrubStop(timeBar: TimeBar, position: Long, canceled: Boolean) {
+            controlsBackground?.background = originalBackground
+            onPosition(null)
+        }
+    }
+    timeBar.addListener(listener)
+    return {
+        timeBar.removeListener(listener)
+        controlsBackground?.background = originalBackground
+        onPosition(null)
+    }
+}
+
+private fun browserVideoTime(positionMs: Long): String {
+    val seconds = positionMs.coerceAtLeast(0) / 1000
+    return if (seconds >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    else String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
+}
 
 /** Media3 的紧凑布局默认隐藏圆点；控件展开时恢复，并给全屏按钮留出拖动空间。 */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
