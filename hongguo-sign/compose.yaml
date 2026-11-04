@@ -3,7 +3,7 @@ name: hongguo-native
 services:
   android:
     build: ./android
-    image: hongguo-android-runtime:14-amd64
+    image: hongguo-android-runtime:14-amd64-64only
     platform: linux/amd64
     container_name: hongguo-android-native
     restart: unless-stopped
@@ -67,6 +67,7 @@ services:
       APK_PATH: /apk/base.apk
       BOOT_TIMEOUT: '${BOOT_TIMEOUT:-300}'
       APP_WARMUP: '${APP_WARMUP:-30}'
+      APP_START_MODE: '${APP_START_MODE:-provider}'
       PORT: '8901'
     cpus: '2.0'
     mem_limit: 1g

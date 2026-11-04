@@ -6,11 +6,11 @@
 
 ```text
 Debian x86_64
-  ├─ Android 14 x86_64 + libndk_translation：运行 ARM64 红果 App
+  ├─ Android 14 x86_64（仅 64 位）+ libndk_translation：运行 ARM64 红果 App
   └─ Python + Frida x86_64：调用 App 的 Java 签名入口 → HTTP :8901
 ```
 
-原 `hongguo-docker.zip` 中的 HTTP 服务和 Java 调用代码保留在 `signer/sign_server.py`。整个 Android 改用宿主机原生的 x86_64 架构，ARM64 库交给镜像已包含的 `libndk_translation`。Frida 的架构与 Android ART 进程一致，使用 x86_64。
+原 `hongguo-docker.zip` 中的 HTTP 服务和 Java 调用代码保留在 `signer/sign_server.py`。整个 Android 改用宿主机原生的 x86_64 架构，ARM64 库交给镜像已包含的 `libndk_translation`。Frida 的架构与 Android ART 进程一致，使用 x86_64。Android 使用仅 64 位的官方镜像；红果 APK 只含 ARM64 库，不需要 32 位 zygote。双 ABI 镜像中曾捕获 Frida 32 位 agent 在 zygote 内超时并触发 SIGTRAP，导致整个 Android 框架重启，因此不保留该路径。
 
 原部署说明把“无法直接 Hook 翻译后的 ARM native 库”推导成“必须仿真整个 ARM64 Android”，这不适用于现有 Java 调用入口。本方案通过 Java 方法进入 App 内部算法，不需要 Frida 对 ARM native 指令执行 Hook。
 
@@ -54,7 +54,11 @@ docker compose up -d --build
 
 也可以在 `.env` 中将 `APK_DIR` 指向现有的 APK 目录。APK、Android 用户数据和运行配置不提交到 Git。Android 数据保存在外部卷 `hongguo-native-data` 中，重新创建容器不会清空它。
 
-首次启动红果时，需要在 App 中完成初始引导，签名组件才会初始化。可通过同一 Docker 网络内的 ADB 获取画面和操作。后续启动复用数据卷。入口使用解析出的 Activity 启动 App，避免依赖模拟触摸事件的 `monkey`。
+首次启动红果时，需要在 App 中完成初始引导，签名组件才会初始化。可临时在 `.env` 中设置 `APP_START_MODE=activity`，通过同一 Docker 网络内的 ADB 获取画面和操作；完成后改回 `provider` 并重新创建 signer。后续启动复用数据卷。
+
+正式运行默认使用 `APP_START_MODE=provider`：通过红果自带的 `FileProvider` 执行空的 `call`，让 Android 初始化 Application 和签名组件，全程不打开视频界面，避免无 GPU 环境的 HWUI 纹理崩溃。`activity` 模式使用解析出的 Activity 启动 App，避免依赖 `monkey`。签名服务重启时清理目标 App 和 Frida 的旧进程，保留 App 数据。进程选择优先查找由 zygote 创建的 App 主进程，排除 ARM 翻译层中同名的子进程。
+
+Frida 连接超时采用异步清理，避免 HTTP 超时响应被阻塞。签名服务连续三次不可用时，容器会重新初始化 App 和 Frida，以便从 Android 框架重启或运行时失联中恢复。
 
 启动顺序：Android 完成启动 → 安装 App（已安装则跳过）→ 启动 x86_64 Frida → 启动红果 → 等待初始化 → 启动 HTTP 服务。两个容器使用 `unless-stopped`，Docker 随系统启动后自动恢复。
 

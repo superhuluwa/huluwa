@@ -167,6 +167,31 @@ class Signer:
         return self.dev
 
     def _find_pid(self):
+        # ARM 翻译层会产生沿用 App 名称的子进程；签名必须注入 zygote
+        # 创建的 App 主进程，不能只取 Frida 枚举或 pidof 的第一个结果。
+        try:
+            import subprocess
+            adb = os.environ.get("ADB_PATH", "adb")
+            sel = ["-s", self.serial] if self.serial else []
+            result = subprocess.run(
+                [adb] + sel + ["shell", "ps", "-A", "-o", "PID,PPID,NAME"],
+                capture_output=True, timeout=15)
+            processes = {}
+            for line in result.stdout.decode("utf-8", "ignore").splitlines():
+                columns = line.split(None, 2)
+                if len(columns) == 3 and columns[0].isdigit() and columns[1].isdigit():
+                    processes[int(columns[0])] = (int(columns[1]), columns[2].strip())
+            for pid, (parent, name) in processes.items():
+                parent_name = processes.get(parent, (0, ""))[1]
+                if name == self.pkg and parent_name in ("zygote", "zygote64"):
+                    return pid
+            if any(name in ("zygote", "zygote64") for _, name in processes.values()):
+                # 已读取到 Android 进程表时，主进程缺失就直接等待恢复，
+                # 不再回退到同名子进程或触发额外的系统进程注入。
+                return None
+        except (OSError, subprocess.SubprocessError):
+            pass
+
         # 1) frida 枚举
         try:
             for p in self._connect_device().enumerate_processes():
@@ -253,18 +278,25 @@ class Signer:
         return self._call("sign", url, timeout=timeout)
 
     def reset(self):
-        try:
-            if self.script:
-                self.script.unload()
-        except Exception:
-            pass
-        try:
-            if self.session:
-                self.session.detach()
-        except Exception:
-            pass
+        script, session = self.script, self.session
         self.script = None
         self.session = None
+        self.dev = None
+
+        # 失联时 Frida 的同步清理也可能卡住，不能阻塞 HTTP 超时响应。
+        def cleanup():
+            try:
+                if session:
+                    session.detach()
+            except Exception:
+                pass
+            try:
+                if script:
+                    script.unload()
+            except Exception:
+                pass
+
+        threading.Thread(target=cleanup, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------

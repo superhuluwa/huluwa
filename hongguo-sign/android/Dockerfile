@@ -1,5 +1,5 @@
 FROM busybox:1.37.0-musl AS toolbox
-FROM redroid/redroid:14.0.0-latest@sha256:a3e654caad74faed03cd5ead057a989e06f507778cda678e5d3b9772e0092f1c
+FROM redroid/redroid:14.0.0_64only-latest@sha256:0a611199ba2e0b5d60af39b3327a517f6407231f4352114ed3bd3cbfe2be69aa
 
 COPY --from=toolbox /bin/busybox /busybox
 COPY entrypoint.sh /native-entrypoint.sh
