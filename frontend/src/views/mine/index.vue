@@ -59,7 +59,7 @@
  * 我的标签页（对齐安卓 MineScreen）：
  *  - 顶部账号卡：当前账号、服务器地址、实时连接状态；
  *  - 「连接配置」打开账号弹层（修改密码 / 退出）；
- *  - 网页端额外保留「服务器概览」「4hu 小说下载」「推送设置」工具入口（安卓端没有对应页面）。
+ *  - 网页端额外保留「服务器概览」「推送设置」两个工具入口（安卓端没有对应页面）。
  */
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
@@ -77,7 +77,6 @@ export default {
             accountOpen: false,
             tools: [
                 { name: 'dashboard', title: '服务器概览', desc: 'CPU、内存与运行环境', icon: 'fa-solid fa-gauge-high' },
-                { name: 'novel-4hu', title: '4hu 小说下载', desc: '分类统计章节，按书名批量保存正文', icon: 'fa-solid fa-book-open' },
                 { name: 'push', title: '推送设置', desc: '推送渠道与订阅事件', icon: 'fa-solid fa-paper-plane' }
             ]
         }

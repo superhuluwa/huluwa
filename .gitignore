@@ -46,5 +46,3 @@ backups/
 /output/windows-builder-validation/
 /output/android-design.zip
 /output/huluwa-android-design.zip
-# 4hu 小说抓取正文（本地内容，不提交仓库）
-/output/4hu-novels/

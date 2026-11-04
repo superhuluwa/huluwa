@@ -64,10 +64,6 @@ huluwa:
     # 页面详情短期复用；巡检绕过已完成缓存，同 URL 的进行中请求仍会合并。
     detail-cache-seconds: 60
     detail-cache-max-entries: 128
-  4hu:
-    # 4hu 会按网络环境返回 Cloudflare 挑战页；直连失败时使用该只读文本代理。
-    # 容器部署可通过 HULUWA_4HU_PROXY_BASE 覆盖。
-    proxy-base: ${HULUWA_4HU_PROXY_BASE:https://r.jina.ai}
   token:
     # 留空则首次启动自动生成并持久化到数据库
     secret: ''
