@@ -1,10 +1,13 @@
 package com.huluwa.android.ui
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -17,6 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +40,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.MediaItem
@@ -43,6 +50,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.huluwa.android.R
 import com.huluwa.android.data.BrowserVideo
+import kotlinx.coroutines.delay
+import kotlin.math.abs
+
+private const val VIDEO_SWIPE_SEEK_MS = 5_000L
 
 /** 网页原位播放与全屏共用一个播放实例，切换视图时保留缓冲、进度及暂停状态。 */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -60,9 +71,21 @@ import com.huluwa.android.data.BrowserVideo
     val latestSuspended by rememberUpdatedState(suspended)
     var fullscreen by remember(media) { mutableStateOf(fullscreenRequest > 0) }
     var controlsVisible by remember(media) { mutableStateOf(true) }
+    var swipeFeedback by remember(media) { mutableStateOf<String?>(null) }
+    var swipeSequence by remember(media) { mutableIntStateOf(0) }
+    LaunchedEffect(swipeSequence) {
+        if (swipeSequence > 0) {
+            delay(800)
+            swipeFeedback = null
+        }
+    }
     val player = remember(media) {
         val data = DefaultHttpDataSource.Factory().setDefaultRequestProperties(media.headers)
-        ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(data)).build().apply {
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
+            .setSeekBackIncrementMs(VIDEO_SWIPE_SEEK_MS)
+            .setSeekForwardIncrementMs(VIDEO_SWIPE_SEEK_MS)
+            .build().apply {
             setMediaItem(MediaItem.fromUri(media.url))
             if (media.positionMs > 0) seekTo(media.positionMs)
             playWhenReady = true
@@ -113,6 +136,10 @@ import com.huluwa.android.data.BrowserVideo
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                         controllerShowTimeoutMs = 3000
                         keepScreenOn = true
+                        enableFiveSecondSwipe(player, allowed = { !latestSuspended }) { forward ->
+                            swipeFeedback = if (forward) "快进 5 秒" else "后退 5 秒"
+                            swipeSequence++
+                        }
                         setShowNextButton(false)
                         setShowPreviousButton(false)
                         setFullscreenButtonClickListener { fullscreen = it }
@@ -136,6 +163,14 @@ import com.huluwa.android.data.BrowserVideo
                 },
                 update = { view -> if (inFullscreen || !fullscreen) attach(view) },
             )
+            swipeFeedback?.let { message ->
+                Surface(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.Black.copy(alpha = .72f),
+                    contentColor = Color.White,
+                    shape = MaterialTheme.shapes.medium,
+                ) { Text(message, Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) }
+            }
             if (controlsVisible) IconButton(
                 onClick = {
                     player.pause()
@@ -170,6 +205,84 @@ import com.huluwa.android.data.BrowserVideo
             }
         }
         surface(inFullscreen = true)
+    }
+}
+
+
+/** 只接收 PlayerView 自身的画面触摸，进度条与控制按钮继续消费自己的手势。 */
+@SuppressLint("ClickableViewAccessibility")
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun PlayerView.enableFiveSecondSwipe(
+    player: ExoPlayer,
+    allowed: () -> Boolean,
+    onSeek: (forward: Boolean) -> Unit,
+) {
+    val threshold = maxOf(48f * resources.displayMetrics.density,
+        ViewConfiguration.get(context).scaledTouchSlop * 2f)
+    var downX = 0f
+    var downY = 0f
+    var tracking = false
+    var handled = false
+    var ignored = false
+    fun seekIfSwiped(event: MotionEvent): Boolean {
+        if (handled) return true
+        if (!tracking || ignored) return false
+        val dx = event.x - downX
+        val dy = event.y - downY
+        if (abs(dy) >= threshold && abs(dy) > abs(dx)) {
+            ignored = true
+            return false
+        }
+        if (abs(dx) < threshold || abs(dx) <= abs(dy) * 1.5f) return false
+        val duration = player.duration
+        if (!allowed() || !player.isCurrentMediaItemSeekable || duration == C.TIME_UNSET || duration <= 0 ||
+            !player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
+            ignored = true
+            return false
+        }
+        val forward = dx > 0
+        val offset = if (forward) VIDEO_SWIPE_SEEK_MS else -VIDEO_SWIPE_SEEK_MS
+        val target = (player.currentPosition.coerceAtLeast(0) + offset).coerceIn(0, duration)
+        // seekTo 不改变 playWhenReady；一次手势只执行一次固定步长定位。
+        player.seekTo(target)
+        handled = true
+        parent?.requestDisallowInterceptTouchEvent(true)
+        val cancel = MotionEvent.obtain(event)
+        cancel.action = MotionEvent.ACTION_CANCEL
+        onTouchEvent(cancel)
+        cancel.recycle()
+        showController()
+        onSeek(forward)
+        return true
+    }
+    setOnTouchListener { _, event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                tracking = true
+                handled = false
+                ignored = false
+                false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                ignored = true
+                handled
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (event.pointerCount > 1) ignored = true
+                seekIfSwiped(event)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val consumed = handled || (event.actionMasked == MotionEvent.ACTION_UP && seekIfSwiped(event))
+                tracking = false
+                handled = false
+                ignored = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+                consumed
+            }
+            else -> handled
+        }
     }
 }
 
