@@ -22,6 +22,7 @@
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const DEFAULTS = {
   baseUrl: 'https://4hu.tv',
@@ -36,12 +37,13 @@ const DEFAULTS = {
   withContent: false,
   concurrency: 4,
   timeoutMs: 60_000,
-  retries: 2,
-  delayMs: 120,
+  retries: 4,
+  delayMs: 300,
   direct: false,
   json: false,
   compact: false,
   input: null,
+  outputDir: null,
 };
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
@@ -61,6 +63,7 @@ function usage() {
   --base-url <url>    目标站地址，默认 ${DEFAULTS.baseUrl}
   --proxy-url <url>   JSON 代理地址，默认 ${DEFAULTS.proxyBaseUrl}
   --input <file>      从已保存的 {"status":1,"data":"..."} JSON 读取
+  --output <dir>      分类输出目录，按“书名/章节.txt”保存，默认不保存
   --concurrency <n>   正文并发数，默认 ${DEFAULTS.concurrency}
   --timeout <ms>      单请求超时，默认 ${DEFAULTS.timeoutMs}
   --retries <n>       失败重试次数，默认 ${DEFAULTS.retries}
@@ -74,6 +77,7 @@ function usage() {
   node scripts/fetch-4hu-novel-chapters.mjs --category 16 --page 1
   node scripts/fetch-4hu-novel-chapters.mjs --category 16 --all --json > chapters.json
   node scripts/fetch-4hu-novel-chapters.mjs --category 16 --id 102944 --with-content --json
+  node scripts/fetch-4hu-novel-chapters.mjs --category 16 --pages 5 --output ./output/4hu-novels/都市小说
 `);
 }
 
@@ -104,6 +108,10 @@ function parseArgs(argv) {
     else if (arg.startsWith('--proxy-url=')) opts.proxyBaseUrl = arg.slice(12);
     else if (arg === '--input') opts.input = take();
     else if (arg.startsWith('--input=')) opts.input = arg.slice(8);
+    else if (arg === '--output') opts.outputDir = take();
+    else if (arg.startsWith('--output=')) opts.outputDir = arg.slice(9);
+    else if (arg === '--save-txt') opts.outputDir = take();
+    else if (arg.startsWith('--save-txt=')) opts.outputDir = arg.slice(11);
     else if (arg === '--concurrency') opts.concurrency = Math.max(1, numeric(take(), '--concurrency'));
     else if (arg.startsWith('--concurrency=')) opts.concurrency = Math.max(1, numeric(arg.slice(14), '--concurrency'));
     else if (arg === '--timeout') opts.timeoutMs = Math.max(1, numeric(take(), '--timeout'));
@@ -165,11 +173,14 @@ async function fetchText(url, opts) {
       });
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        const error = new Error(`HTTP ${response.status} ${response.statusText}`);
+        error.retryable = response.status === 429 || response.status >= 500;
+        throw error;
       }
       return text;
     } catch (error) {
       lastError = error;
+      if (error.retryable === false) break;
     }
   }
   throw new Error(`请求失败：${url}（${lastError?.message || '未知错误'}）`);
@@ -266,6 +277,70 @@ async function fetchChapterDetail(id, opts) {
   };
 }
 
+function parseChapterTitle(rawTitle) {
+  const title = String(rawTitle || '').trim();
+  let match = title.match(/^\s*[《【](.+?)[》】]\s*(?:[-—–:：]\s*)?(.*)$/s);
+  if (match) {
+    return { bookTitle: match[1].trim(), chapterTitle: (match[2] || title).trim() };
+  }
+  match = title.match(/^\s*(.+?)\s+[-—–]\s+(.+)$/s);
+  if (match) {
+    return { bookTitle: match[1].trim(), chapterTitle: (match[2] || title).trim() };
+  }
+  return { bookTitle: '未分类', chapterTitle: title };
+}
+
+function safeFileName(value, fallback = '未命名', maxBytes = 180) {
+  let name = String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  if (!name) name = fallback;
+  while (Buffer.byteLength(name, 'utf8') > maxBytes) {
+    name = name.slice(0, -1);
+  }
+  return name.replace(/[. ]+$/g, '') || fallback;
+}
+
+function chapterTxt(chapter) {
+  const parsed = parseChapterTitle(chapter.title);
+  return [
+    chapter.title,
+    '',
+    `分类：${chapter.categoryName || ''}`,
+    `日期：${chapter.date || ''}`,
+    `来源：https://4hu.tv${chapter.url}`,
+    '',
+    chapter.contentText || '',
+    '',
+  ].join('\n');
+}
+
+function chapterPath(chapter, outputDir) {
+  const parsed = parseChapterTitle(chapter.title);
+  const dir = path.join(outputDir, safeFileName(parsed.bookTitle));
+  const baseName = safeFileName(`${parsed.chapterTitle || '正文'}_${chapter.id}`);
+  return path.join(dir, `${baseName}.txt`);
+}
+
+async function saveChapterTxt(chapter, outputDir) {
+  const target = chapterPath(chapter, outputDir);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, chapterTxt(chapter), 'utf8');
+  return target;
+}
+
+async function fileExists(file) {
+  try {
+    const stat = await fs.stat(file);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
 function htmlToText(html) {
   return html
     .replace(/<br\s*\/?>/gi, '\n')
@@ -285,16 +360,23 @@ function htmlToText(html) {
 async function mapLimit(items, limit, work) {
   const results = new Array(items.length);
   let cursor = 0;
+  let firstError = null;
   async function worker() {
-    while (true) {
+    while (!firstError) {
       const index = cursor;
       cursor += 1;
       if (index >= items.length) return;
-      results[index] = await work(items[index], index);
+      try {
+        results[index] = await work(items[index], index);
+      } catch (error) {
+        firstError = error;
+        return;
+      }
     }
   }
   const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
   await Promise.all(workers);
+  if (firstError) throw firstError;
   return results;
 }
 
@@ -368,14 +450,34 @@ async function main() {
     chapters = collected.pages.flatMap((page) => page.chapters);
   }
 
-  if (opts.withContent) {
+  const saveResults = [];
+  let skippedCount = 0;
+  chapters = chapters.map((chapter) => ({
+    ...chapter,
+    categoryName: chapter.categoryName || listMeta.categoryName || `分类-${chapter.categoryId}`,
+  }));
+
+  if (opts.withContent || opts.outputDir) {
     chapters = await mapLimit(chapters, opts.concurrency, async (chapter) => {
+      if (opts.outputDir) {
+        const existing = chapterPath(chapter, opts.outputDir);
+        if (await fileExists(existing)) {
+          skippedCount += 1;
+          return { ...chapter, savedTo: existing, skipped: true };
+        }
+      }
       if (opts.delayMs) await sleep(opts.delayMs);
       const detail = await fetchChapterDetail(chapter.id, opts);
       if (detail.categoryId !== chapter.categoryId) {
         throw new Error(`章节 ${chapter.id} 分类不一致：${detail.categoryId} != ${chapter.categoryId}`);
       }
-      return { ...chapter, ...detail };
+      const merged = { ...chapter, ...detail };
+      if (opts.outputDir) {
+        const file = await saveChapterTxt(merged, opts.outputDir);
+        merged.savedTo = file;
+        saveResults.push(file);
+      }
+      return merged;
     });
   }
 
@@ -383,6 +485,9 @@ async function main() {
     source: opts.input ? opts.input : (opts.direct ? opts.baseUrl : opts.proxyBaseUrl),
     category: listMeta,
     count: chapters.length,
+    savedCount: saveResults.length,
+    skippedCount,
+    outputDir: opts.outputDir ? path.resolve(opts.outputDir) : null,
     chapters,
   };
 
