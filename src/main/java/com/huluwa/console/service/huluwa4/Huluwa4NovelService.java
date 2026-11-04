@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>站点接口返回 AES-CBC 加密的 JSON：分类页为
  * {@code /json/category/{category}-{page}.json}，章节页为
  * {@code /json/view/{chapter}.json}。本服务只访问这两个只读接口，
- * 正文按“分类/书名/章节_章节ID.txt”落盘，已存在非空文件直接跳过。</p>
+ * 正文按“分类/章节_章节ID.txt”落盘，已存在非空文件直接跳过。</p>
  */
 @Service
 public class Huluwa4NovelService {
@@ -206,9 +206,10 @@ public class Huluwa4NovelService {
             String taskId = categoryId + "-" + System.currentTimeMillis();
             try {
                 Files.createDirectories(root);
+                flattenChapterFiles(root);
             } catch (IOException error) {
                 activeOutputs.remove(root);
-                throw new BusinessException(500, "无法创建下载目录：" + root, error);
+                throw new BusinessException(500, "无法准备下载目录：" + root, error);
             }
             TaskStatus status = new TaskStatus(taskId, categoryId, total.name(), "running",
                     total.lastPage(), 0, 0, 0, total.total(), 0, 0, 0, 0, 0,
@@ -256,6 +257,51 @@ public class Huluwa4NovelService {
                     String right = b.startedAt() == null ? "" : b.startedAt();
                     return right.compareTo(left);
                 }).toList();
+    }
+
+    /**
+     * 兼容旧版“分类/书名/章节.txt”布局：把所有 TXT 移到分类根目录。
+     * 文件名已带章节 ID，根目录同名时保留根目录版本，删除旧子目录中的重复文件。
+     */
+    private void flattenChapterFiles(Path categoryRoot) throws IOException {
+        if (!Files.isDirectory(categoryRoot)) return;
+        try (var children = Files.list(categoryRoot)) {
+            for (Path child : children.filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith(".")).toList()) {
+                try (var files = Files.walk(child)) {
+                    for (Path file : files.filter(Files::isRegularFile)
+                            .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".txt"))
+                            .toList()) {
+                        Path target = categoryRoot.resolve(file.getFileName().toString());
+                        if (Files.exists(target)) {
+                            if (Files.size(target) > 0) {
+                                Files.deleteIfExists(file);
+                                continue;
+                            }
+                            Files.delete(target);
+                        }
+                        moveAtomically(file, target);
+                    }
+                }
+            }
+        }
+        // 删除已经为空的书名子目录；非空目录保留，避免误删用户文件。
+        try (var children = Files.list(categoryRoot)) {
+            for (Path child : children.filter(Files::isDirectory)
+                    .filter(path -> !path.getFileName().toString().startsWith(".")).toList()) {
+                try (var entries = Files.list(child)) {
+                    if (entries.findAny().isEmpty()) Files.deleteIfExists(child);
+                }
+            }
+        }
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private Path resolveOutputDir(int categoryId, String categoryName, String requested) {
@@ -311,8 +357,7 @@ public class Huluwa4NovelService {
                     currentBook = parsed.book();
                     currentChapter = parsed.chapter();
                     books.add(parsed.book());
-                    Path target = root.resolve(safeName(parsed.book(), "未分类"))
-                            .resolve(safeName(parsed.chapter(), "正文") + "_" + chapterId + ".txt");
+                    Path target = root.resolve(safeName(parsed.chapter(), "正文") + "_" + chapterId + ".txt");
                     processed++;
                     currentPageProcessed++;
                     if (Files.isRegularFile(target) && Files.size(target) > 0) {

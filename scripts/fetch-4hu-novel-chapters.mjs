@@ -63,7 +63,7 @@ function usage() {
   --base-url <url>    目标站地址，默认 ${DEFAULTS.baseUrl}
   --proxy-url <url>   JSON 代理地址，默认 ${DEFAULTS.proxyBaseUrl}
   --input <file>      从已保存的 {"status":1,"data":"..."} JSON 读取
-  --output <dir>      分类输出目录，按“书名/章节.txt”保存，默认不保存
+  --output <dir>      分类输出目录，按“章节_章节ID.txt”保存，默认不保存
   --concurrency <n>   正文并发数，默认 ${DEFAULTS.concurrency}
   --timeout <ms>      单请求超时，默认 ${DEFAULTS.timeoutMs}
   --retries <n>       失败重试次数，默认 ${DEFAULTS.retries}
@@ -320,9 +320,8 @@ function chapterTxt(chapter) {
 
 function chapterPath(chapter, outputDir) {
   const parsed = parseChapterTitle(chapter.title);
-  const dir = path.join(outputDir, safeFileName(parsed.bookTitle));
   const baseName = safeFileName(`${parsed.chapterTitle || '正文'}_${chapter.id}`);
-  return path.join(dir, `${baseName}.txt`);
+  return path.join(outputDir, `${baseName}.txt`);
 }
 
 async function saveChapterTxt(chapter, outputDir) {

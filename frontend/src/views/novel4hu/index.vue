@@ -6,7 +6,7 @@
                 <div>
                     <span class="eyebrow">4HU · NOVEL ARCHIVE</span>
                     <h1>一键下载全部小说</h1>
-                    <p>选择分类即可下载其下全部小说。正文按「书名 / 章节.txt」保存，已有非空文件自动跳过，可随时续传。</p>
+                    <p>选择分类即可下载其下全部小说。正文直接保存在分类根目录，已有非空文件自动跳过，可随时续传。</p>
                 </div>
                 <span class="hero-mark"><i class="fa-solid fa-book-open"></i></span>
             </section>
@@ -18,7 +18,7 @@
                 <div class="field-label output-label">保存位置</div>
                 <n-input v-model:value="outputDir" clearable size="large"
                     placeholder="留空：数据目录/4hu-novels/分类名" />
-                <p class="hint">也可以填写数据目录下的绝对路径；不允许写到数据目录之外。正文按「书名/章节_章节ID.txt」保存。</p>
+                <p class="hint">也可以填写数据目录下的绝对路径；不允许写到数据目录之外。正文按「章节_章节ID.txt」直接保存在分类根目录。</p>
             </section>
 
             <section v-if="category" class="summary-grid">
@@ -111,7 +111,7 @@
                     <template #icon><i class="fa-solid fa-download"></i></template>
                     {{ checkingTask ? '正在检查任务…' : (task && task.running ? '正在一键下载…' : '一键下载全部小说') }}
                 </n-button>
-                <span class="action-note">下载全部小说并保留分类/书名目录；已保存章节会跳过，可放心重复点击补齐。</span>
+                <span class="action-note">下载全部小说并直接保存到分类根目录；已保存章节会跳过，可放心重复点击补齐。</span>
             </div>
         </div>
     </ManagementShell>
