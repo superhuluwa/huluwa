@@ -190,11 +190,20 @@ public class Huluwa4NovelService {
         synchronized (startLock) {
             if (stopping.get()) throw new BusinessException(503, "服务正在停止，请稍后重试");
             CategoryTotal total = categoryTotal(categoryId);
-            String taskId = categoryId + "-" + System.currentTimeMillis();
             Path root = resolveOutputDir(categoryId, total.name(), outputDir);
+            // 浏览器刷新或重复点击时，同一个保存目录直接复用运行中的任务。
+            // 前端只持有展示状态；任务的真实状态始终以后端内存任务为准。
+            for (Task running : tasks.values()) {
+                TaskStatus status = running.status;
+                if (status.running() && status.categoryId() == categoryId
+                        && root.equals(Path.of(status.outputDir()).toAbsolutePath().normalize())) {
+                    return status;
+                }
+            }
             if (!activeOutputs.add(root)) {
                 throw new BusinessException(409, "该保存目录已有下载任务，请等待完成：" + root);
             }
+            String taskId = categoryId + "-" + System.currentTimeMillis();
             try {
                 Files.createDirectories(root);
             } catch (IOException error) {

@@ -106,10 +106,10 @@
             </section>
 
             <div class="action-row">
-                <n-button type="primary" size="large" :loading="starting" :disabled="!category || Boolean(task && task.running)"
+                <n-button type="primary" size="large" :loading="starting" :disabled="!category || checkingTask || Boolean(task && task.running)"
                     @click="startDownload">
                     <template #icon><i class="fa-solid fa-download"></i></template>
-                    {{ task && task.running ? '正在一键下载…' : '一键下载全部小说' }}
+                    {{ checkingTask ? '正在检查任务…' : (task && task.running ? '正在一键下载…' : '一键下载全部小说') }}
                 </n-button>
                 <span class="action-note">下载全部小说并保留分类/书名目录；已保存章节会跳过，可放心重复点击补齐。</span>
             </div>
@@ -128,7 +128,7 @@ import { NButton, NInput, NSelect } from 'naive-ui'
 import ManagementShell from '@/components/main/management-shell.vue'
 import {
     getNovel4huCategories, getNovel4huCategory, startNovel4huDownload,
-    getNovel4huTask, cancelNovel4huTask
+    getNovel4huTask, getNovel4huTasks, cancelNovel4huTask
 } from '@/api/novel4hu'
 
 const ACTIVE_TASK_KEY = 'huluwa.4hu.activeTask'
@@ -149,6 +149,7 @@ export default {
             task: null,
             loadingCategories: true,
             loadingCategory: false,
+            checkingTask: false,
             starting: false,
             cancelling: false,
             timer: null
@@ -179,8 +180,7 @@ export default {
     },
     async mounted() {
         await this.loadCategories()
-        const savedTask = localStorage.getItem(ACTIVE_TASK_KEY)
-        if (savedTask) await this.restoreTask(savedTask)
+        await this.restoreFromServer()
     },
     beforeUnmount() {
         this.stopPolling()
@@ -205,6 +205,7 @@ export default {
             this.loadingCategory = true
             try {
                 this.category = await getNovel4huCategory(this.categoryId)
+                await this.restoreFromServer()
             } catch (error) {
                 this.category = null
             } finally {
@@ -216,10 +217,11 @@ export default {
             this.starting = true
             try {
                 const status = await startNovel4huDownload(this.categoryId, this.outputDir)
+                const resumed = Boolean(status.taskId && this.task && this.task.taskId === status.taskId)
                 this.task = status
                 localStorage.setItem(ACTIVE_TASK_KEY, status.taskId)
-                this.startPolling()
-                this.$message.success(`已启动 ${status.categoryName} 的下载任务`)
+                if (status.running) this.startPolling()
+                this.$message.success(resumed ? `已继续显示 ${status.categoryName} 的下载进度` : `已启动 ${status.categoryName} 的一键下载任务`)
             } catch (error) {
                 // http 拦截器已提示
             } finally {
@@ -262,15 +264,43 @@ export default {
                 this.stopPolling()
             }
         },
-        async restoreTask(taskId) {
+        /**
+         * 刷新页面后不能依赖 localStorage：它只保存“上次打开的任务”，
+         * 换浏览器/清缓存或任务由其他页面启动时会丢失展示。
+         * 这里以服务端任务列表为准，优先运行中的任务，其次最近结束的任务。
+         */
+        async restoreFromServer() {
+            this.checkingTask = true
             try {
-                this.task = await getNovel4huTask(taskId)
-                if (this.task.running) this.startPolling()
-                const selected = this.categories.find(item => item.id === this.task.categoryId)
-                if (selected) this.categoryId = selected.id
-                await this.loadCategory()
+                const tasks = await getNovel4huTasks()
+                const list = Array.isArray(tasks) ? tasks : []
+                if (!list.length) {
+                    this.task = null
+                    return
+                }
+                const matches = list.filter(item => !this.categoryId || item.categoryId === this.categoryId)
+                const candidates = matches.length ? matches : list
+                const selected = candidates.find(item => item.running)
+                    || candidates.find(item => this.task && item.taskId === this.task.taskId)
+                    || candidates[0]
+                if (!selected) return
+                this.task = selected
+                if (selected.categoryId && selected.categoryId !== this.categoryId) {
+                    // 恢复的是其他分类的任务时，同步下拉框；无需再次请求详情。
+                    this.categoryId = selected.categoryId
+                    this.category = this.categories.find(item => item.id === selected.categoryId) || this.category
+                }
+                if (selected.running) {
+                    this.startPolling()
+                } else {
+                    this.stopPolling()
+                    this.outputDir = this.outputDir || selected.outputDir || ''
+                }
+                localStorage.setItem(ACTIVE_TASK_KEY, selected.taskId)
             } catch (error) {
-                localStorage.removeItem(ACTIVE_TASK_KEY)
+                // 恢复失败不阻塞分类查询；页面仍可重新启动或刷新。
+            } finally {
+                this.checkingTask = false
             }
         }
     }
