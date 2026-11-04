@@ -72,9 +72,19 @@
                         <span>{{ task.currentChapter || '等待章节信息' }}</span>
                     </div>
                 </div>
+                <div class="page-progress">
+                    <div class="page-progress-row">
+                        <span>当前下载</span>
+                        <strong>第 {{ task.currentPage || 0 }} 页 / 共 {{ task.totalPages || 0 }} 页</strong>
+                    </div>
+                    <div class="page-progress-row">
+                        <span>当前页章节</span>
+                        <strong>{{ task.currentPageProcessed || 0 }} / {{ task.currentPageTotal || 0 }} 章</strong>
+                    </div>
+                </div>
                 <div class="progress-track"><span :style="{ width: progressWidth }"></span></div>
                 <div class="progress-meta">
-                    <strong>{{ Number(task.processedChapters || 0).toLocaleString() }} / {{ Number(task.totalChapters || 0).toLocaleString() }} 章</strong>
+                    <strong>全部章节 {{ Number(task.processedChapters || 0).toLocaleString() }} / {{ Number(task.totalChapters || 0).toLocaleString() }} 章</strong>
                     <span class="percent-badge">{{ progressPercent }}%</span>
                 </div>
                 <div class="progress-detail">
@@ -539,6 +549,33 @@ export default {
     font-size: 10px;
 }
 
+.page-progress {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 14px 18px 0;
+}
+
+.page-progress-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 13px;
+    background: var(--paper);
+}
+
+.page-progress-row span {
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.page-progress-row strong {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .progress-track {
     height: 8px;
     margin: 18px 18px 0;
@@ -617,5 +654,6 @@ export default {
     .chapter-date { display: none; }
     .chapter-id { width: 52px; }
     .action-row { align-items: stretch; flex-direction: column; }
+    .page-progress { grid-template-columns: 1fr; }
 }
 </style>

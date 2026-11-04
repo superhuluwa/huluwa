@@ -89,9 +89,10 @@ public class Huluwa4NovelService {
                           String bookTitle, String chapterTitle) { }
 
     public record TaskStatus(String taskId, int categoryId, String categoryName, String state,
-                             int totalChapters, int processedChapters, int downloadedChapters,
-                             int skippedChapters, int failedChapters, int discoveredBooks,
-                             String currentBook, String currentChapter, String outputDir,
+                             int totalPages, int currentPage, int currentPageProcessed,
+                             int currentPageTotal, int totalChapters, int processedChapters,
+                             int downloadedChapters, int skippedChapters, int failedChapters,
+                             int discoveredBooks, String currentBook, String currentChapter, String outputDir,
                              String error, String startedAt, String finishedAt,
                              List<String> recentFailures) {
         public boolean running() { return "running".equals(state) || "cancelling".equals(state); }
@@ -201,7 +202,8 @@ public class Huluwa4NovelService {
                 throw new BusinessException(500, "无法创建下载目录：" + root, error);
             }
             TaskStatus status = new TaskStatus(taskId, categoryId, total.name(), "running",
-                    total.total(), 0, 0, 0, 0, 0, null, null, root.toString(), null, now(), null, List.of());
+                    total.lastPage(), 0, 0, 0, total.total(), 0, 0, 0, 0, 0,
+                    null, null, root.toString(), null, now(), null, List.of());
             Task task = new Task(taskId, total, root.toString(), status);
             tasks.put(taskId, task);
             try {
@@ -228,10 +230,11 @@ public class Huluwa4NovelService {
         task.cancelled.set(true);
         TaskStatus current = task.status;
         TaskStatus cancelling = new TaskStatus(current.taskId(), current.categoryId(), current.categoryName(), "cancelling",
-                current.totalChapters(), current.processedChapters(), current.downloadedChapters(),
-                current.skippedChapters(), current.failedChapters(), current.discoveredBooks(),
-                current.currentBook(), current.currentChapter(), current.outputDir(), current.error(),
-                current.startedAt(), null, current.recentFailures());
+                current.totalPages(), current.currentPage(), current.currentPageProcessed(),
+                current.currentPageTotal(), current.totalChapters(), current.processedChapters(),
+                current.downloadedChapters(), current.skippedChapters(), current.failedChapters(),
+                current.discoveredBooks(), current.currentBook(), current.currentChapter(), current.outputDir(),
+                current.error(), current.startedAt(), null, current.recentFailures());
         task.status = cancelling;
         return cancelling;
     }
@@ -261,6 +264,9 @@ public class Huluwa4NovelService {
         int downloaded = 0;
         int skipped = 0;
         int failed = 0;
+        int currentPage = 0;
+        int currentPageProcessed = 0;
+        int currentPageTotal = 0;
         List<String> failures = new ArrayList<>();
         java.util.LinkedHashSet<String> books = new java.util.LinkedHashSet<>();
         String currentBook = null;
@@ -270,15 +276,23 @@ public class Huluwa4NovelService {
             Path root = Path.of(task.outputDir);
             for (int page = 1; page <= total.lastPage(); page++) {
                 if (task.cancelled.get()) {
-                    update(task, state(task.status, "cancelled", null, processed, downloaded, skipped, failed,
-                            books.size(), currentBook, currentChapter, failures));
+                    update(task, state(task.status, "cancelled", null, page - 1, currentPageProcessed,
+                            currentPageTotal, processed, downloaded, skipped, failed, books.size(),
+                            currentBook, currentChapter, failures));
                     return;
                 }
                 JsonNode payload = fetchCategoryPage(task.total.categoryId(), page);
+                currentPage = page;
+                currentPageProcessed = 0;
+                currentPageTotal = payload.path("data").size();
+                update(task, state(task.status, "running", null, currentPage, currentPageProcessed,
+                        currentPageTotal, processed, downloaded, skipped, failed, books.size(),
+                        currentBook, currentChapter, failures));
                 for (JsonNode item : payload.path("data")) {
                     if (task.cancelled.get()) {
-                        update(task, state(task.status, "cancelled", null, processed, downloaded, skipped, failed,
-                                books.size(), currentBook, currentChapter, failures));
+                        update(task, state(task.status, "cancelled", null, currentPage, currentPageProcessed,
+                                currentPageTotal, processed, downloaded, skipped, failed, books.size(),
+                                currentBook, currentChapter, failures));
                         return;
                     }
                     int chapterId = item.path("id").asInt();
@@ -291,6 +305,7 @@ public class Huluwa4NovelService {
                     Path target = root.resolve(safeName(parsed.book(), "未分类"))
                             .resolve(safeName(parsed.chapter(), "正文") + "_" + chapterId + ".txt");
                     processed++;
+                    currentPageProcessed++;
                     if (Files.isRegularFile(target) && Files.size(target) > 0) {
                         skipped++;
                     } else {
@@ -308,30 +323,36 @@ public class Huluwa4NovelService {
                             log.warn("4hu 小说章节 {} 下载失败：{}", chapterId, error.getMessage());
                         }
                     }
-                    update(task, state(task.status, "running", null, processed, downloaded, skipped, failed,
-                            books.size(), currentBook, currentChapter, failures));
+                    update(task, state(task.status, "running", null, currentPage, currentPageProcessed,
+                            currentPageTotal, processed, downloaded, skipped, failed, books.size(),
+                            currentBook, currentChapter, failures));
                 }
                 sleepQuietly(800);
             }
-            update(task, state(task.status, "done", null, processed, downloaded, skipped, failed,
-                    books.size(), currentBook, currentChapter, failures));
+            update(task, state(task.status, "done", null, currentPage, currentPageProcessed,
+                    currentPageTotal, processed, downloaded, skipped, failed, books.size(),
+                    currentBook, currentChapter, failures));
         } catch (BusinessException error) {
             String nextState = task.cancelled.get() ? "cancelled" : "failed";
             update(task, state(task.status, nextState, task.cancelled.get() ? null : error.getMessage(),
-                    processed, downloaded, skipped, failed, books.size(), currentBook, currentChapter, failures));
+                    currentPage, currentPageProcessed, currentPageTotal, processed, downloaded, skipped,
+                    failed, books.size(), currentBook, currentChapter, failures));
         } catch (Exception error) {
             log.warn("4hu 小说下载任务 {} 失败：{}", task.taskId, error.getMessage());
             update(task, state(task.status, "failed", "下载失败：" + shortError(error),
-                    processed, downloaded, skipped, failed, books.size(), currentBook, currentChapter, failures));
+                    currentPage, currentPageProcessed, currentPageTotal, processed, downloaded, skipped,
+                    failed, books.size(), currentBook, currentChapter, failures));
         } finally {
             activeOutputs.remove(Path.of(task.outputDir));
         }
     }
 
-    private static TaskStatus state(TaskStatus base, String state, String error, int processed,
+    private static TaskStatus state(TaskStatus base, String state, String error, int currentPage,
+                                    int currentPageProcessed, int currentPageTotal, int processed,
                                     int downloaded, int skipped, int failed, int discoveredBooks,
                                     String currentBook, String currentChapter, List<String> failures) {
         return new TaskStatus(base.taskId(), base.categoryId(), base.categoryName(), state,
+                base.totalPages(), currentPage, currentPageProcessed, currentPageTotal,
                 base.totalChapters(), processed, downloaded, skipped, failed, discoveredBooks,
                 currentBook, currentChapter, base.outputDir(), error, base.startedAt(),
                 ("running".equals(state) || "cancelling".equals(state)) ? null : now(),
