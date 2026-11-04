@@ -114,6 +114,12 @@ const routes = [
                 name: 'push',
                 meta: { title: '推送设置', tab: 'mine', chat: true },
                 component: createRouteLoader(() => import('@/views/push/index.vue'))
+            },
+            {
+                path: 'novel-4hu',
+                name: 'novel-4hu',
+                meta: { title: '4hu 小说下载', tab: 'mine', chat: true },
+                component: createRouteLoader(() => import('@/views/novel4hu/index.vue'))
             }
         ]
     },
