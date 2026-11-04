@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
@@ -33,7 +34,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.Cast
-import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.*
@@ -45,6 +45,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -64,7 +65,6 @@ import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.HuluwaApplication
 import com.huluwa.android.VideoCastViewModel
 import com.huluwa.android.data.*
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -105,15 +105,13 @@ import java.util.concurrent.atomic.AtomicReference
     val castVm: VideoCastViewModel = viewModel()
     val cast by castVm.state.collectAsStateWithLifecycle()
     var detectedVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
-    var nativeVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
+    var videoTouch by remember(initialUrl) { mutableStateOf<BrowserVideoTouch?>(null) }
+    var videoFullscreenRequest by remember(initialUrl) { mutableIntStateOf(0) }
     var castVideo by remember(initialUrl) { mutableStateOf<BrowserVideo?>(null) }
     var showCast by remember { mutableStateOf(false) }
-    var resolving by remember { mutableStateOf(false) }
-    var resolutionJob by remember { mutableStateOf<Job?>(null) }
     var pageTitle by remember(initialUrl) { mutableStateOf("") }
     val currentPage = remember(initialUrl) { AtomicReference(initialUrl) }
     val pageSequence = remember(initialUrl) { AtomicLong(0) }
-    val nativeActive by rememberUpdatedState(nativeVideo != null)
     val castActive by rememberUpdatedState(cast.selected != null && cast.playing)
     val bookmarkUrl = remember(loadedUrl) { runCatching { BrowserAddress.normalize(loadedUrl) }.getOrNull() }
     val bookmarked = bookmarks.any { it.url == bookmarkUrl }
@@ -183,12 +181,22 @@ import java.util.concurrent.atomic.AtomicReference
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-            // 返回退出全屏后，跨域播放器等用户再次操作网页时才恢复加载。
+            var touchDownX = 0f
+            var touchDownY = 0f
+            // 原播放区域的点击也能接管跨域 iframe；拖动网页不当作播放请求。
             setOnTouchListener { _, event ->
-                if (event.actionMasked == MotionEvent.ACTION_DOWN && restoreFramesOnTouch &&
-                    !backPending && !nativeActive && !castActive) {
-                    restoreFramesOnTouch = false
-                    evaluateJavascript(MovieWebVideo.resumeScript, null)
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    touchDownX = event.x
+                    touchDownY = event.y
+                    if (restoreFramesOnTouch && !backPending && !castActive) {
+                        restoreFramesOnTouch = false
+                        evaluateJavascript(MovieWebVideo.resumeScript, null)
+                    }
+                } else if (event.actionMasked == MotionEvent.ACTION_UP &&
+                    event.eventTime - event.downTime < 500 &&
+                    kotlin.math.abs(event.x - touchDownX) < 12 * resources.displayMetrics.density &&
+                    kotlin.math.abs(event.y - touchDownY) < 12 * resources.displayMetrics.density) {
+                    videoTouch = BrowserVideoTouch(event.x, event.y, SystemClock.uptimeMillis())
                 }
                 false
             }
@@ -210,9 +218,9 @@ import java.util.concurrent.atomic.AtomicReference
                     pageSequence.incrementAndGet()
                     backPending = false
                     restoreFramesOnTouch = false
-                    resolutionJob?.cancel()
-                    resolving = false
                     detectedVideo = null
+                    videoTouch = null
+                    videoFullscreenRequest = 0
                     if (!url.isNullOrBlank() && url != "about:blank") {
                         loadedUrl = url
                         currentPage.set(url)
@@ -239,9 +247,9 @@ import java.util.concurrent.atomic.AtomicReference
                     failure = null
                     backPending = false
                     restoreFramesOnTouch = false
-                    resolutionJob?.cancel()
-                    resolving = false
                     detectedVideo = null
+                    videoTouch = null
+                    videoFullscreenRequest = 0
                     view.post { capturePage(view, actual) }
                 }
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -273,10 +281,11 @@ import java.util.concurrent.atomic.AtomicReference
                 override fun onReceivedTitle(view: WebView, title: String?) {
                     if (!title.isNullOrBlank()) pageTitle = title
                 }
-                // 网页视频点全屏时由宿主接管：把视频视图铺满窗口并切到横屏沉浸式。
+                // 网页请求全屏时先保留原生网页能力，受支持的正片随后切换到共用播放实例。
                 // 不覆写这两个回调时，WebView 会直接告诉网页「不支持全屏」，点击就毫无反应。
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) {
                     fullscreenHost.show(view, callback)
+                    if (MovieWebVideo.isPlaybackPage(currentPage.get())) videoFullscreenRequest++
                 }
                 override fun onHideCustomView() {
                     fullscreenHost.hide(callPage = false)
@@ -297,9 +306,9 @@ import java.util.concurrent.atomic.AtomicReference
         }
         backPending = true
         val sequence = pageSequence.incrementAndGet()
-        resolutionJob?.cancel()
-        resolving = false
         detectedVideo = null
+        videoTouch = null
+        videoFullscreenRequest = 0
         webView.stopLoading()
         webView.evaluateJavascript(MovieWebVideo.stopScript) {
             // 清理期间可能已跳转或关闭，不能再操作旧页面或已销毁的 WebView。
@@ -329,14 +338,13 @@ import java.util.concurrent.atomic.AtomicReference
     DisposableEffect(lifecycle, webView) {
         val observer = LifecycleEventObserver { _, event -> when (event) {
             Lifecycle.Event.ON_STOP -> webView.onPause()
-            Lifecycle.Event.ON_START -> if (!nativeActive && !castActive) webView.onResume()
+            Lifecycle.Event.ON_START -> webView.onResume()
             else -> Unit
         } }
         lifecycle.lifecycle.addObserver(observer)
         onDispose {
             lifecycle.lifecycle.removeObserver(observer)
             pageSequence.incrementAndGet()
-            resolutionJob?.cancel()
             castVm.cancelScan()
             // 全屏中直接退出浏览页时也要先收起全屏视图，否则窗口会停留在横屏。
             fullscreenHost.hide(callPage = false)
@@ -363,49 +371,8 @@ import java.util.concurrent.atomic.AtomicReference
         webView.loadUrl(url)
     }
     fun navigate() = navigateTo(address)
-    fun pauseWebVideo() {
-        webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
-        webView.onPause()
-    }
-    fun openVideo(forCast: Boolean) {
-        if (resolving) return
-        val page = currentPage.get()
-        val sequence = pageSequence.get()
-        resolving = true
-        failure = null
-        fun resolved(media: BrowserVideo) {
-            if (sequence != pageSequence.get()) return
-            resolving = false
-            if (forCast) {
-                castVideo = media
-                showCast = true
-                castVm.scan()
-            } else {
-                pauseWebVideo()
-                nativeVideo = media
-            }
-        }
-        fun failed(message: String) {
-            if (sequence == pageSequence.get()) { resolving = false; failure = message }
-        }
-        // 点击时重读进度；blob 视频通过请求捕获或本站分集解析接口取得真实地址。
-        webView.evaluateJavascript(MovieWebVideo.captureScript) { result ->
-            if (sequence == pageSequence.get()) {
-                captureDom(result, page, webView.settings.userAgentString)
-                if (MovieWebVideo.canResolve(page)) {
-                    resolutionJob = vm.resolveBrowserVideo(page, onResolved = { url ->
-                        resolved(BrowserVideo(url, pageTitle.ifBlank { "电影港在线视频" }, page, webView.settings.userAgentString,
-                            CookieManager.getInstance().getCookie(url).orEmpty(), detectedVideo?.positionMs ?: 0))
-                    }, onFailure = ::failed)
-                } else detectedVideo?.let(::resolved) ?: failed("请先在网页中播放视频")
-            }
-        }
-    }
-    LaunchedEffect(cast.selected, nativeVideo) {
-        if (cast.selected == null && nativeVideo == null) {
-            webView.evaluateJavascript(MovieWebVideo.resumeScript, null)
-            webView.onResume()
-        }
+    LaunchedEffect(cast.selected) {
+        if (cast.selected == null) webView.onResume()
     }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
@@ -463,20 +430,6 @@ import java.util.concurrent.atomic.AtomicReference
                             }
                         }
                     }
-                    if (detectedVideo != null || MovieWebVideo.canResolve(loadedUrl)) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton({ openVideo(false) }, enabled = !resolving) {
-                                Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp)); Text("横屏播放")
-                            }
-                            TextButton({ openVideo(true) }, enabled = !resolving) {
-                                Icon(Icons.Outlined.Cast, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp)); Text("投屏")
-                            }
-                            if (resolving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        }
-                    }
                     cast.selected?.let { device ->
                         TextButton({ castVideo = cast.media; showCast = true; castVm.scan() }, Modifier.fillMaxWidth()) {
                             Icon(Icons.Outlined.Cast, null, Modifier.size(16.dp))
@@ -491,8 +444,20 @@ import java.util.concurrent.atomic.AtomicReference
             }
         },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize().navigationBarsPadding().imePadding()) {
+        Box(Modifier.padding(padding).fillMaxSize().navigationBarsPadding().imePadding().clipToBounds()) {
             AndroidView({ webView }, Modifier.fillMaxSize())
+            BrowserWebVideoOverlay(
+                vm = vm,
+                webView = webView,
+                page = loadedUrl,
+                pageToken = pageSequence.get(),
+                detectedVideo = detectedVideo,
+                touch = videoTouch,
+                fullscreenRequest = videoFullscreenRequest,
+                castActive = cast.selected != null && cast.playing,
+                onTakeover = { fullscreenHost.hide(callPage = true) },
+                onCast = { media -> castVideo = media; showCast = true; castVm.scan() },
+            )
             if (loadedUrl.isBlank()) {
                 Column(
                     Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
@@ -527,15 +492,8 @@ import java.util.concurrent.atomic.AtomicReference
     if (showBookmarks) BrowserBookmarksDialog(bookmarks, savingBookmark, bookmarkError,
         onOpen = { bookmark -> showBookmarks = false; navigateTo(bookmark.url) },
         onRemove = { changeBookmark(it) }, dismiss = { showBookmarks = false })
-    nativeVideo?.let { media ->
-        BrowserVideoPlayer(media, onCast = { castVideo = media; showCast = true; castVm.scan() }) {
-            nativeVideo = null
-            if (cast.selected == null) webView.onResume()
-        }
-    }
     if (showCast) VideoCastDialog(castVideo, cast, castVm, onStarted = {
-        pauseWebVideo()
-        nativeVideo = null
+        webView.evaluateJavascript(MovieWebVideo.pauseScript, null)
     }, dismiss = { showCast = false; castVm.cancelScan() })
 }
 
@@ -559,7 +517,7 @@ private fun Context.findActivity(): Activity? {
  *
  * WebView 本身不具备全屏能力：网页调用 video.requestFullscreen() 时，会把播放器视图通过
  * WebChromeClient.onShowCustomView 交给宿主，由宿主铺满窗口。这里把播放器视图挂到 Activity
- * 的 android.R.id.content 上盖住 Compose 界面，并切换到横屏沉浸式；退出时移除并恢复系统栏。
+ * 的 android.R.id.content 上盖住 Compose 界面，支持横竖屏沉浸播放；退出时移除并恢复系统栏。
  */
 private class WebFullscreenHost(private val activity: Activity?) {
     private var container: FrameLayout? = null
@@ -610,7 +568,7 @@ private class WebFullscreenHost(private val activity: Activity?) {
     }
 
     private fun enterImmersive(target: Activity, view: View) {
-        target.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        target.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
         val controller = WindowCompat.getInsetsController(target.window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())

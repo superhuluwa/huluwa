@@ -1,5 +1,6 @@
 package com.huluwa.android.data
 
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** 网页识别出的播放资源；请求头仅用于当前原生播放，不写入浏览记录。 */
@@ -23,6 +24,8 @@ object MovieWebVideo {
             mfcnVideoPath.matches(uri.encodedPath)
     }
     fun isSupportedPage(url: String): Boolean = isMoviePage(url) || isMfcnPage(url)
+    fun isPlaybackPage(url: String): Boolean = isMfcnPage(url) ||
+        (isMoviePage(url) && url.toHttpUrlOrNull()?.encodedPath == "/e/DownSys/play/")
     fun isM3u8(url: String): Boolean = url.toHttpUrlOrNull()?.encodedPath?.endsWith(".m3u8", ignoreCase = true) == true
     fun canResolve(url: String): Boolean {
         val uri = url.toHttpUrlOrNull() ?: return false
@@ -115,12 +118,94 @@ object MovieWebVideo {
             if (source.indexOf('http') !== 0 && window.flashvars) source = window.flashvars.a || '';
             if (source.indexOf('http') !== 0 && Array.isArray(window.video)) source = (window.video[0] || '').split('->')[0];
           }
-          return JSON.stringify({url: source, title: document.title, positionMs: active ? Math.round(active.currentTime * 1000) : null});
+          var target = active;
+          if (!target || target.getBoundingClientRect().height < 40) {
+            target = mfcnPage ? document.querySelector('.play-content') :
+              document.querySelector('.playering iframe, .playering #a1, .playering .video, #a1');
+          }
+          var playback = window.__huluwaVideoPlayback;
+          if (!playback) {
+            playback = window.__huluwaVideoPlayback = {page: location.href, requested: false, owned: false};
+            document.addEventListener('play', function(event) {
+              var state = window.__huluwaVideoPlayback;
+              if (state.owned && event.target === state.ownedVideo) {
+                event.target.pause();
+              } else if (event.target === state.video || (state.target && state.target.contains(event.target))) {
+                state.requested = true;
+              }
+            }, true);
+            document.addEventListener('pause', function(event) {
+              var state = window.__huluwaVideoPlayback;
+              if (!state.owned && event.target === state.video) state.requested = false;
+            }, true);
+            document.addEventListener('click', function(event) {
+              var state = window.__huluwaVideoPlayback;
+              if (!state.owned && event.target.closest && event.target.closest('.play_but')) state.requested = true;
+            }, true);
+          }
+          if (playback.page !== location.href) {
+            playback.page = location.href;
+            playback.requested = false;
+            playback.owned = false;
+            playback.ownedVideo = null;
+            playback.ownedHls = null;
+          }
+          playback.video = active;
+          playback.target = target;
+          playback.hls = mfcnPage && active && player ? player.hls : null;
+          if (playback.owned && active === playback.ownedVideo && active && !active.paused) active.pause();
+          var rect = target && target.getBoundingClientRect();
+          var viewport = window.visualViewport;
+          var bounds = rect && rect.width > 0 && rect.height > 0 ? {
+            left: rect.left - (viewport ? viewport.offsetLeft : 0),
+            top: rect.top - (viewport ? viewport.offsetTop : 0),
+            width: rect.width, height: rect.height,
+            viewportWidth: viewport ? viewport.width : window.innerWidth
+          } : null;
+          return JSON.stringify({url: source, title: document.title, pageUrl: location.href,
+            requested: !playback.owned && (playback.requested || !!(active && !active.paused && !active.ended)),
+            positionMs: active ? Math.round(active.currentTime * 1000) : null, bounds: bounds});
         })();
     """.trimIndent()
 
     val pauseScript = pausePageScript(release = false)
     val stopScript = pausePageScript(release = true)
+
+    // 先标记归属再暂停网页，后续网页自动 play 不会与原生播放器同时发声。
+    fun takeoverScript(page: String) = """
+        (function() {
+          if (location.href !== ${JsonPrimitive(page)}) return false;
+          var state = window.__huluwaVideoPlayback;
+          if (!state) return false;
+          state.owned = true;
+          state.ownedVideo = state.video;
+          state.ownedHls = state.hls;
+          state.requested = false;
+          try { if (state.ownedHls) state.ownedHls.stopLoad(); } catch (ignored) {}
+          $pauseScript
+          return true;
+        })();
+    """.trimIndent()
+
+    fun releaseTakeoverScript(positionMs: Long) = """
+        (function() {
+          var state = window.__huluwaVideoPlayback;
+          if (!state) return;
+          state.owned = false;
+          state.requested = false;
+          var video = state.ownedVideo;
+          state.ownedVideo = null;
+          try { if (state.ownedHls) state.ownedHls.startLoad(); } catch (ignored) {}
+          state.ownedHls = null;
+          if (video && video.isConnected) {
+            try { video.currentTime = ${positionMs.coerceAtLeast(0)} / 1000; } catch (ignored) {}
+            try {
+              var attempt = video.play();
+              if (attempt && attempt.catch) attempt.catch(function() {});
+            } catch (ignored) {}
+          }
+        })();
+    """.trimIndent()
 
     // 回退可能只切换网页路由，不会销毁文档；离开前主动释放媒体源。
     // 跨域 frame 无法访问媒体元素，用 replace 卸载，避免额外增加回退记录。
