@@ -1,12 +1,12 @@
 <template>
-    <ManagementShell kind="novel4hu" title="4hu 小说下载" subtitle="选择分类，统计章节并批量保存正文"
+    <ManagementShell kind="novel4hu" title="4hu 小说下载" subtitle="一键下载分类全部小说，实时查看进度"
         :loading="loadingCategory" :busy="Boolean(task && task.running)" @refresh="loadCategory">
         <div class="mgmt-content novel-page">
             <section class="hero">
                 <div>
                     <span class="eyebrow">4HU · NOVEL ARCHIVE</span>
-                    <h1>小说章节下载</h1>
-                    <p>选择分类后查询总章数，正文按「书名 / 章节.txt」保存；已存在的非空文件自动跳过。</p>
+                    <h1>一键下载全部小说</h1>
+                    <p>选择分类即可下载其下全部小说。正文按「书名 / 章节.txt」保存，已有非空文件自动跳过，可随时续传。</p>
                 </div>
                 <span class="hero-mark"><i class="fa-solid fa-book-open"></i></span>
             </section>
@@ -60,15 +60,26 @@
             <section v-if="task" class="task-panel panel">
                 <div class="panel-head">
                     <div>
-                        <strong>下载任务</strong>
-                        <span>{{ taskStateLabel }} · {{ task.downloadedChapters }} 下载 / {{ task.skippedChapters }} 跳过 / {{ task.failedChapters }} 失败</span>
+                        <strong>当前下载进度</strong>
+                        <span>{{ taskStateLabel }} · 已发现 {{ task.discoveredBooks || 0 }} 本小说 · {{ task.downloadedChapters }} 下载 / {{ task.skippedChapters }} 跳过 / {{ task.failedChapters }} 失败</span>
                     </div>
                     <span class="state-pill" :class="task.state">{{ taskStateLabel }}</span>
                 </div>
+                <div class="current-book" v-if="task.currentBook">
+                    <span class="current-label">{{ task.running ? '正在处理' : '最后处理' }}</span>
+                    <div class="current-main">
+                        <strong>{{ task.currentBook }}</strong>
+                        <span>{{ task.currentChapter || '等待章节信息' }}</span>
+                    </div>
+                </div>
                 <div class="progress-track"><span :style="{ width: progressWidth }"></span></div>
                 <div class="progress-meta">
-                    <strong>{{ task.processedChapters }} / {{ task.totalChapters }}</strong>
-                    <span>{{ progressPercent }}%</span>
+                    <strong>{{ Number(task.processedChapters || 0).toLocaleString() }} / {{ Number(task.totalChapters || 0).toLocaleString() }} 章</strong>
+                    <span class="percent-badge">{{ progressPercent }}%</span>
+                </div>
+                <div class="progress-detail">
+                    <span>剩余 {{ Math.max(0, Number(task.totalChapters || 0) - Number(task.processedChapters || 0)).toLocaleString() }} 章</span>
+                    <span>已发现 {{ task.discoveredBooks || 0 }} 本小说</span>
                 </div>
                 <p v-if="task.error" class="notice danger">{{ task.error }}</p>
                 <ul v-if="task.recentFailures?.length" class="failures">
@@ -88,9 +99,9 @@
                 <n-button type="primary" size="large" :loading="starting" :disabled="!category || Boolean(task && task.running)"
                     @click="startDownload">
                     <template #icon><i class="fa-solid fa-download"></i></template>
-                    {{ task && task.running ? '正在下载…' : '下载该分类全部章节' }}
+                    {{ task && task.running ? '正在一键下载…' : '一键下载全部小说' }}
                 </n-button>
-                <span class="action-note">已保存的章节会跳过，可放心重复点击补齐。</span>
+                <span class="action-note">下载全部小说并保留分类/书名目录；已保存章节会跳过，可放心重复点击补齐。</span>
             </div>
         </div>
     </ManagementShell>
@@ -478,6 +489,56 @@ export default {
     flex: none;
 }
 
+.current-book {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 14px 18px 0;
+    padding: 11px 13px;
+    border-radius: 14px;
+    background: var(--soft-green);
+}
+
+.current-label {
+    flex: none;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--pine);
+    color: #fff;
+    font-size: 10px;
+}
+
+.current-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.current-main strong,
+.current-main span {
+    overflow-wrap: anywhere;
+}
+
+.current-main strong {
+    color: var(--ink);
+    font-size: 13px;
+}
+
+.current-main span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.progress-detail {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 18px 0;
+    color: var(--muted);
+    font-size: 10px;
+}
+
 .progress-track {
     height: 8px;
     margin: 18px 18px 0;
@@ -504,6 +565,12 @@ export default {
 
 .progress-meta strong {
     color: var(--ink);
+}
+
+.percent-badge {
+    color: var(--pine);
+    font-size: 15px;
+    font-weight: 700;
 }
 
 .notice,

@@ -59,9 +59,10 @@ public class Huluwa4NovelController {
 
     public record DownloadRequest(String outputDir) { }
 
-    @PostMapping("/categories/{categoryId}/download")
-    public ApiResult<Huluwa4NovelService.TaskStatus> download(@PathVariable int categoryId,
-                                                               @RequestBody(required = false) DownloadRequest request) {
+    /** 一键下载该分类下的全部小说。保留 /download 兼容旧入口。 */
+    @PostMapping({"/categories/{categoryId}/download-all", "/categories/{categoryId}/download"})
+    public ApiResult<Huluwa4NovelService.TaskStatus> downloadAll(@PathVariable int categoryId,
+                                                                  @RequestBody(required = false) DownloadRequest request) {
         return ApiResult.ok(novels.startDownload(categoryId, request == null ? null : request.outputDir()));
     }
 

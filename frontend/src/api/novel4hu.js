@@ -8,9 +8,9 @@ export const getNovel4huCategory = categoryId => http.get(`/4hu/novels/categorie
 export const getNovel4huChapters = (categoryId, page = 1) =>
     http.get(`/4hu/novels/categories/${categoryId}/chapters`, { page }, { timeout: 60000 })
 
-/** 启动批量正文下载；已存在非空 TXT 的章节由后端跳过 */
+/** 一键下载分类下全部小说；已存在非空 TXT 的章节由后端跳过 */
 export const startNovel4huDownload = (categoryId, outputDir = '') =>
-    http.post(`/4hu/novels/categories/${categoryId}/download`, { outputDir }, { timeout: 60000 })
+    http.post(`/4hu/novels/categories/${categoryId}/download-all`, { outputDir }, { timeout: 60000 })
 
 export const getNovel4huTask = taskId => http.get(`/4hu/novels/tasks/${taskId}`)
 
