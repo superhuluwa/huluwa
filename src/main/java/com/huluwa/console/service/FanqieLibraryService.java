@@ -208,7 +208,9 @@ public class FanqieLibraryService {
             Path file = bookDir(bookId).resolve(entry.itemId() + ".txt");
             String content;
             try {
-                content = Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : "";
+                // 旧缓存可能还带有数字实体，读取时还原即可，无需重新下载章节。
+                content = Files.isRegularFile(file)
+                        ? FanqieClient.decodeHtmlEntities(Files.readString(file, StandardCharsets.UTF_8)) : "";
                 if (content.isBlank()) {
                     content = remote(() -> client.chapter(entry.itemId())).text();
                     if (content.isBlank()) throw new BusinessException(502, "当前章节暂时无法获取，请重试");
@@ -300,7 +302,7 @@ public class FanqieLibraryService {
         Path file = bookDir(bookId).resolve(itemId + ".txt");
         try {
             if (!Files.isRegularFile(file) || Files.size(file) == 0) return null;
-            return Files.readString(file, StandardCharsets.UTF_8);
+            return FanqieClient.decodeHtmlEntities(Files.readString(file, StandardCharsets.UTF_8));
         } catch (IOException error) {
             log.warn("读取番茄小说 {} 章节 {} 缓存失败：{}", bookId, itemId, error.getMessage());
             return null;
