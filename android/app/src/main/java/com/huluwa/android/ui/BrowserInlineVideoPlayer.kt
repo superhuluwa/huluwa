@@ -47,6 +47,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import com.huluwa.android.R
 import com.huluwa.android.data.BrowserVideo
@@ -123,6 +124,7 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
             PlayerView.switchTargetView(player, activeView[0], view)
             activeView[0] = view
             view.showController()
+            view.showProgressScrubber()
             controlsVisible = true
         }
         view.setFullscreenButtonState(fullscreen)
@@ -144,8 +146,17 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
                         setShowPreviousButton(false)
                         setFullscreenButtonClickListener { fullscreen = it }
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                            if (visibility == View.VISIBLE) showProgressScrubber()
                             if (activeView[0] === this) controlsVisible = visibility == View.VISIBLE
                         })
+                        var compactLayout = false
+                        addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                            val compact = findViewById<View>(androidx.media3.ui.R.id.exo_minimal_controls)?.visibility == View.VISIBLE
+                            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop || compact != compactLayout) {
+                                compactLayout = compact
+                                showProgressScrubber()
+                            }
+                        }
                         views[slot] = this
                         if (inFullscreen || !fullscreen) attach(this)
                     }
@@ -208,6 +219,26 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
     }
 }
 
+
+
+/** Media3 的紧凑布局默认隐藏圆点；控件展开时恢复，并给全屏按钮留出拖动空间。 */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun PlayerView.showProgressScrubber() {
+    // 在控件自己的尺寸适配完成后执行，避免紧凑模式再次把圆点隐藏。
+    post {
+        if (!isAttachedToWindow || !isControllerFullyVisible) return@post
+        val timeBar = findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress) ?: return@post
+        val compactControls = findViewById<View>(androidx.media3.ui.R.id.exo_minimal_controls)
+        val endPadding = if (compactControls?.visibility == View.VISIBLE) {
+            maxOf(compactControls.width + (8 * resources.displayMetrics.density).toInt(),
+                (48 * resources.displayMetrics.density).toInt())
+        } else 0
+        timeBar.setPaddingRelative(0, 0, endPadding, 0)
+        timeBar.showScrubber()
+        // 恢复圆点后重新计算两端留白，拖到片头和片尾时也能完整显示圆点。
+        timeBar.requestLayout()
+    }
+}
 
 /** 只接收 PlayerView 自身的画面触摸，进度条与控制按钮继续消费自己的手势。 */
 @SuppressLint("ClickableViewAccessibility")

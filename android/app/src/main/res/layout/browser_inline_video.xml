@@ -7,4 +7,13 @@
     app:surface_type="texture_view"
     app:resize_mode="fit"
     app:show_buffering="when_playing"
+    app:bar_height="6dp"
+    app:played_color="#FFFFD54F"
+    app:buffered_color="#B3FFFFFF"
+    app:unplayed_color="#40FFFFFF"
+    app:scrubber_color="#FFFFD54F"
+    app:scrubber_enabled_size="20dp"
+    app:scrubber_dragged_size="28dp"
+    app:scrubber_disabled_size="0dp"
+    app:touch_target_height="48dp"
     app:use_controller="true" />
