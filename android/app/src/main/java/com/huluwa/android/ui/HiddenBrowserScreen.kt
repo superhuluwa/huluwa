@@ -148,14 +148,26 @@ import java.util.concurrent.atomic.AtomicReference
 
     fun capture(value: String, page: String, userAgent: String, positionMs: Long = 0, referer: String = page) {
         if (!MovieWebVideo.isM3u8(value)) return
-        detectedVideo = BrowserVideo(value, pageTitle.ifBlank { "电影港在线视频" }, referer, userAgent,
+        val title = pageTitle.ifBlank { if (MovieWebVideo.isMoviePage(page)) "电影港在线视频" else "网页视频" }
+        detectedVideo = BrowserVideo(value, title, referer, userAgent,
             CookieManager.getInstance().getCookie(value).orEmpty(), positionMs.coerceAtLeast(0))
     }
-    fun captureDom(result: String?, page: String, userAgent: String) {
+    fun captureDom(result: String?, page: String, userAgent: String, referer: String = page, requestedUrl: String? = null) {
         runCatching {
             val encoded = ApiJson.parseToJsonElement(result.orEmpty()) as? JsonPrimitive ?: return@runCatching
             val raw = ApiJson.parseToJsonElement(encoded.content).asObject()
-            capture(raw.text("url"), page, userAgent, raw.number("positionMs")?.toLong() ?: 0)
+            val source = raw.text("url")
+            val positionMs = raw.number("positionMs")?.toLong()?.coerceAtLeast(0)
+            val previous = detectedVideo
+            if (MovieWebVideo.isM3u8(source)) {
+                // 只有命中当前资源的请求头才能复用，避免把广告请求的 Referer 带给正片。
+                val sourceReferer = if (requestedUrl == null || requestedUrl == source) referer else page
+                capture(source, page, userAgent, positionMs ?: 0,
+                    previous?.takeIf { it.url == source }?.referer ?: sourceReferer)
+            } else if (previous != null && positionMs != null && !MovieWebVideo.isMfcnPage(page)) {
+                // 电影港的 blob 视频仍沿用请求捕获的地址，只补充可读取的网页进度。
+                detectedVideo = previous.copy(positionMs = positionMs)
+            }
         }
     }
     // 网页视频全屏：WebView 不自带全屏能力，需由宿主把网页提供的视频视图挂到窗口上。
@@ -181,6 +193,13 @@ import java.util.concurrent.atomic.AtomicReference
                 false
             }
             webViewClient = object : WebViewClient() {
+                private fun capturePage(view: WebView, page: String, referer: String = page, requestedUrl: String? = null) {
+                    if (!MovieWebVideo.isSupportedPage(page) || page != currentPage.get()) return
+                    val sequence = pageSequence.get()
+                    view.evaluateJavascript(MovieWebVideo.captureScript) { result ->
+                        if (sequence == pageSequence.get()) captureDom(result, page, view.settings.userAgentString, referer, requestedUrl)
+                    }
+                }
                 /** 只允许在浏览器内打开网页，禁止网页通过自定义 scheme 唤起外部应用。 */
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     request.url.scheme?.lowercase() !in setOf("http", "https")
@@ -190,6 +209,7 @@ import java.util.concurrent.atomic.AtomicReference
                     pageTitle = ""
                     pageSequence.incrementAndGet()
                     backPending = false
+                    restoreFramesOnTouch = false
                     resolutionJob?.cancel()
                     resolving = false
                     detectedVideo = null
@@ -201,26 +221,41 @@ import java.util.concurrent.atomic.AtomicReference
                 override fun onPageFinished(view: WebView, url: String?) {
                     progress = 0
                     val actual = url.orEmpty()
-                    if (actual.isNotBlank() && actual != "about:blank") {
+                    if (actual.isNotBlank() && actual != "about:blank" && actual == currentPage.get()) {
                         loadedUrl = actual
                         if (!editing) address = actual
-                        if (MovieWebVideo.isMoviePage(actual)) {
-                            val sequence = pageSequence.get()
-                            view.evaluateJavascript(MovieWebVideo.captureScript) { result ->
-                                if (sequence == pageSequence.get()) captureDom(result, actual, view.settings.userAgentString)
-                            }
-                        }
+                        capturePage(view, actual)
                     }
+                }
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                    val actual = url.orEmpty()
+                    if (actual.isBlank() || actual == "about:blank" || actual == currentPage.get()) return
+                    // Vue 的站内切换不会重新加载文档，仍需清掉上一条视频及其异步回调。
+                    pageSequence.incrementAndGet()
+                    currentPage.set(actual)
+                    loadedUrl = actual
+                    if (!editing) address = actual
+                    pageTitle = view.title.orEmpty()
+                    failure = null
+                    backPending = false
+                    restoreFramesOnTouch = false
+                    resolutionJob?.cancel()
+                    resolving = false
+                    detectedVideo = null
+                    view.post { capturePage(view, actual) }
                 }
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val page = currentPage.get()
                     val sequence = pageSequence.get()
                     val url = request.url.toString()
-                    if (MovieWebVideo.isMoviePage(page) && MovieWebVideo.isM3u8(url)) {
+                    if (MovieWebVideo.isSupportedPage(page) && MovieWebVideo.isM3u8(url)) {
                         val referer = request.requestHeaders.entries.firstOrNull { it.key.equals("Referer", true) }?.value ?: page
                         view.post {
                             if (sequence == pageSequence.get() && detectedVideo == null) {
-                                capture(url, page, view.settings.userAgentString, referer = referer)
+                                if (MovieWebVideo.isMfcnPage(page)) {
+                                    // 该站同页含广告，并且旧 HLS 请求可能尚未结束，以当前组件的配置为准。
+                                    capturePage(view, page, referer, url)
+                                } else capture(url, page, view.settings.userAgentString, referer = referer)
                             }
                         }
                     }
@@ -362,7 +397,7 @@ import java.util.concurrent.atomic.AtomicReference
                         resolved(BrowserVideo(url, pageTitle.ifBlank { "电影港在线视频" }, page, webView.settings.userAgentString,
                             CookieManager.getInstance().getCookie(url).orEmpty(), detectedVideo?.positionMs ?: 0))
                     }, onFailure = ::failed)
-                } else detectedVideo?.let(::resolved) ?: failed("请先在网页中选择并播放一个分集")
+                } else detectedVideo?.let(::resolved) ?: failed("请先在网页中播放视频")
             }
         }
     }
