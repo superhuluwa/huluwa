@@ -517,7 +517,7 @@ private fun Context.findActivity(): Activity? {
  *
  * WebView 本身不具备全屏能力：网页调用 video.requestFullscreen() 时，会把播放器视图通过
  * WebChromeClient.onShowCustomView 交给宿主，由宿主铺满窗口。这里把播放器视图挂到 Activity
- * 的 android.R.id.content 上盖住 Compose 界面，支持横竖屏沉浸播放；退出时移除并恢复系统栏。
+ * 的 android.R.id.content 上盖住 Compose 界面并进入横屏沉浸播放；退出时恢复原方向和系统栏。
  */
 private class WebFullscreenHost(private val activity: Activity?) {
     private var container: FrameLayout? = null
@@ -568,7 +568,7 @@ private class WebFullscreenHost(private val activity: Activity?) {
     }
 
     private fun enterImmersive(target: Activity, view: View) {
-        target.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+        target.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         val controller = WindowCompat.getInsetsController(target.window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())

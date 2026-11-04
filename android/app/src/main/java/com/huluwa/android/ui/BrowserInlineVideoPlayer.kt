@@ -225,7 +225,8 @@ private const val VIDEO_SWIPE_SEEK_MS = 5_000L
             val orientation = activity?.requestedOrientation
             window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            // 显式进入横屏，不受系统竖屏锁定影响；退出时恢复进入全屏前的方向设置。
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             window?.let {
                 WindowCompat.getInsetsController(it, view).apply {
                     systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
