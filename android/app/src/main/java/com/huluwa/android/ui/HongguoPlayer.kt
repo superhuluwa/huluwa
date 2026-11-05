@@ -284,6 +284,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     LaunchedEffect(player, request) {
         while (true) {
             if (session.isActive(request)) {
+                session.preloadWhenBuffered()
                 position = player.currentPosition.coerceAtLeast(0L)
                 duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
                 hongguoPosition(player, report, false)

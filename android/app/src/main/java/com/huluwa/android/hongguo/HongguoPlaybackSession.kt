@@ -48,14 +48,22 @@ internal class HongguoPlaybackSession(context: Context) {
         setHandleAudioBecomingNoisy(true)
         addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                canPreload = playbackState == Player.STATE_READY
-                // 优先保证当前集起播，准备好后才让相邻集下载媒体样本。
-                if (canPreload) preloadManager.invalidate()
+                if (playbackState != Player.STATE_READY) canPreload = false
+                preloadWhenBuffered()
             }
         })
     }
 
     fun isActive(request: Long): Boolean = currentRequest == request
+
+    /** 当前集先积累三秒缓冲，避免相邻集预加载与当前集起播争抢带宽。 */
+    fun preloadWhenBuffered() {
+        if (!canPreload && currentRequest != null && player.playbackState == Player.STATE_READY &&
+            (player.bufferedPosition - player.currentPosition >= 3_000L || player.bufferedPercentage == 100)) {
+            canPreload = true
+            preloadManager.invalidate()
+        }
+    }
 
     fun update(
         episodeId: String,
