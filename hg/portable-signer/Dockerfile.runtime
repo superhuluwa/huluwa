@@ -1,0 +1,12 @@
+# Packaging already-built static Go executables requires no toolchain download.
+FROM alpine:3.20
+RUN mkdir -p /config /usr/share/licenses/hongguo-signer && chown 65532:65532 /config
+COPY bin/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY bin/hg-signer bin/hg-register /usr/local/bin/
+COPY LICENSE.openhongguo LICENSE.Go NOTICE.md /usr/share/licenses/hongguo-signer/
+USER 65532:65532
+VOLUME ["/config"]
+EXPOSE 8901
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1:8901/health || exit 1
+ENTRYPOINT ["/usr/local/bin/hg-signer"]
+CMD ["--listen", "0.0.0.0:8901", "--profile", "/config/anonymous.json"]

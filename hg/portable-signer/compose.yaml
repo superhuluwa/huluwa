@@ -1,0 +1,28 @@
+services:
+  signer:
+    image: huluwa-hongguo-signer:portable-42b73f2-r2
+    build:
+      context: .
+      additional_contexts:
+        openhongguo: ${OPENHONGGUO_SOURCE:-../../../openhongguo}
+    container_name: hongguo-signer-portable
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${HONGGUO_SIGN_PORT:-8901}:8901"
+    volumes:
+      - device-profile:/config
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  device-profile:
+    name: ${HONGGUO_PROFILE_VOLUME:-hongguo-portable-device-profile}

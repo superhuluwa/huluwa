@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/beilunyang/openhongguo",
+  "commit": "42b73f201309423f012d483bfc0ce579dcc0937c",
+  "files": {
+    "internal/protocol/sign/aes.go": "daa72afe53881f3b3f8e97f19b6e5d3a94306af1f070ffbcadb579b5a860fe16",
+    "internal/protocol/sign/const.go": "dc6851c7b9eb71cfee63f93a949a40b45e9fa90ef9d9903a65379954adff0e57",
+    "internal/protocol/sign/f13.go": "8a5b6f0bad9cb2151abcf3a26da33307801ca22191df8ae5e0220eed2e3aeb06",
+    "internal/protocol/sign/gorgon.go": "c392c16fbde37f50303d0f8f55ad8cce06e5fb678963868c03c55ef9d6619695",
+    "internal/protocol/sign/helios.go": "4636071a581657a3074035c3d6704dd3c29b0a579b3c1717656cded41a4d9192",
+    "internal/protocol/sign/medusa.go": "0aef480d70b38cef992b95ffd07e6fbf786bd802b05a93a35dff4e34a3cc152f",
+    "internal/protocol/sign/proto.go": "3ec5848052ef097813b13f63c7293e7cf0ff5df0c9609c7cd53db045eb406c82",
+    "internal/protocol/sign/prim.go": "b2c5d5cafdb0ea80682f85250604cac92e3da067cda1bd7dace011c37e873977",
+    "internal/protocol/sign/request.go": "6f994b0e16a5f06ccaa947f9b782c76960bc098c26e7a55c9d3df3772390f91e",
+    "internal/protocol/sign/sm3.go": "019d8fda594fde6b3d56f7d227fe61b2eceb9c4ec5932b4e3574115c7b7dc612"
+  }
+}
