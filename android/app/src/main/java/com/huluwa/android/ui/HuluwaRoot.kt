@@ -154,6 +154,11 @@ private enum class RootPage { Home, Chat, ServerStatus }
                             val dengtaVm: DengtaViewModel = viewModel(key = "dengta:${pageUi.auth.server}:${pageUi.auth.username}")
                             DengtaScreen(dengtaVm, pageUi.chat.session?.title.orEmpty(), vm::closeChat)
                         }
+                    pageUi.chat.session?.kind == HONGGUO_SESSION_KIND ->
+                        holder.SaveableStateProvider("hongguo:${pageUi.auth.server}:${pageUi.auth.username}") {
+                            val hongguoVm: HongguoViewModel = viewModel(key = "hongguo:${pageUi.auth.server}:${pageUi.auth.username}")
+                            HongguoScreen(hongguoVm, vm::closeChat)
+                        }
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }
                     else -> holder.SaveableStateProvider("session:${pageUi.chat.session?.id}") { ChatScreen(pageUi, vm, snackbar) }
