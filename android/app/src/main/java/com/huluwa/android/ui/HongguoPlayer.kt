@@ -370,7 +370,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                         Box(Modifier.matchParentSize().pointerInput(player) {
                             detectTapGestures { onTap() }
                         })
-                        AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
+                        androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
                             enter = fadeIn(), exit = fadeOut()) {
                             FilledIconButton(onTogglePlayback, Modifier.size(64.dp),
                                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
@@ -397,21 +397,21 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     else -> Text("请选择可播放的分集", color = Color.White)
                 }
             }
+            if (portraitVideo && isCurrent) {
+                Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .24f), Color.Black.copy(alpha = .7f))))
+                    .padding(top = 56.dp)) {
+                    HongguoPlayerInfo(seriesTitle, seriesIntro, episodeLabel, episodeCount, introExpanded,
+                        onToggleIntro = onToggleIntro, onShowEpisodes = onShowEpisodes)
+                    Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, seekable, onSeek, onSeekFinished) }
+                }
+            }
 
         }
 
         if (!fullscreen && !portraitVideo) {
             HongguoPlayerInfo(seriesTitle, seriesIntro, episodeLabel, episodeCount, introExpanded,
                 onToggleIntro = onToggleIntro, onShowEpisodes = onShowEpisodes)
-        }
-        if (portraitVideo && isCurrent) {
-            Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .24f), Color.Black.copy(alpha = .7f))))
-                .padding(top = 56.dp)) {
-                HongguoPlayerInfo(seriesTitle, seriesIntro, episodeLabel, episodeCount, introExpanded,
-                    onToggleIntro = onToggleIntro, onShowEpisodes = onShowEpisodes)
-                Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, seekable, onSeek, onSeekFinished) }
-            }
         }
         if (!fullscreen) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = if (portraitVideo) 4.dp else 0.dp, bottom = 8.dp),
