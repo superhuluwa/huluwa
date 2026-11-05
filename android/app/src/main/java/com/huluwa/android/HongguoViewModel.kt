@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
 
 data class HongguoState(
     val query: String = "", val submittedQuery: String = "", val results: List<HongguoSeries> = emptyList(),
@@ -54,12 +53,12 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
             catch (error: Exception) { mutable.update { it.copy(settingsLoading = false, settingsError = error.userMessage()) } }
         }
     }
-    fun saveSettings(url: String, profile: JsonObject?) {
+    fun saveSettings(url: String) {
         if (mutable.value.settingsSaving) return
         mutable.update { it.copy(settingsSaving = true, settingsError = null) }
         viewModelScope.launch {
             try {
-                val settings = repository.saveSettings(url, profile)
+                val settings = repository.saveSettings(url)
                 mutable.update { it.copy(settings = settings, settingsSaving = false, settingsVisible = false) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutable.update { it.copy(settingsSaving = false, settingsError = error.userMessage()) } }
@@ -81,10 +80,6 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         if (more && (current.searching || current.loadingMore || !current.hasMore)) return
         val query = (if (more) current.submittedQuery else current.query).trim()
         if (query.isBlank()) return
-        if (current.settings?.configured != true) {
-            mutable.update { it.copy(settingsVisible = true, settingsError = "请先导入当前签名 App 的设备资料") }
-            return
-        }
         searchJob?.cancel()
         val offset = if (more) current.nextOffset else 0
         mutable.update { it.copy(submittedQuery = query, searched = true, searching = !more, loadingMore = more,

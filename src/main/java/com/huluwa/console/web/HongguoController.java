@@ -19,7 +19,7 @@ public class HongguoController {
     @PostMapping("/settings")
     public ApiResult<Map<String, Object>> save(@RequestBody SettingsRequest request) {
         if (request == null) throw new BusinessException(400, "缺少连接配置");
-        return ApiResult.ok(service.saveSettings(request.signUrl(), request.deviceProfile()));
+        return ApiResult.ok(service.saveSettings(request.signUrl()));
     }
     @PostMapping("/settings/sync")
     public ApiResult<Map<String, Object>> sync() { return ApiResult.ok(service.syncProfile()); }
@@ -31,5 +31,6 @@ public class HongguoController {
     public ApiResult<Map<String, Object>> detail(@PathVariable String id) { return ApiResult.ok(service.detail(id)); }
     @GetMapping("/episodes/{id}/playback")
     public ApiResult<Map<String, Object>> playback(@PathVariable String id) { return ApiResult.ok(service.playback(id)); }
+    /** deviceProfile 仅兼容旧客户端字段；实际设备始终自动读取签名服务。 */
     public record SettingsRequest(String signUrl, JsonNode deviceProfile) { }
 }

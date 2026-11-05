@@ -14,8 +14,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,38 +46,26 @@ public class HongguoService {
     }
 
     public Map<String, Object> settings() {
-        ObjectNode profile = profile(false);
-        JsonNode params = profile.path("params");
-        return Map.of("signUrl", signUrl(), "configured", !params.path("device_id").asText().isBlank(),
-                "deviceModel", params.path("device_type").asText(),
-                "profileAvailable", !params.path("iid").asText().isBlank());
+        String url = signUrl();
+        try { return describe(url, profile(url), ""); }
+        catch (BusinessException error) { return describe(url, json.createObjectNode(), error.getMessage()); }
     }
 
-    public Map<String, Object> saveSettings(String url, JsonNode deviceProfile) {
-        String normalized = validateBaseUrl(url);
-        ObjectNode imported = null;
-        if (deviceProfile != null && !deviceProfile.isNull()) imported = normalizeProfile(deviceProfile);
-        if (!normalized.equals(signUrl()) && imported == null) {
-            throw new BusinessException(400, "更换签名服务时请同时导入对应 App 的设备资料");
-        }
-        config.put("hongguo.sign-url", normalized);
-        if (imported != null) config.put("hongguo.device-profile", imported.toString());
+    public Map<String, Object> saveSettings(String url) {
+        config.put("hongguo.sign-url", validateBaseUrl(url));
         return settings();
     }
 
-    /** 兼容以后在 /info 中提供设备资料的签名服务，不改变 /sign 协议。 */
     public Map<String, Object> syncProfile() {
-        JsonNode info = readJson(send(HttpRequest.newBuilder(URI.create(signUrl() + "/info"))
-                .timeout(Duration.ofSeconds(30)).GET().build()), "签名服务");
-        JsonNode candidate = info.has("deviceProfile") ? info.get("deviceProfile") : info;
-        if (!candidate.has("params") && candidate.has("device")) candidate = candidate.get("device");
-        ObjectNode profile;
-        try { profile = normalizeProfile(candidate); }
-        catch (BusinessException error) {
-            throw new BusinessException(400, "当前签名服务未提供设备资料，请导入 hg 自检脚本导出的 JSON 文件");
-        }
-        config.put("hongguo.device-profile", profile.toString());
-        return settings();
+        String url = signUrl();
+        return describe(url, profile(url), "");
+    }
+
+    private Map<String, Object> describe(String url, ObjectNode profile, String message) {
+        JsonNode params = profile.path("params");
+        boolean available = !params.path("device_id").asText().isBlank() && !params.path("iid").asText().isBlank();
+        return Map.of("signUrl", url, "configured", available, "deviceModel", params.path("device_type").asText(),
+                "profileAvailable", available, "message", message);
     }
 
     public Map<String, Object> search(String query, int offset) {
@@ -170,11 +156,12 @@ public class HongguoService {
         return Map.of("videoId", videoId, "streams", streams,
                 "expireTime", data.path("expire_time").asLong(model == null ? 0 : model.path("url_expire").asLong()),
                 "duration", model == null ? 0 : model.path("video_duration").asDouble(),
-                "userAgent", profile(true).path("user_agent").asText(defaultUserAgent()));
+                "userAgent", profile(signUrl()).path("user_agent").asText(defaultUserAgent()));
     }
 
     private JsonNode request(String path, Map<String, String> business) {
-        ObjectNode profile = profile(true);
+        String signerUrl = signUrl();
+        ObjectNode profile = profile(signerUrl);
         Map<String, String> params = new LinkedHashMap<>(Map.ofEntries(
                 Map.entry("device_platform", "android"), Map.entry("aid", "8662"), Map.entry("app_name", "novelread"),
                 Map.entry("version_code", "73932"), Map.entry("version_name", "7.3.9.32"), Map.entry("ssmix", "a"),
@@ -193,7 +180,7 @@ public class HongguoService {
         String body;
         try { body = json.writeValueAsString(Map.of("url", url)); }
         catch (IOException error) { throw new BusinessException(500, "签名请求构造失败"); }
-        JsonNode signature = readJson(send(HttpRequest.newBuilder(URI.create(signUrl() + "/sign"))
+        JsonNode signature = readJson(send(HttpRequest.newBuilder(URI.create(signerUrl + "/sign"))
                 .timeout(Duration.ofSeconds(45)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build()), "签名服务");
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(40))
@@ -209,7 +196,7 @@ public class HongguoService {
         if (!found.containsAll(SIGN_HEADERS)) throw new BusinessException(502, "签名服务未返回完整签名，请检查 App 状态");
         JsonNode result = readJson(send(request.build()), "红果接口");
         int code = result.path("code").asInt(-1);
-        if (code == 110) throw new BusinessException(502, "红果设备身份不可用，请重新导入当前签名 App 的设备资料");
+        if (code == 110) throw new BusinessException(502, "红果设备身份暂不可用，请稍后重试，设备信息会自动重新获取");
         if (code != 0) throw new BusinessException(502, "红果请求失败（" + code + "）：" + text(result, "message"));
         return result;
     }
@@ -224,7 +211,7 @@ public class HongguoService {
     private JsonNode readJson(HttpResponse<byte[]> response, String source) {
         if (response.statusCode() != 200) throw new BusinessException(502, source + "返回 HTTP " + response.statusCode());
         byte[] bytes = response.body();
-        if (bytes.length == 0) throw new BusinessException(502, "红果返回空内容，请重新导入当前签名 App 的设备资料");
+        if (bytes.length == 0) throw new BusinessException(502, "服务返回空内容，请稍后重试或检查签名 App 的运行状态");
         try {
             if (bytes.length > 1 && (bytes[0] & 255) == 31 && (bytes[1] & 255) == 139) {
                 try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(bytes))) { bytes = gzip.readAllBytes(); }
@@ -235,16 +222,19 @@ public class HongguoService {
         } catch (IOException error) { throw new BusinessException(502, source + "返回的数据格式不正确"); }
     }
 
-    private ObjectNode profile(boolean required) {
-        String saved = config.get("hongguo.device-profile", "");
-        try {
-            if (!saved.isBlank()) return normalizeProfile(json.readTree(saved));
-            // 可将 hg 自检脚本导出的资料放进持久化数据目录，无须写入源码。
-            Path file = Path.of(System.getProperty("huluwa.data-dir", "./data"), "hongguo-device-profile.json");
-            if (Files.isRegularFile(file)) return normalizeProfile(json.readTree(Files.readString(file)));
-        } catch (IOException error) { throw new BusinessException(500, "红果设备资料无法读取，请重新导入"); }
-        if (required) throw new BusinessException(400, "请先在右上角连接设置中导入红果设备资料");
-        return json.createObjectNode();
+    /** 每次元数据请求均从同一个签名服务读取当前设备，不使用手动导入或旧文件中的身份。 */
+    private ObjectNode profile(String url) {
+        JsonNode info = readJson(send(HttpRequest.newBuilder(URI.create(url + "/info"))
+                .timeout(Duration.ofSeconds(30)).GET().build()), "签名服务");
+        JsonNode candidate = info.has("deviceProfile") ? info.get("deviceProfile") : info;
+        if (!candidate.has("params") && candidate.has("device")) candidate = candidate.get("device");
+        try { return normalizeProfile(candidate); }
+        catch (BusinessException error) {
+            if (info.hasNonNull("deviceProfileError")) {
+                throw new BusinessException(502, "签名 App 的设备信息暂未就绪，请稍后重试");
+            }
+            throw new BusinessException(502, "签名服务尚未提供自动设备信息，请更新签名服务");
+        }
     }
 
     private ObjectNode normalizeProfile(JsonNode input) {

@@ -21,14 +21,14 @@ data class HongguoStream(
         (!encrypted || (encryptionMethod == "cenc-aes-ctr" && spadeA.isNotBlank()))
 }
 data class HongguoPlayback(val videoId: String, val streams: List<HongguoStream>, val expireTime: Long, val userAgent: String)
-data class HongguoSettings(val signUrl: String, val configured: Boolean, val deviceModel: String)
+data class HongguoSettings(val signUrl: String, val configured: Boolean, val deviceModel: String, val message: String = "")
 data class HongguoSearchPage(val items: List<HongguoSeries>, val nextOffset: Int, val hasMore: Boolean)
 
 class HongguoRepository(private val api: ApiClient) {
-    private fun settings(json: JsonObject) = HongguoSettings(json.text("signUrl"), json.flag("configured"), json.text("deviceModel"))
+    private fun settings(json: JsonObject) = HongguoSettings(json.text("signUrl"), json.flag("configured"), json.text("deviceModel"), json.text("message"))
     suspend fun settings() = settings(api.get("hongguo", "settings").asObject())
-    suspend fun saveSettings(url: String, profile: JsonObject?) = settings(api.post("hongguo", "settings", body = jsonBody {
-        put("signUrl", url); if (profile != null) put("deviceProfile", profile)
+    suspend fun saveSettings(url: String) = settings(api.post("hongguo", "settings", body = jsonBody {
+        put("signUrl", url)
     }).asObject())
     suspend fun syncSettings() = settings(api.post("hongguo", "settings", "sync").asObject())
     suspend fun search(query: String, offset: Int): HongguoSearchPage {

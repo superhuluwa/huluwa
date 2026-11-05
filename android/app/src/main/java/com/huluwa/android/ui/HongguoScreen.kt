@@ -1,8 +1,6 @@
 package com.huluwa.android.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -32,10 +29,6 @@ import coil3.compose.AsyncImage
 import com.huluwa.android.HongguoState
 import com.huluwa.android.HongguoViewModel
 import com.huluwa.android.data.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 
 @Composable fun HongguoScreen(vm: HongguoViewModel, onClose: () -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -82,8 +75,8 @@ import kotlinx.serialization.json.JsonObject
             if (ui.settingsLoading && !ui.searched) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             if (ui.settings?.configured == false) item {
                 Panel {
-                    Text("连接红果服务", fontWeight = FontWeight.SemiBold)
-                    Text("首次使用请设置签名服务并导入对应的设备资料。", color = HuluwaColors.Muted)
+                    Text("红果服务暂不可用", fontWeight = FontWeight.SemiBold)
+                    Text(ui.settings.message.ifBlank { "请检查签名服务的连接状态。" }, color = HuluwaColors.Muted)
                     TextButton(vm::showSettings) { Text("连接设置") }
                 }
             }
@@ -203,51 +196,22 @@ import kotlinx.serialization.json.JsonObject
 
 @Composable private fun HongguoSettingsDialog(ui: HongguoState, vm: HongguoViewModel) {
     var url by remember(ui.settings?.signUrl) { mutableStateOf(ui.settings?.signUrl.orEmpty()) }
-    var profile by remember { mutableStateOf<JsonObject?>(null) }
-    var importError by remember { mutableStateOf<String?>(null) }
-    var importing by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            importing = true; importError = null
-            try {
-                profile = withContext(Dispatchers.IO) {
-                    val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                        val chars = CharArray(65_537)
-                        var size = 0
-                        while (size < chars.size) {
-                            val n = reader.read(chars, size, chars.size - size)
-                            if (n < 0) break
-                            size += n
-                        }
-                        require(size <= 65_536) { "设备资料文件过大" }
-                        String(chars, 0, size)
-                    } ?: error("无法读取设备资料")
-                    ApiJson.parseToJsonElement(raw) as? JsonObject ?: error("请选择有效的设备资料 JSON 文件")
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-            catch (error: Exception) { importError = error.message ?: "设备资料导入失败" }
-            finally { importing = false }
-        }
-    }
     AlertDialog(onDismissRequest = vm::hideSettings, title = { Text("红果连接设置") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("搜索和剧集信息由服务端获取，视频在手机上直接播放。", style = MaterialTheme.typography.bodySmall)
+                Text("自动使用签名服务当前的设备，视频在手机上直接播放。", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(url, { url = it }, label = { Text("签名服务地址") }, singleLine = true, enabled = !ui.settingsSaving)
-                Text(if (profile != null) "已选择新的设备资料" else if (ui.settings?.configured == true)
-                    "已配置设备：${ui.settings.deviceModel}" else "尚未导入设备资料", style = MaterialTheme.typography.bodySmall)
-                OutlinedButton({ importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                    enabled = !ui.settingsSaving && !importing) { Text(if (importing) "正在读取…" else "导入设备资料 JSON") }
-                Text("使用 hg 自检脚本导出的资料，需与签名服务当前的 App 对应。", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                val error = importError ?: ui.settingsError
+                Text(if (ui.settings?.configured == true) "当前设备：${ui.settings?.deviceModel.orEmpty()}" else "设备信息会自动获取",
+                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+                if (ui.settingsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                val error = ui.settingsError ?: ui.settings?.message?.takeIf { it.isNotBlank() }
                 if (error != null) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
-            TextButton({ vm.saveSettings(url, profile) }, enabled = !ui.settingsSaving && !importing && url.isNotBlank() &&
-                (profile != null || ui.settings?.configured == true)) { Text(if (ui.settingsSaving) "保存中…" else "保存") }
+            TextButton({ vm.saveSettings(url) }, enabled = !ui.settingsSaving && url.isNotBlank()) {
+                Text(if (ui.settingsSaving) "保存中…" else "保存")
+            }
         },
         dismissButton = { TextButton(vm::hideSettings, enabled = !ui.settingsSaving) { Text("取消") } })
 }

@@ -3,7 +3,7 @@
 """红果视频链路自检：搜索、分集、播放模型、CDN、可选完整下载/解码。
 
 主机只使用 Python 标准库。--device-from-container 复用签名容器内的 Frida。
-必须使用当前签名 App 的设备资料，不能复用其他模拟器的 device_id/iid。
+默认从签名服务 /info 自动读取当前设备，不能复用其他模拟器的 device_id/iid。
 退出码：0=所选检查通过，1=接口/下载失败，2=签名或设备资料不可用，
 3=搜索失败，4=加密流尚未验证可播放，5=文件/解码检查失败。
 """
@@ -112,8 +112,14 @@ def load_device(args):
         if result.returncode:
             raise ValueError("容器设备参数读取失败: " + result.stderr.strip()[-1000:])
         profile = json.loads(result.stdout)
-    else:
+    elif args.device_profile:
         profile = json.loads(Path(args.device_profile).read_text(encoding="utf-8"))
+    else:
+        with urllib.request.urlopen(SERVER + "/info", timeout=30) as response:
+            info = json.loads(response.read())
+        profile = info.get("deviceProfile")
+        if not isinstance(profile, dict):
+            raise ValueError("签名服务尚未提供自动设备信息，请更新签名服务或显式指定设备来源")
     if not isinstance(profile, dict):
         raise ValueError("设备资料必须是 JSON 对象")
     params = profile.get("params", profile)
@@ -429,7 +435,7 @@ def main():
     global SERVER
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", required=True, help="签名服务地址")
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--device-profile", help="当前签名 App 的设备资料 JSON")
     source.add_argument("--device-from-container", help="在该签名容器内读取设备资料")
     parser.add_argument("--save-device-profile", help="保存设备资料，供其他主机复用")
