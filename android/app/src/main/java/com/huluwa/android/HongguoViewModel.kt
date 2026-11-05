@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class HongguoFeedTab { Recommend, Ranking, Search }
+enum class HongguoFeedTab { Recommend, Ranking, Search, Favorites }
 
 data class HongguoState(
     val tab: HongguoFeedTab = HongguoFeedTab.Recommend,
@@ -30,16 +30,19 @@ data class HongguoState(
     val startPositionMs: Long = 0, val playLoading: Boolean = false, val playError: String? = null,
     val settings: HongguoSettings? = null, val settingsVisible: Boolean = false,
     val settingsLoading: Boolean = false, val settingsSaving: Boolean = false, val settingsError: String? = null,
+    val favorites: List<HongguoFavorite> = emptyList(),
 ) {
     val stream get() = playback?.streams?.getOrNull(streamIndex)
     val currentRankContent get() = rankContents.firstOrNull { it.selected || it.id == rankContent }
     val currentRankBoards get() = currentRankContent?.boards.orEmpty()
+    val favoriteSelected get() = detail?.series?.id?.let { id -> favorites.any { it.id == id } } ?: false
 }
 
 class HongguoViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as HuluwaApplication
     private val repository = HongguoRepository(app.repository.api)
     private val history = HongguoHistoryStore(application, app.session.server, app.session.username)
+    private val favoriteStore = HongguoFavoriteStore(application, app.session.server, app.session.username)
     private val mutable = MutableStateFlow(HongguoState())
     val state = mutable.asStateFlow()
     private var searchJob: Job? = null
@@ -51,14 +54,17 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private val lastSavedAt = mutableMapOf<String, Long>()
     private var preferredDefinition = "1080p"
 
-    init { loadSettings() }
+    init {
+        mutable.update { it.copy(favorites = favoriteStore.read()) }
+        loadSettings()
+    }
     fun setQuery(value: String) { mutable.update { it.copy(query = value.take(100)) } }
     fun selectTab(tab: HongguoFeedTab) {
         mutable.update { it.copy(tab = tab) }
         when (tab) {
             HongguoFeedTab.Recommend -> if (!mutable.value.discoverLoading) loadDiscover()
             HongguoFeedTab.Ranking -> if (!mutable.value.rankLoaded) loadRanking()
-            HongguoFeedTab.Search -> Unit
+            HongguoFeedTab.Search, HongguoFeedTab.Favorites -> Unit
         }
     }
     fun loadDiscover() {
@@ -194,6 +200,10 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun retryPlayback() { mutable.value.episode?.let(::playEpisode) }
+    fun toggleFavorite() {
+        val series = mutable.value.detail?.series ?: mutable.value.selectedSeries ?: return
+        mutable.update { it.copy(favorites = favoriteStore.toggle(series)) }
+    }
     fun selectStream(index: Int) {
         val current = mutable.value
         val stream = current.playback?.streams?.getOrNull(index) ?: return

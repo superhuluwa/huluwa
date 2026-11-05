@@ -9,16 +9,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.outlined.Pause
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.SkipNext
-import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,17 +49,14 @@ import com.huluwa.android.data.HongguoPlayback
 import com.huluwa.android.data.HongguoStream
 import com.huluwa.android.hongguo.HongguoDataSourceFactory
 import kotlinx.coroutines.delay
-import java.util.Locale
 
-/** 红果播放页使用整屏视频，顶部只保留返回与剧名，底部固定显示分集和清晰度。 */
+/** 沉浸式播放页：顶部返回，底部仅保留可点击的当前集数与收藏。 */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable internal fun HongguoPlayer(
     playback: HongguoPlayback?, stream: HongguoStream?, request: Long, startPosition: Long,
-    title: String, episodeNumber: Int?, episodeCount: Int,
-    canPrevious: Boolean, canNext: Boolean,
+    title: String, episodeNumber: Int?, episodeCount: Int, favorite: Boolean,
     loading: Boolean, error: String?,
-    onBack: () -> Unit, onPrevious: () -> Unit, onNext: () -> Unit, onShowEpisodes: () -> Unit,
-    onSelectStream: (Int) -> Unit,
+    onBack: () -> Unit, onShowEpisodes: () -> Unit, onToggleFavorite: () -> Unit,
     onProgress: (Long, Long, Boolean) -> Unit, onEnded: () -> Unit, onError: (String) -> Unit, onRetry: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -70,11 +65,6 @@ import java.util.Locale
     var controlsVisible by remember(request) { mutableStateOf(true) }
     var interaction by remember(request) { mutableIntStateOf(0) }
     var playing by remember(request) { mutableStateOf(false) }
-    var position by remember(request) { mutableLongStateOf(startPosition.coerceAtLeast(0)) }
-    var duration by remember(request) { mutableLongStateOf(0) }
-    var seeking by remember(request) { mutableStateOf(false) }
-    var seekPosition by remember(request) { mutableLongStateOf(startPosition.coerceAtLeast(0)) }
-    var qualityMenu by remember(request) { mutableStateOf(false) }
     val player = remember(request, stream?.url) {
         if (playback == null || stream == null) null else {
             val factory = HongguoDataSourceFactory(stream, playback.userAgent)
@@ -92,18 +82,11 @@ import java.util.Locale
     val ended = remember(player) { onEnded }
     val failed = remember(player) { onError }
 
-    fun refreshPlayback() {
-        val active = player ?: return
-        if (!seeking) position = active.currentPosition.coerceAtLeast(0)
-        duration = active.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
-        playing = active.isPlaying
-    }
-
     if (player != null) {
         DisposableEffect(player, lifecycle) {
             val listener = object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    refreshPlayback()
+                    playing = player.isPlaying
                     if (playbackState == Player.STATE_ENDED) { hongguoPosition(player, report, true); ended() }
                 }
                 override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -111,7 +94,7 @@ import java.util.Locale
                     hongguoPosition(player, report, true)
                     val reason = generateSequence<Throwable>(error) { it.cause }.mapNotNull { it.message }
                         .firstOrNull { it.startsWith("红果") || it.startsWith("视频") || it.startsWith("CDN") }
-                    failed(reason ?: "视频播放失败，请重试或切换清晰度")
+                    failed(reason ?: "视频播放失败，请重试")
                 }
             }
             val observer = LifecycleEventObserver { _, event ->
@@ -126,14 +109,8 @@ import java.util.Locale
                 player.release()
             }
         }
-        LaunchedEffect(player) {
-            while (true) {
-                delay(500)
-                refreshPlayback()
-            }
-        }
-        LaunchedEffect(player, controlsVisible, playing, seeking, interaction) {
-            if (controlsVisible && playing && !seeking) {
+        LaunchedEffect(player, controlsVisible, playing, interaction) {
+            if (controlsVisible && playing) {
                 delay(3000)
                 controlsVisible = false
             }
@@ -185,103 +162,46 @@ import java.util.Locale
         ) {
             Row(
                 Modifier.fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .82f), Color.Transparent)))
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .78f), Color.Transparent)))
                     .statusBarsPadding().padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回选集", tint = Color.White) }
-                Column(Modifier.weight(1f)) {
-                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(if (episodeNumber != null) "第${episodeNumber}集 · 共${episodeCount}集" else "正在加载分集",
-                        color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.labelMedium)
-                }
+                Text(title, Modifier.weight(1f), color = Color.White.copy(alpha = .9f),
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .94f))))
-                .navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            AnimatedVisibility(visible = controlsVisible, enter = fadeIn(), exit = fadeOut()) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                    Slider(
-                        value = if (duration > 0) ((if (seeking) seekPosition else position).toDouble() / duration).toFloat().coerceIn(0f, 1f) else 0f,
-                        onValueChange = { fraction ->
-                            if (duration > 0) {
-                                seeking = true
-                                seekPosition = (fraction.toDouble() * duration).toLong().coerceIn(0, duration)
-                            }
-                        },
-                        onValueChangeFinished = {
-                            if (player != null && duration > 0) {
-                                player.seekTo(seekPosition)
-                                position = seekPosition
-                            }
-                            seeking = false
-                            interaction++
-                        },
-                        enabled = player != null && duration > 0,
-                    )
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton({
-                            if (player != null) {
-                                if (player.isPlaying) player.pause() else {
-                                    if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-                                    player.play()
-                                }
-                            }
-                            controlsVisible = true
-                            interaction++
-                        }, modifier = Modifier.size(38.dp)) {
-                            Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                if (playing) "暂停" else "播放", tint = Color.White)
-                        }
-                        Text(hongguoTime(if (seeking) seekPosition else position), color = Color.White,
-                            style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.weight(1f))
-                        Text(if (duration > 0) hongguoTime(duration) else "--:--", color = Color.White.copy(alpha = .7f),
-                            style = MaterialTheme.typography.labelMedium)
-                    }
-                }
+            Row(
+                Modifier.weight(1f, fill = false)
+                    .background(Color.Black.copy(alpha = .38f), RoundedCornerShape(50.dp))
+                    .clickable(onClick = onShowEpisodes)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    if (episodeNumber != null) "第${episodeNumber}集 · 共${episodeCount}集" else "选择分集 · 共${episodeCount}集",
+                    color = Color.White.copy(alpha = .78f), style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+                Text("⌄", color = Color.White.copy(alpha = .55f), style = MaterialTheme.typography.labelMedium)
             }
-
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onPrevious, Modifier.size(40.dp), enabled = canPrevious) {
-                    Icon(Icons.Outlined.SkipPrevious, "上一集", tint = if (canPrevious) Color.White else Color.White.copy(alpha = .35f))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(if (episodeNumber != null) "第${episodeNumber}集" else "选择分集", color = Color.White,
-                        fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    Text("共${episodeCount}集", color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelSmall)
-                }
-                IconButton(onNext, Modifier.size(40.dp), enabled = canNext) {
-                    Icon(Icons.Outlined.SkipNext, "下一集", tint = if (canNext) Color.White else Color.White.copy(alpha = .35f))
-                }
-                TextButton(onClick = onShowEpisodes,
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
-                    Icon(Icons.Outlined.GridView, null, Modifier.size(17.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("分集")
-                }
-                if (playback != null) {
-                    Box {
-                        TextButton(onClick = { qualityMenu = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
-                            Text(stream?.definition ?: "清晰度")
-                        }
-                        DropdownMenu(qualityMenu, { qualityMenu = false }) {
-                            playback.streams.forEachIndexed { index, variant ->
-                                DropdownMenuItem(
-                                    text = { Text(variant.definition + if (variant.url == stream?.url) " ✓" else "") },
-                                    onClick = { qualityMenu = false; onSelectStream(index) },
-                                )
-                            }
-                        }
-                    }
-                }
+            Spacer(Modifier.weight(1f))
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.background(Color.Black.copy(alpha = .38f), RoundedCornerShape(50.dp)),
+            ) {
+                Icon(
+                    if (favorite) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
+                    if (favorite) "取消收藏" else "收藏本剧",
+                    tint = if (favorite) Color(0xFFFF6B5E) else Color.White.copy(alpha = .82f),
+                )
             }
         }
     }
@@ -316,12 +236,6 @@ private fun HongguoImmersiveBars() {
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 private fun hongguoPosition(player: ExoPlayer, callback: (Long, Long, Boolean) -> Unit, force: Boolean) {
     callback(player.currentPosition.coerceAtLeast(0), player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L, force)
-}
-
-private fun hongguoTime(positionMs: Long): String {
-    val seconds = positionMs.coerceAtLeast(0) / 1000
-    return if (seconds >= 3600) String.format(Locale.ROOT, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
-    else String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60)
 }
 
 private fun Context.hongguoActivity(): Activity? {

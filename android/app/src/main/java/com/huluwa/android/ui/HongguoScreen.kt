@@ -70,7 +70,7 @@ import com.huluwa.android.data.*
 @Composable private fun HongguoHome(ui: HongguoState, vm: HongguoViewModel) {
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = ui.tab.ordinal, containerColor = Color.White) {
-            listOf(HongguoFeedTab.Recommend to "推荐", HongguoFeedTab.Ranking to "排行榜", HongguoFeedTab.Search to "搜索")
+            listOf(HongguoFeedTab.Recommend to "推荐", HongguoFeedTab.Ranking to "排行榜", HongguoFeedTab.Search to "搜索", HongguoFeedTab.Favorites to "收藏")
                 .forEachIndexed { index, (tab, label) ->
                     Tab(selected = ui.tab == tab, onClick = { vm.selectTab(tab) },
                         text = { Text(label, fontWeight = if (ui.tab == tab) FontWeight.SemiBold else FontWeight.Normal) })
@@ -80,6 +80,7 @@ import com.huluwa.android.data.*
             HongguoFeedTab.Recommend -> HongguoDiscover(ui, vm)
             HongguoFeedTab.Ranking -> HongguoRanking(ui, vm)
             HongguoFeedTab.Search -> HongguoSearch(ui, vm)
+            HongguoFeedTab.Favorites -> HongguoFavorites(ui, vm)
         }
     }
 }
@@ -209,6 +210,23 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     }
 }
 
+@Composable private fun HongguoFavorites(ui: HongguoState, vm: HongguoViewModel) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("我的收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("收藏的短剧会保存在当前账号下", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+        }
+        if (ui.favorites.isEmpty()) item {
+            Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                Text("还没有收藏，播放短剧时点击右下角爱心即可收藏", color = HuluwaColors.Muted)
+            }
+        }
+        items(ui.favorites, key = { "favorite-" + it.id }) { favorite ->
+            HongguoSeriesCard(favorite.series()) { vm.openSeries(favorite.series()) }
+        }
+    }
+}
+
 @Composable private fun HongguoSearch(ui: HongguoState, vm: HongguoViewModel) {
     val focus = LocalFocusManager.current
     Column(Modifier.fillMaxSize()) {
@@ -262,17 +280,13 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     val detail = ui.detail ?: return
     val episode = ui.episode
     val episodes = detail.episodes
-    val episodeIndex = episodes.indexOfFirst { it.id == episode?.id }
     var showEpisodes by remember(detail.series.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HongguoPlayer(
             playback = ui.playback, stream = ui.stream, request = ui.playRequest, startPosition = ui.startPositionMs,
             title = detail.series.title, episodeNumber = episode?.number, episodeCount = episodes.size,
-            canPrevious = episodeIndex > 0 && !episodes[episodeIndex - 1].locked,
-            canNext = episodeIndex >= 0 && episodes.getOrNull(episodeIndex + 1)?.locked == false,
-            loading = ui.playLoading, error = ui.playError,
-            onBack = onBack, onPrevious = vm::previousEpisode, onNext = { vm.nextEpisode() },
-            onShowEpisodes = { showEpisodes = true }, onSelectStream = vm::selectStream,
+            favorite = ui.favoriteSelected, loading = ui.playLoading, error = ui.playError,
+            onBack = onBack, onShowEpisodes = { showEpisodes = true }, onToggleFavorite = vm::toggleFavorite,
             onProgress = { position, duration, force ->
                 episode?.let { vm.progress(detail.series.id, it, position, duration, force) }
             },
