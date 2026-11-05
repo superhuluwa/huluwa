@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import androidx.activity.compose.BackHandler
@@ -49,35 +50,35 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.huluwa.android.data.HongguoEpisode
 import com.huluwa.android.data.HongguoPlayback
 import com.huluwa.android.data.HongguoStream
-import com.huluwa.android.hongguo.HongguoDataSourceFactory
+import com.huluwa.android.hongguo.HongguoEpisodePreload
+import com.huluwa.android.hongguo.HongguoPlaybackSession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.abs
+import kotlin.math.roundToLong
 
 private val HongguoPlayerBackground = Color(0xFF191F1C)
 private val HongguoPlayerSurface = Color(0xFF303633)
 
 /**
  * 深色短剧播放页。剧集使用整屏纵向分页，拖动时上一集/下一集会跟随手势露出，
- * 松手后吸附到整集页面并开始播放，交互与抖音的上下翻页一致。
+ * 页面成为当前页就接入提前准备的媒体源，播放时复用播放器与相邻集缓冲。
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable internal fun HongguoPlayer(
     playback: HongguoPlayback?, stream: HongguoStream?, request: Long, startPosition: Long,
+    episodePreloads: List<HongguoEpisodePreload>,
     title: String, intro: String, seriesCover: String, episodes: List<HongguoEpisode>, currentEpisode: HongguoEpisode?,
     episodeCount: Int, loading: Boolean, error: String?,
     onBack: () -> Unit, onShowEpisodes: () -> Unit, onSelectEpisode: (HongguoEpisode) -> Unit,
@@ -109,10 +110,12 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     var interaction by remember(request) { mutableIntStateOf(0) }
     var playing by remember(request) { mutableStateOf(false) }
     var firstFrameSent by remember(request) { mutableStateOf(false) }
+    var buffering by remember(request) { mutableStateOf(true) }
+    var showBuffering by remember(request) { mutableStateOf(false) }
     var position by remember(request) { mutableLongStateOf(startPosition) }
     var duration by remember(request) { mutableLongStateOf(0L) }
-    var seekable by remember(request) { mutableStateOf(false) }
     var seekFraction by remember(request) { mutableStateOf<Float?>(null) }
+    var lastSeekPreviewAt by remember(request) { mutableLongStateOf(0L) }
     var videoAspectRatio by remember(request, stream) {
         mutableFloatStateOf(if (stream != null && stream.width > 0 && stream.height > 0) {
             stream.width.toFloat() / stream.height
@@ -123,21 +126,25 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     val pager = rememberPagerState(initialPage = initialPage, pageCount = { pages.size })
     val latestSelectedEpisodeId by rememberUpdatedState(currentEpisodeId)
     val selectEpisode by rememberUpdatedState(onSelectEpisode)
+    var syncingPage by remember { mutableStateOf(false) }
     val episodeLabel = currentEpisode?.number?.let { number -> "第${number}集" } ?: "选择分集"
 
     LaunchedEffect(currentEpisodeId, pages) {
         val target = pages.indexOfFirst { it.id == currentEpisodeId }
         if (target >= 0 && target != pager.currentPage) {
-            if (abs(target - pager.currentPage) == 1) pager.animateScrollToPage(target)
-            else pager.scrollToPage(target)
+            syncingPage = true
+            try {
+                if (abs(target - pager.currentPage) == 1) pager.animateScrollToPage(target)
+                else pager.scrollToPage(target)
+            } finally { syncingPage = false }
         }
     }
     LaunchedEffect(pager, pages) {
-        snapshotFlow { pager.currentPage to pager.isScrollInProgress }
+        snapshotFlow { pager.currentPage to syncingPage }
             .distinctUntilChanged()
-            .collectLatest { (page, scrolling) ->
+            .collectLatest { (page, syncing) ->
                 val latest = latestSelectedEpisodeId
-                if (scrolling || latest == null) return@collectLatest
+                if (syncing || latest == null) return@collectLatest
                 val episode = pages.getOrNull(page) ?: return@collectLatest
                 if (episode.id != latest) {
                     controlsVisible = true
@@ -156,44 +163,59 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         }
     }
 
-    val player = remember(request, stream?.url) {
-        if (playback == null || stream == null) null else {
-            val factory = HongguoDataSourceFactory(stream, playback.userAgent)
-            ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build().apply {
-                setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
-                setHandleAudioBecomingNoisy(true)
-                setMediaItem(MediaItem.Builder().setUri(stream.url).setMimeType(MimeTypes.VIDEO_MP4).build())
-                if (startPosition > 0) seekTo(startPosition)
-                prepare()
-                playWhenReady = true
+    val session = remember(context) { HongguoPlaybackSession(context.applicationContext) }
+    val player = session.player
+    // 同一播放器跨分集复用，进度和结束事件仍绑定各自的请求，防止串集。
+    val report = remember(player, request) { onProgress }
+    val ended = remember(player, request) { onEnded }
+    val failed = remember(player, request) { onError }
+    LaunchedEffect(session, request, playback, stream, episodePreloads, pages) {
+        if (currentEpisodeId != null && playback != null && stream != null) {
+            session.update(currentEpisodeId, initialPage, request, playback, stream, startPosition,
+                episodePreloads.mapNotNull { preload ->
+                    pages.indexOfFirst { it.id == preload.episodeId }.takeIf { it >= 0 }?.let { it to preload }
+                }, lifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        }
+    }
+    LaunchedEffect(request, loading, buffering, error) {
+        showBuffering = false
+        if ((loading || buffering) && error == null) {
+            delay(200)
+            showBuffering = true
+        }
+    }
+    val progress = seekFraction ?: if (duration > 0) (position.toDouble() / duration).toFloat().coerceIn(0f, 1f) else 0f
+    val seek: (Float) -> Unit = {
+        val fraction = it.coerceIn(0f, 1f)
+        seekFraction = fraction
+        controlsVisible = true
+        interaction++
+        if (duration > 0 && session.isActive(request)) {
+            val now = SystemClock.uptimeMillis()
+            // 拖动时按节流预览目标画面，松手后再精确落到最终位置。
+            if (now - lastSeekPreviewAt >= 180) {
+                position = (fraction.toDouble() * duration).roundToLong()
+                player.seekTo(position)
+                lastSeekPreviewAt = now
             }
         }
     }
-    val report = remember(player) { onProgress }
-    val ended = remember(player) { onEnded }
-    val failed = remember(player) { onError }
-    val progress = seekFraction ?: if (duration > 0) (position.toDouble() / duration).toFloat().coerceIn(0f, 1f) else 0f
-    val seek: (Float) -> Unit = {
-        seekFraction = it
-        controlsVisible = true
-        interaction++
-    }
     val finishSeek: () -> Unit = {
         seekFraction?.let { fraction ->
-            position = (fraction.toDouble() * duration).toLong()
-            player?.let { it.seekTo(position); hongguoPosition(it, report, true) }
+            position = (fraction.toDouble() * duration).roundToLong()
+            if (session.isActive(request)) { player.seekTo(position); hongguoPosition(player, report, true) }
         }
         seekFraction = null
     }
     val togglePlayback: () -> Unit = {
         var pausedByUser = false
-        player?.let {
-            if (it.playWhenReady) {
-                it.pause()
+        if (session.isActive(request)) {
+            if (player.playWhenReady) {
+                player.pause()
                 pausedByUser = true
             } else {
-                if (it.playbackState == Player.STATE_ENDED) it.seekTo(0)
-                it.play()
+                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                player.play()
             }
         }
         centerPlayVisible = pausedByUser
@@ -202,57 +224,75 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     }
     val leavePlayer: () -> Unit = { if (fullscreen) fullscreen = false else onBack() }
 
-    if (player != null) {
-        DisposableEffect(player, lifecycle) {
-            val listener = object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    playing = player.isPlaying
-                    if (!firstFrameSent && playbackState == Player.STATE_READY) {
-                        firstFrameSent = true
-                        onFirstFrame()
-                    }
-                    if (playbackState == Player.STATE_ENDED) { hongguoPosition(player, report, true); ended() }
-                }
-                override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
-                override fun onVideoSizeChanged(videoSize: VideoSize) {
-                    if (videoSize.width > 0 && videoSize.height > 0) {
-                        videoAspectRatio = videoSize.width.toFloat() * videoSize.pixelWidthHeightRatio / videoSize.height
-                    }
-                }
-                override fun onPlayerError(error: PlaybackException) {
-                    hongguoPosition(player, report, true)
-                    val reason = generateSequence<Throwable>(error) { it.cause }.mapNotNull { it.message }
-                        .firstOrNull { it.startsWith("红果") || it.startsWith("视频") || it.startsWith("CDN") }
-                    failed(reason ?: "视频播放失败，请重试")
-                }
-            }
-            val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_STOP) { hongguoPosition(player, report, true); player.pause() }
-            }
-            player.addListener(listener)
-            lifecycle.lifecycle.addObserver(observer)
-            onDispose {
-                hongguoPosition(player, report, true)
-                lifecycle.lifecycle.removeObserver(observer)
-                player.removeListener(listener)
-                player.release()
-            }
-        }
-        LaunchedEffect(player, speed) { player.setPlaybackSpeed(speed) }
-        LaunchedEffect(player) {
-            while (true) {
+    DisposableEffect(player, request, lifecycle) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!session.isActive(request)) return
+                playing = player.isPlaying
                 position = player.currentPosition.coerceAtLeast(0L)
                 duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
-                seekable = player.isCurrentMediaItemSeekable
-                hongguoPosition(player, report, false)
-                delay(500)
+                buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                if (playbackState == Player.STATE_ENDED) { hongguoPosition(player, report, true); ended() }
+            }
+            override fun onRenderedFirstFrame() {
+                if (!session.isActive(request) || firstFrameSent) return
+                firstFrameSent = true
+                onFirstFrame()
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (session.isActive(request)) playing = isPlaying
+            }
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (session.isActive(request) && videoSize.width > 0 && videoSize.height > 0) {
+                    videoAspectRatio = videoSize.width.toFloat() * videoSize.pixelWidthHeightRatio / videoSize.height
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                if (!session.isActive(request)) return
+                hongguoPosition(player, report, true)
+                val reason = generateSequence<Throwable>(error) { it.cause }.mapNotNull { it.message }
+                    .firstOrNull { it.startsWith("红果") || it.startsWith("视频") || it.startsWith("CDN") }
+                failed(reason ?: "视频播放失败，请重试")
             }
         }
-        LaunchedEffect(player, controlsVisible, playing, interaction, seekFraction, showSpeed, showMore) {
-            if (controlsVisible && playing && seekFraction == null && !showSpeed && !showMore) {
-                delay(3000)
-                controlsVisible = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && session.isActive(request)) {
+                hongguoPosition(player, report, true)
+                player.pause()
             }
+        }
+        player.addListener(listener)
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose {
+            if (session.isActive(request)) {
+                hongguoPosition(player, report, true)
+                player.pause()
+            }
+            lifecycle.lifecycle.removeObserver(observer)
+            player.removeListener(listener)
+        }
+    }
+    val reportOnExit by rememberUpdatedState<() -> Unit>({
+        if (session.isActive(request)) hongguoPosition(player, onProgress, true)
+    })
+    DisposableEffect(session) {
+        onDispose { reportOnExit(); session.release() }
+    }
+    LaunchedEffect(player, speed) { player.setPlaybackSpeed(speed) }
+    LaunchedEffect(player, request) {
+        while (true) {
+            if (session.isActive(request)) {
+                position = player.currentPosition.coerceAtLeast(0L)
+                duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
+                hongguoPosition(player, report, false)
+            }
+            delay(500)
+        }
+    }
+    LaunchedEffect(player, controlsVisible, playing, interaction, seekFraction, showSpeed, showMore) {
+        if (controlsVisible && playing && seekFraction == null && !showSpeed && !showMore) {
+            delay(3000)
+            controlsVisible = false
         }
     }
 
@@ -263,13 +303,16 @@ private val HongguoPlayerSurface = Color(0xFF303633)
             state = pager,
             modifier = Modifier.fillMaxSize(),
             userScrollEnabled = !fullscreen,
+            beyondViewportPageCount = 1,
+            key = { pages[it].id },
         ) { page ->
             val pageEpisode = pages[page]
             HongguoEpisodePage(
                 pageEpisode = pageEpisode, currentEpisodeId = currentEpisodeId, episodeCount = episodeCount,
                 seriesTitle = title, seriesIntro = intro, seriesCover = seriesCover, fullscreen = fullscreen,
-                player = player, loading = loading, error = error, position = position, duration = duration,
-                seekable = seekable, progress = progress, centerPlayVisible = centerPlayVisible,
+                player = player.takeIf { playback != null && stream != null }, loading = showBuffering,
+                firstFrameRendered = firstFrameSent, error = error, position = position, duration = duration,
+                progress = progress, centerPlayVisible = centerPlayVisible,
                 portraitVideo = portraitVideo, videoBackground = videoBackground, introExpanded = introExpanded,
                 onTap = togglePlayback,
                 onTogglePlayback = togglePlayback, onSeek = seek, onSeekFinished = finishSeek,
@@ -313,7 +356,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         if (fullscreen) AnimatedVisibility(visible = controlsVisible, modifier = Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
             Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .75f))))
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp)) {
-                HongguoSeekBar(progress, seekable, seek, finishSeek)
+                HongguoSeekBar(progress, duration > 0, seek, finishSeek)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(togglePlayback) { Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                         if (playing) "暂停" else "播放", tint = Color.White) }
@@ -336,8 +379,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
 @Composable private fun HongguoEpisodePage(
     pageEpisode: HongguoEpisode, currentEpisodeId: String?, episodeCount: Int,
     seriesTitle: String, seriesIntro: String, seriesCover: String, fullscreen: Boolean,
-    player: ExoPlayer?, loading: Boolean, error: String?, position: Long, duration: Long,
-    seekable: Boolean, progress: Float, centerPlayVisible: Boolean,
+    player: ExoPlayer?, loading: Boolean, firstFrameRendered: Boolean, error: String?, position: Long, duration: Long,
+    progress: Float, centerPlayVisible: Boolean,
     portraitVideo: Boolean, videoBackground: Color, introExpanded: Boolean,
     onTap: () -> Unit, onTogglePlayback: () -> Unit, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit,
     onShowEpisodes: () -> Unit, onToggleIntro: () -> Unit, onFullscreen: () -> Unit, onRetry: () -> Unit,
@@ -361,7 +404,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                                     resizeMode = if (portraitVideo) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                                     setShutterBackgroundColor(videoBackground.toArgb())
                                     setBackgroundColor(videoBackground.toArgb())
-                                    keepScreenOn = true
+                                    keepScreenOn = isCurrent
                                     this.player = player
                                 }
                             },
@@ -373,6 +416,9 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                             },
                             onRelease = { view -> view.player = null },
                         )
+                        if (!firstFrameRendered) {
+                            HongguoEpisodePlaceholder(seriesCover, episodeLabel, seriesTitle, dimmed = true)
+                        }
                         Box(Modifier.matchParentSize().pointerInput(player) {
                             detectTapGestures { onTap() }
                         })
@@ -407,7 +453,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     .padding(top = 56.dp)) {
                     HongguoPlayerInfo(seriesTitle, seriesIntro, episodeLabel, episodeCount, introExpanded,
                         onToggleIntro = onToggleIntro, onShowEpisodes = onShowEpisodes)
-                    Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, seekable, onSeek, onSeekFinished) }
+                    Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, duration > 0, onSeek, onSeekFinished) }
                 }
             }
 
@@ -464,7 +510,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     }
 }
 
-/** 非当前集使用剧集封面承接翻页过程，松手后再进入实际视频页。 */
+/** 用封面承接翻页和首帧渲染，避免播放页在换集时短暂黑屏。 */
 @Composable private fun HongguoEpisodePlaceholder(
     cover: String, episodeLabel: String, title: String, dimmed: Boolean = false,
 ) {
@@ -485,10 +531,10 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     }
 }
 
-/** 轨道与圆点共用画布坐标，Slider 保留拖动和无障碍交互。 */
+/** 轨道与圆点共用画布坐标；滑块使用更大的触控高度，便于左右拖动定位。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun HongguoSeekBar(progress: Float, enabled: Boolean, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(24.dp)) {
+    Box(Modifier.fillMaxWidth().height(40.dp)) {
         Canvas(Modifier.matchParentSize()) {
             val radius = 2.dp.toPx()
             val start = Offset(radius, center.y)
@@ -500,7 +546,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
             drawCircle(Color.White, radius, thumb)
         }
         Slider(value = progress, onValueChange = onSeek, onValueChangeFinished = onSeekFinished, enabled = enabled,
-            modifier = Modifier.fillMaxWidth().height(24.dp).semantics { contentDescription = "播放进度" },
+            modifier = Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = "播放进度" },
             thumb = { Spacer(Modifier.size(4.dp)) }, track = {},
         )
     }
