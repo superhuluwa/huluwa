@@ -42,6 +42,7 @@ import com.huluwa.android.data.*
     val back = { if (!vm.back()) onClose() }
     BackHandler(onBack = back)
     LaunchedEffect(Unit) { vm.loadDiscover() }
+    LaunchedEffect(ui.tab) { if (ui.tab == HongguoFeedTab.Ranking) vm.loadRanking() }
     if (ui.selectedSeries != null) {
         HongguoDetailContent(ui, vm, back)
     } else {
@@ -92,7 +93,10 @@ import com.huluwa.android.data.*
             Text("为你推荐", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("短剧频道精选，点开即可选集观看", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
         }
-        if (ui.discoverLoading) item { HongguoLoading("正在加载推荐…") }
+        if (ui.discoverLoading) item {
+            if (ui.discover.isEmpty()) HongguoLoading("正在加载推荐…")
+            else LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
         if (ui.discoverError != null) item { HongguoError(ui.discoverError) { vm.loadDiscover() } }
         if (!ui.discoverLoading && ui.discover.isEmpty() && ui.discoverError == null) item {
             Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
@@ -132,7 +136,10 @@ import com.huluwa.android.data.*
                 }
             }
         }
-        if (ui.rankLoading) item { HongguoLoading("正在加载排行榜…") }
+        if (ui.rankLoading) item {
+            if (ui.rankItems.isEmpty()) HongguoLoading("正在加载排行榜…")
+            else LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
         if (ui.rankError != null) item { HongguoError(ui.rankError) { vm.loadRanking() } }
         if (!ui.rankLoading && ui.rankItems.isEmpty() && ui.rankError == null) item {
             Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {

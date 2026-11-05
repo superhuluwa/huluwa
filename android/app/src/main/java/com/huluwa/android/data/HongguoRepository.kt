@@ -1,9 +1,11 @@
 package com.huluwa.android.data
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
 const val HONGGUO_SESSION_KIND = "hongguo"
 
+@Serializable
 data class HongguoSeries(val id: String, val title: String, val cover: String, val intro: String, val episodeCount: Int) {
     companion object {
         fun from(json: JsonObject) = HongguoSeries(json.text("id"), json.text("title"), json.text("cover"),
@@ -23,8 +25,11 @@ data class HongguoStream(
 data class HongguoPlayback(val videoId: String, val streams: List<HongguoStream>, val expireTime: Long, val userAgent: String)
 data class HongguoSettings(val signUrl: String, val configured: Boolean, val deviceModel: String, val message: String = "")
 data class HongguoSearchPage(val items: List<HongguoSeries>, val nextOffset: Int, val hasMore: Boolean)
+@Serializable
 data class HongguoRankBoard(val id: String, val name: String, val selected: Boolean)
+@Serializable
 data class HongguoRankContent(val id: String, val name: String, val selected: Boolean, val boards: List<HongguoRankBoard>)
+@Serializable
 data class HongguoRankItem(
     val id: String, val title: String, val cover: String, val score: String, val episodeCount: Int,
     val kind: String, val userId: String, val intro: String, val details: List<String>, val promoted: Boolean,

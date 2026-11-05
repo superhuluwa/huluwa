@@ -46,6 +46,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private val repository = HongguoRepository(app.repository.api)
     private val history = HongguoHistoryStore(application, app.session.server, app.session.username)
     private val favoriteStore = HongguoFavoriteStore(application, app.session.server, app.session.username)
+    private val feedCache = HongguoFeedCacheStore(application, app.session.server, app.session.username)
     private val mutable = MutableStateFlow(HongguoState())
     val state = mutable.asStateFlow()
     private var searchJob: Job? = null
@@ -59,15 +60,25 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private var preferredDefinition = "1080p"
 
     init {
-        mutable.update { it.copy(favorites = favoriteStore.read()) }
+        val cachedDiscover = feedCache.readDiscover()
+        val cachedRanking = feedCache.readDefaultRanking()
+        mutable.update {
+            it.copy(
+                favorites = favoriteStore.read(), discover = cachedDiscover,
+                discoverLoaded = cachedDiscover.isNotEmpty(),
+                rankContent = cachedRanking?.content.orEmpty(), rankBoard = cachedRanking?.board.orEmpty(),
+                rankCursor = cachedRanking?.cursor.orEmpty(), rankItems = cachedRanking?.items.orEmpty(),
+                rankContents = cachedRanking?.contents.orEmpty(), rankHasMore = cachedRanking?.hasMore == true,
+                rankLoaded = cachedRanking != null,
+            )
+        }
         loadSettings()
     }
     fun setQuery(value: String) { mutable.update { it.copy(query = value.take(100)) } }
     fun selectTab(tab: HongguoFeedTab) {
         mutable.update { it.copy(tab = tab) }
         when (tab) {
-            HongguoFeedTab.Recommend -> if (!mutable.value.discoverLoading) loadDiscover()
-            HongguoFeedTab.Ranking -> if (!mutable.value.rankLoaded) loadRanking()
+            HongguoFeedTab.Recommend, HongguoFeedTab.Ranking -> Unit
             HongguoFeedTab.Search, HongguoFeedTab.Favorites -> Unit
         }
     }
@@ -79,6 +90,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         discoverJob = viewModelScope.launch {
             try {
                 val page = repository.discover()
+                feedCache.writeDiscover(page.items)
                 mutable.update { it.copy(discover = page.items, discoverLoading = false, discoverLoaded = true) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutable.update { it.copy(discoverLoading = false,
@@ -88,13 +100,22 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     fun loadRanking(content: String = mutable.value.rankContent, board: String = mutable.value.rankBoard,
                     more: Boolean = false) {
         val current = mutable.value
-        if (current.rankLoading || current.rankMore || (more && !current.rankHasMore)) return
+        if (more && (current.rankLoading || current.rankMore || !current.rankHasMore)) return
         val cursor = if (more) current.rankCursor else ""
+        val cached = if (more) null else feedCache.readRanking(content, board)
         mutable.update { it.copy(rankContent = content, rankBoard = board, rankCursor = if (more) it.rankCursor else "",
-            rankLoading = !more, rankMore = more, rankError = null, rankItems = if (more) it.rankItems else emptyList()) }
+            rankLoading = !more, rankMore = more, rankError = null,
+            rankItems = if (more) it.rankItems else cached?.items.orEmpty(),
+            rankContents = cached?.contents ?: it.rankContents,
+            rankHasMore = if (more) it.rankHasMore else cached?.hasMore == true) }
         rankJob?.cancel(); rankJob = viewModelScope.launch {
             try {
                 val ranking = repository.ranking(content, board, cursor)
+                if (!more) {
+                    feedCache.writeRanking(HongguoCachedRanking(ranking.content, ranking.board,
+                        ranking.contents, ranking.items, ranking.hasMore, ranking.cursor), content, board,
+                        default = content.isBlank() && board.isBlank())
+                }
                 mutable.update { old ->
                     val rows = if (more) (old.rankItems + ranking.items).distinctBy { it.kind + it.id } else ranking.items
                     old.copy(rankItems = rows, rankContent = ranking.content, rankBoard = ranking.board,
@@ -106,8 +127,23 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
                 rankError = error.userMessage()) } }
         }
     }
-    fun selectRankContent(id: String) { loadRanking(content = id, board = "") }
-    fun selectRankBoard(id: String) { loadRanking(content = mutable.value.rankContent, board = id) }
+    fun selectRankContent(id: String) {
+        showCachedRanking(feedCache.readRanking(id, ""))
+        loadRanking(content = id, board = "")
+    }
+    fun selectRankBoard(id: String) {
+        val content = mutable.value.rankContent
+        showCachedRanking(feedCache.readRanking(content, id))
+        loadRanking(content = content, board = id)
+    }
+    private fun showCachedRanking(cached: HongguoCachedRanking?) {
+        if (cached == null) return
+        mutable.update {
+            it.copy(rankContent = cached.content, rankBoard = cached.board, rankCursor = cached.cursor,
+                rankItems = cached.items, rankContents = cached.contents, rankHasMore = cached.hasMore,
+                rankLoaded = true)
+        }
+    }
     fun showSettings() { mutable.update { it.copy(settingsVisible = true, settingsError = null) }; loadSettings() }
     fun hideSettings() { if (!mutable.value.settingsSaving) mutable.update { it.copy(settingsVisible = false) } }
     private fun loadSettings() {
