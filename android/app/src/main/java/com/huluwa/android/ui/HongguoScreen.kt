@@ -287,6 +287,8 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
             title = detail.series.title, episodeNumber = episode?.number, episodeCount = episodes.size,
             favorite = ui.favoriteSelected, loading = ui.playLoading, error = ui.playError,
             onBack = onBack, onShowEpisodes = { showEpisodes = true }, onToggleFavorite = vm::toggleFavorite,
+            onSwipeForward = { vm.nextEpisode() }, onSwipeBack = vm::previousEpisode,
+            onFirstFrame = { vm.prefetchNextEpisode(ui.playRequest) },
             onProgress = { position, duration, force ->
                 episode?.let { vm.progress(detail.series.id, it, position, duration, force) }
             },

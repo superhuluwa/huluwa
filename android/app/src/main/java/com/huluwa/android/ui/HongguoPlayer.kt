@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,6 +58,7 @@ import kotlinx.coroutines.delay
     title: String, episodeNumber: Int?, episodeCount: Int, favorite: Boolean,
     loading: Boolean, error: String?,
     onBack: () -> Unit, onShowEpisodes: () -> Unit, onToggleFavorite: () -> Unit,
+    onSwipeForward: () -> Unit, onSwipeBack: () -> Unit, onFirstFrame: () -> Unit,
     onProgress: (Long, Long, Boolean) -> Unit, onEnded: () -> Unit, onError: (String) -> Unit, onRetry: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -65,6 +67,8 @@ import kotlinx.coroutines.delay
     var controlsVisible by remember(request) { mutableStateOf(true) }
     var interaction by remember(request) { mutableIntStateOf(0) }
     var playing by remember(request) { mutableStateOf(false) }
+    var firstFrameSent by remember(request) { mutableStateOf(false) }
+    var dragDistance by remember(request) { mutableFloatStateOf(0f) }
     val player = remember(request, stream?.url) {
         if (playback == null || stream == null) null else {
             val factory = HongguoDataSourceFactory(stream, playback.userAgent)
@@ -87,6 +91,10 @@ import kotlinx.coroutines.delay
             val listener = object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     playing = player.isPlaying
+                    if (!firstFrameSent && playbackState == Player.STATE_READY) {
+                        firstFrameSent = true
+                        onFirstFrame()
+                    }
                     if (playbackState == Player.STATE_ENDED) { hongguoPosition(player, report, true); ended() }
                 }
                 override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
@@ -132,12 +140,28 @@ import kotlinx.coroutines.delay
                 modifier = Modifier.fillMaxSize(),
                 onRelease = { view -> view.player = null },
             )
-            Box(Modifier.matchParentSize().pointerInput(player) {
-                detectTapGestures {
-                    controlsVisible = !controlsVisible
-                    interaction++
+            Box(Modifier.matchParentSize()
+                .pointerInput(player) {
+                    detectTapGestures {
+                        controlsVisible = !controlsVisible
+                        interaction++
+                    }
                 }
-            })
+                .pointerInput(player) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, distance ->
+                            dragDistance += distance
+                            if (dragDistance < -40f || dragDistance > 40f) change.consume()
+                        },
+                        onDragEnd = {
+                            if (dragDistance < -80f) onSwipeForward()
+                            else if (dragDistance > 80f) onSwipeBack()
+                            dragDistance = 0f
+                        },
+                        onDragCancel = { dragDistance = 0f },
+                    )
+                }
+            )
         }
 
         when {

@@ -4,12 +4,15 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.huluwa.android.data.*
+import com.huluwa.android.hongguo.HongguoPrefetchCache
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class HongguoFeedTab { Recommend, Ranking, Search, Favorites }
 
@@ -50,6 +53,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private var rankJob: Job? = null
     private var detailJob: Job? = null
     private var playbackJob: Job? = null
+    private var prefetchJob: Job? = null
     private val positions = mutableMapOf<String, HongguoWatchProgress>()
     private val lastSavedAt = mutableMapOf<String, Long>()
     private var preferredDefinition = "1080p"
@@ -162,7 +166,8 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun openSeries(series: HongguoSeries) {
-        detailJob?.cancel(); playbackJob?.cancel()
+        detailJob?.cancel(); playbackJob?.cancel(); prefetchJob?.cancel()
+        HongguoPrefetchCache.clear()
         mutable.update { it.copy(selectedSeries = series, detail = null, detailLoading = true, detailError = null,
             episode = null, playback = null, playLoading = false, playError = null) }
         detailJob = viewModelScope.launch {
@@ -183,23 +188,53 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         if (episode.locked) return
         val detail = mutable.value.detail ?: return
         if (detail.episodes.none { it.id == episode.id }) return
-        playbackJob?.cancel()
+        playbackJob?.cancel(); prefetchJob?.cancel()
         val progress = positions[episode.id] ?: history.read(detail.series.id)?.takeIf { it.episodeId == episode.id }
         val resume = progress?.takeUnless { it.completed }?.positionMs ?: 0L
         mutable.update { it.copy(episode = episode, playback = null, playLoading = true, playError = null,
             startPositionMs = resume, playRequest = it.playRequest + 1) }
         playbackJob = viewModelScope.launch {
             try {
-                val playback = repository.playback(episode.id)
+                val cached = HongguoPrefetchCache.get(episode.id)?.playback
+                val playback = cached ?: repository.playback(episode.id)
                 val available = playback.streams.filter { it.supported }.sortedByDescending { it.height }
                 check(available.isNotEmpty()) { "该集暂未提供手机支持的视频编码，请稍后重试" }
                 val selected = available.indexOfFirst { it.definition == preferredDefinition }.coerceAtLeast(0)
-                mutable.update { it.copy(playback = playback.copy(streams = available), streamIndex = selected, playLoading = false) }
+                HongguoPrefetchCache.clear()
+                mutable.update { it.copy(playback = playback.copy(streams = available), streamIndex = selected,
+                    playLoading = false) }
+                prefetchNextEpisode(mutable.value.playRequest)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutable.update { it.copy(playLoading = false, playError = error.userMessage()) } }
         }
     }
     fun retryPlayback() { mutable.value.episode?.let(::playEpisode) }
+    /** 当前集开始播放后，提前请求下一集模型并预热解密索引与开头媒体段。 */
+    fun prefetchNextEpisode(currentRequest: Long? = null) {
+        val current = mutable.value
+        if (currentRequest != null && current.playRequest != currentRequest) return
+        val detail = current.detail ?: return
+        val episode = current.episode ?: return
+        val index = detail.episodes.indexOfFirst { it.id == episode.id }
+        val next = detail.episodes.getOrNull(index + 1)?.takeUnless { it.locked } ?: return
+        if (prefetchJob?.isActive == true) return
+        val cached = HongguoPrefetchCache.get(next.id)
+        prefetchJob = viewModelScope.launch {
+            try {
+                val playback = cached?.playback ?: repository.playback(next.id)
+                val available = playback.streams.filter { it.supported }.sortedByDescending { it.height }
+                val selected = available.firstOrNull { it.definition == preferredDefinition } ?: available.firstOrNull()
+                    ?: return@launch
+                val hasData = withContext(Dispatchers.IO) {
+                    HongguoPrefetchCache.prefetch(playback, selected, 512 * 1024)
+                }
+                val normalized = playback.copy(streams = available)
+                HongguoPrefetchCache.put(HongguoPrefetchCache.Entry(next.id, normalized, selected, hasData))
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Exception) { }
+        }
+    }
     fun toggleFavorite() {
         val series = mutable.value.detail?.series ?: mutable.value.selectedSeries ?: return
         mutable.update { it.copy(favorites = favoriteStore.toggle(series)) }
@@ -244,9 +279,15 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
             mutable.update { it.copy(tab = HongguoFeedTab.Recommend) }; return true
         }
         if (mutable.value.selectedSeries == null) return false
-        detailJob?.cancel(); playbackJob?.cancel()
+        detailJob?.cancel(); playbackJob?.cancel(); prefetchJob?.cancel()
+        HongguoPrefetchCache.clear()
         mutable.update { it.copy(selectedSeries = null, detail = null, detailLoading = false, detailError = null,
             episode = null, playback = null, playLoading = false, playError = null) }
         return true
+    }
+    override fun onCleared() {
+        prefetchJob?.cancel()
+        HongguoPrefetchCache.clear()
+        super.onCleared()
     }
 }
