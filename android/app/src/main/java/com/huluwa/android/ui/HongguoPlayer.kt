@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,7 +64,7 @@ import kotlinx.coroutines.delay
 private val HongguoPlayerBackground = Color(0xFF191F1C)
 private val HongguoPlayerSurface = Color(0xFF303633)
 
-/** 深色短剧播放页：顶部集数与倍速，底部简介、进度和选集，不显示侧边社交操作。 */
+/** 横屏视频完整居中，竖屏视频铺满并叠加信息，底部独立选集，不显示侧边社交操作。 */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable internal fun HongguoPlayer(
     playback: HongguoPlayback?, stream: HongguoStream?, request: Long, startPosition: Long,
@@ -200,131 +201,142 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         }
     }
 
-    Box(Modifier.fillMaxSize().background(HongguoPlayerBackground)) {
-        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(top = if (fullscreen) 0.dp else 56.dp)) {
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                val showFullscreenButton = !fullscreen && player != null && error == null
-                val videoAreaHeight = (maxHeight - if (showFullscreenButton) 56.dp else 0.dp).coerceAtLeast(0.dp)
-                Box(Modifier.fillMaxWidth().height(videoAreaHeight).align(Alignment.TopCenter), contentAlignment = Alignment.Center) {
-                    if (player != null) key(player) {
-                        AndroidView(
-                            factory = { viewContext ->
-                                PlayerView(viewContext).apply {
-                                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                                    useController = false
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                    setShutterBackgroundColor(HongguoPlayerBackground.toArgb())
-                                    setBackgroundColor(HongguoPlayerBackground.toArgb())
-                                    keepScreenOn = true
-                                    this.player = player
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                            onRelease = { view -> view.player = null },
-                        )
-                        Box(Modifier.matchParentSize()
-                            .pointerInput(player) {
-                                detectTapGestures {
-                                    controlsVisible = !controlsVisible
-                                    interaction++
-                                }
-                            }
-                            .pointerInput(player) {
-                                detectVerticalDragGestures(
-                                    onVerticalDrag = { change, distance ->
-                                        dragDistance += distance
-                                        if (dragDistance < -40f || dragDistance > 40f) change.consume()
+    val portraitVideo = videoAspectRatio < 1f && !fullscreen
+    val videoBackground = if (portraitVideo) Color.Black else HongguoPlayerBackground
+    Box(Modifier.fillMaxSize().background(videoBackground)) {
+        Column(Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
+            Box(Modifier.fillMaxWidth().weight(1f)
+                .then(if (portraitVideo) Modifier.clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)) else Modifier)) {
+                Column(Modifier.fillMaxSize().then(
+                    if (!fullscreen && !portraitVideo) Modifier
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).padding(top = 56.dp)
+                    else Modifier
+                )) {
+                    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        val showFullscreenButton = !fullscreen && !portraitVideo && player != null && error == null
+                        val videoAreaHeight = (maxHeight - if (showFullscreenButton) 56.dp else 0.dp).coerceAtLeast(0.dp)
+                        Box(Modifier.fillMaxWidth().height(videoAreaHeight).align(Alignment.TopCenter), contentAlignment = Alignment.Center) {
+                            if (player != null) key(player) {
+                                AndroidView(
+                                    factory = { viewContext ->
+                                        PlayerView(viewContext).apply {
+                                            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                                            useController = false
+                                            resizeMode = if (portraitVideo) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                            setShutterBackgroundColor(videoBackground.toArgb())
+                                            setBackgroundColor(videoBackground.toArgb())
+                                            keepScreenOn = true
+                                            this.player = player
+                                        }
                                     },
-                                    onDragEnd = {
-                                        if (dragDistance < -80f) onSwipeForward()
-                                        else if (dragDistance > 80f) onSwipeBack()
-                                        dragDistance = 0f
+                                    modifier = Modifier.fillMaxSize(),
+                                    update = { view ->
+                                        view.resizeMode = if (portraitVideo) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                        view.setShutterBackgroundColor(videoBackground.toArgb())
+                                        view.setBackgroundColor(videoBackground.toArgb())
                                     },
-                                    onDragCancel = { dragDistance = 0f },
+                                    onRelease = { view -> view.player = null },
                                 )
+                                Box(Modifier.matchParentSize()
+                                    .pointerInput(player) {
+                                        detectTapGestures {
+                                            controlsVisible = !controlsVisible
+                                            interaction++
+                                        }
+                                    }
+                                    .pointerInput(player) {
+                                        detectVerticalDragGestures(
+                                            onVerticalDrag = { change, distance ->
+                                                dragDistance += distance
+                                                if (dragDistance < -40f || dragDistance > 40f) change.consume()
+                                            },
+                                            onDragEnd = {
+                                                if (dragDistance < -80f) onSwipeForward()
+                                                else if (dragDistance > 80f) onSwipeBack()
+                                                dragDistance = 0f
+                                            },
+                                            onDragCancel = { dragDistance = 0f },
+                                        )
+                                    }
+                                )
+                                androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
+                                    enter = fadeIn(), exit = fadeOut()) {
+                                    FilledIconButton(togglePlayback, Modifier.size(56.dp),
+                                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
+                                        Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                            if (playing) "暂停" else "播放", Modifier.size(30.dp))
+                                    }
+                                }
                             }
-                        )
-                        androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
-                            enter = fadeIn(), exit = fadeOut()) {
-                            FilledIconButton(togglePlayback, Modifier.size(56.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
-                                Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                    if (playing) "暂停" else "播放", Modifier.size(30.dp))
+                            when {
+                                error != null -> Surface(
+                                    modifier = Modifier.padding(24.dp), color = Color.Black.copy(alpha = .8f), contentColor = Color.White,
+                                    shape = RoundedCornerShape(14.dp),
+                                ) {
+                                    Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(error, style = MaterialTheme.typography.bodyMedium)
+                                        TextButton(onRetry, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("重新播放") }
+                                    }
+                                }
+                                loading -> CircularProgressIndicator(color = Color.White)
+                                player == null -> Text("请选择可播放的分集", color = Color.White)
+                            }
+                        }
+                        if (showFullscreenButton) {
+                            val videoHeight = minOf(videoAreaHeight, maxWidth / videoAspectRatio)
+                            FilledTonalButton(
+                                onClick = { fullscreen = true; controlsVisible = true; interaction++ },
+                                modifier = Modifier.align(Alignment.TopCenter)
+                                    .offset(y = (videoAreaHeight + videoHeight) / 2 + 8.dp).height(40.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.White.copy(alpha = .04f), contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            ) {
+                                Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("全屏观看", fontSize = 13.sp, fontWeight = FontWeight.Normal)
                             }
                         }
                     }
-                    when {
-                        error != null -> Surface(
-                            modifier = Modifier.padding(24.dp), color = Color.Black.copy(alpha = .8f), contentColor = Color.White,
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(error, style = MaterialTheme.typography.bodyMedium)
-                                TextButton(onRetry, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("重新播放") }
-                            }
-                        }
-                        loading -> CircularProgressIndicator(color = Color.White)
-                        player == null -> Text("请选择可播放的分集", color = Color.White)
+                    if (!fullscreen && !portraitVideo) {
+                        HongguoPlayerInfo(title, intro, episodeLabel, episodeCount, introExpanded,
+                            onToggleIntro = { introExpanded = !introExpanded }, onShowEpisodes = onShowEpisodes)
+                        Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, seekable, seek, finishSeek) }
                     }
                 }
-                if (showFullscreenButton) {
-                    val videoHeight = minOf(videoAreaHeight, maxWidth / videoAspectRatio)
-                    FilledTonalButton(
-                        onClick = { fullscreen = true; controlsVisible = true; interaction++ },
-                        modifier = Modifier.align(Alignment.TopCenter)
-                            .offset(y = (videoAreaHeight + videoHeight) / 2 + 8.dp).height(40.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.White.copy(alpha = .04f), contentColor = Color.White),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    ) {
-                        Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("全屏观看", fontSize = 13.sp, fontWeight = FontWeight.Normal)
+                if (portraitVideo) {
+                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .24f), Color.Black.copy(alpha = .7f))))
+                        .padding(top = 56.dp)) {
+                        HongguoPlayerInfo(title, intro, episodeLabel, episodeCount, introExpanded,
+                            onToggleIntro = { introExpanded = !introExpanded }, onShowEpisodes = onShowEpisodes)
+                        Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, seekable, seek, finishSeek) }
                     }
                 }
             }
             if (!fullscreen) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onShowEpisodes),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, Modifier.weight(1f, fill = false), color = Color.White,
-                            fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(20.dp), tint = Color.White)
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (intro.isBlank()) "$episodeLabel · 共${episodeCount}集" else "$episodeLabel | $intro",
-                            Modifier.weight(1f).padding(vertical = 8.dp), color = Color.White.copy(alpha = .72f),
-                            fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal, maxLines = if (introExpanded) 4 else 1, overflow = TextOverflow.Ellipsis)
-                        if (intro.isNotBlank()) TextButton({ introExpanded = !introExpanded },
-                            modifier = Modifier.height(40.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
-                            Text(if (introExpanded) "收起" else "展开", fontSize = 14.sp, fontWeight = FontWeight.Normal)
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = if (portraitVideo) 4.dp else 0.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(onClick = onShowEpisodes, modifier = Modifier.weight(1f).height(44.dp), color = if (portraitVideo) Color(0xFF151515) else HongguoPlayerSurface,
+                        contentColor = Color.White, shape = RoundedCornerShape(10.dp)) {
+                        Row(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("选集 · 全${episodeCount}集", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Normal)
+                            Icon(Icons.Outlined.KeyboardArrowUp, null)
                         }
                     }
-                    HongguoSeekBar(progress, seekable, seek, finishSeek)
-                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(onClick = onShowEpisodes, modifier = Modifier.weight(1f).height(44.dp), color = HongguoPlayerSurface,
-                            contentColor = Color.White, shape = RoundedCornerShape(10.dp)) {
-                            Row(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("选集 · 全${episodeCount}集", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Normal)
-                                Icon(Icons.Outlined.KeyboardArrowUp, null)
-                            }
-                        }
-                        IconButton({ fullscreen = true; controlsVisible = true; interaction++ }, Modifier.size(40.dp)) {
-                            Icon(Icons.Outlined.Fullscreen, "全屏观看",
-                                Modifier.size(22.dp).border(1.5.dp, Color.White, RoundedCornerShape(5.dp)).padding(2.dp), tint = Color.White)
-                        }
+                    IconButton({ fullscreen = true; controlsVisible = true; interaction++ }, Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.Fullscreen, "全屏观看",
+                            Modifier.size(22.dp).border(1.5.dp, Color.White, RoundedCornerShape(5.dp)).padding(2.dp), tint = Color.White)
                     }
                 }
             }
         }
         AnimatedVisibility(visible = !fullscreen || controlsVisible, modifier = Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
             Row(Modifier.fillMaxWidth()
-                .background(if (fullscreen) Brush.verticalGradient(listOf(Color.Black.copy(alpha = .7f), Color.Transparent))
+                .background(if (fullscreen || portraitVideo) Brush.verticalGradient(listOf(Color.Black.copy(alpha = .7f), Color.Transparent))
                     else Brush.verticalGradient(listOf(HongguoPlayerBackground, HongguoPlayerBackground)))
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -369,6 +381,32 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     TextButton(onShowEpisodes, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("选集") }
                     IconButton({ fullscreen = false }) { Icon(Icons.Outlined.FullscreenExit, "退出全屏", tint = Color.White) }
                 }
+            }
+        }
+    }
+}
+
+/** 两种视频布局共用剧集信息，保持字号和展开行为一致。 */
+@Composable private fun HongguoPlayerInfo(
+    title: String, intro: String, episodeLabel: String, episodeCount: Int, expanded: Boolean,
+    onToggleIntro: () -> Unit, onShowEpisodes: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onShowEpisodes),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f, fill = false), color = Color.White,
+                fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(20.dp), tint = Color.White)
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (intro.isBlank()) "$episodeLabel · 共${episodeCount}集" else "$episodeLabel | $intro",
+                Modifier.weight(1f).padding(vertical = 8.dp), color = Color.White.copy(alpha = .72f),
+                fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal, maxLines = if (expanded) 4 else 1, overflow = TextOverflow.Ellipsis)
+            if (intro.isNotBlank()) TextButton(onToggleIntro,
+                modifier = Modifier.height(40.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
+                Text(if (expanded) "收起" else "展开", fontSize = 14.sp, fontWeight = FontWeight.Normal)
             }
         }
     }
