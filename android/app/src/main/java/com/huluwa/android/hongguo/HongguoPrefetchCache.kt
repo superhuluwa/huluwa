@@ -67,7 +67,8 @@ internal class HongguoPrefetchCache(
 
     fun clear() {
         entries.clear()
-        requests.values.forEach { it.cancel() }
+        val pending = requests.values.toList()
         requests.clear()
+        pending.forEach { it.cancel() }
     }
 }

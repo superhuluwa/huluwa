@@ -22,6 +22,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,8 +81,9 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     playback: HongguoPlayback?, stream: HongguoStream?, request: Long, startPosition: Long,
     episodePreloads: List<HongguoEpisodePreload>,
     title: String, intro: String, seriesCover: String, episodes: List<HongguoEpisode>, currentEpisode: HongguoEpisode?,
-    episodeCount: Int, loading: Boolean, error: String?,
+    episodeCount: Int, loading: Boolean, error: String?, favorite: Boolean,
     onBack: () -> Unit, onShowEpisodes: () -> Unit, onSelectEpisode: (HongguoEpisode) -> Unit,
+    onToggleFavorite: () -> Unit,
     onFirstFrame: () -> Unit, onProgress: (Long, Long, Boolean) -> Unit, onEnded: () -> Unit,
     onError: (String) -> Unit, onRetry: () -> Unit,
 ) {
@@ -314,9 +316,11 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 firstFrameRendered = firstFrameSent, error = error, position = position, duration = duration,
                 progress = progress, centerPlayVisible = centerPlayVisible,
                 portraitVideo = portraitVideo, videoBackground = videoBackground, introExpanded = introExpanded,
+                favorite = favorite,
                 onTap = togglePlayback,
                 onTogglePlayback = togglePlayback, onSeek = seek, onSeekFinished = finishSeek,
                 onShowEpisodes = onShowEpisodes, onToggleIntro = { introExpanded = !introExpanded },
+                onToggleFavorite = onToggleFavorite,
                 onFullscreen = { fullscreen = true; controlsVisible = true; interaction++ }, onRetry = onRetry,
             )
         }
@@ -380,10 +384,11 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     pageEpisode: HongguoEpisode, currentEpisodeId: String?, episodeCount: Int,
     seriesTitle: String, seriesIntro: String, seriesCover: String, fullscreen: Boolean,
     player: ExoPlayer?, loading: Boolean, firstFrameRendered: Boolean, error: String?, position: Long, duration: Long,
-    progress: Float, centerPlayVisible: Boolean,
+    progress: Float, centerPlayVisible: Boolean, favorite: Boolean,
     portraitVideo: Boolean, videoBackground: Color, introExpanded: Boolean,
     onTap: () -> Unit, onTogglePlayback: () -> Unit, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit,
-    onShowEpisodes: () -> Unit, onToggleIntro: () -> Unit, onFullscreen: () -> Unit, onRetry: () -> Unit,
+    onShowEpisodes: () -> Unit, onToggleIntro: () -> Unit, onToggleFavorite: () -> Unit,
+    onFullscreen: () -> Unit, onRetry: () -> Unit,
 ) {
     val isCurrent = pageEpisode.id == currentEpisodeId
     val episodeLabel = "第${pageEpisode.number}集"
@@ -473,6 +478,11 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                         Text("选集 · 全${episodeCount}集", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Normal)
                         Icon(Icons.Outlined.KeyboardArrowUp, null)
                     }
+                }
+                IconButton(onToggleFavorite, Modifier.size(40.dp)) {
+                    Icon(if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        if (favorite) "取消收藏" else "收藏",
+                        Modifier.size(24.dp), tint = if (favorite) Color(0xFFFF4D67) else Color.White)
                 }
                 IconButton(onFullscreen, Modifier.size(40.dp)) {
                     Icon(Icons.Outlined.Fullscreen, "全屏观看",
