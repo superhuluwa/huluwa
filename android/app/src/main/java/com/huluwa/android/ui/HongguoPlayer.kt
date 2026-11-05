@@ -241,7 +241,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                             )
                         }
                     )
-                    AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
+                    androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
                         enter = fadeIn(), exit = fadeOut()) {
                         FilledIconButton(togglePlayback, Modifier.size(64.dp),
                             colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
