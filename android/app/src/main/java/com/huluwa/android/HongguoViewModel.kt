@@ -252,12 +252,15 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         if (request != null && current.playRequest != request) return
         val episodes = current.detail?.episodes ?: return
         val index = episodes.indexOfFirst { it.id == current.episode?.id }
-        episodes.getOrNull(index + 1)?.takeUnless { it.locked }?.let(::playEpisode)
+        val next = episodes.asSequence().drop(index + 1).firstOrNull { !it.locked } ?: return
+        playEpisode(next)
     }
     fun previousEpisode() {
         val current = mutable.value
         val episodes = current.detail?.episodes ?: return
-        episodes.getOrNull(episodes.indexOfFirst { it.id == current.episode?.id } - 1)?.takeUnless { it.locked }?.let(::playEpisode)
+        val index = episodes.indexOfFirst { it.id == current.episode?.id }
+        val previous = episodes.asSequence().take(index.coerceAtLeast(0)).lastOrNull { !it.locked } ?: return
+        playEpisode(previous)
     }
     fun playerError(request: Long, message: String) {
         mutable.update { if (it.playRequest == request) it.copy(playError = message) else it }
