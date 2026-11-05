@@ -49,7 +49,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private var playbackJob: Job? = null
     private val positions = mutableMapOf<String, HongguoWatchProgress>()
     private val lastSavedAt = mutableMapOf<String, Long>()
-    private var preferredDefinition = "720p"
+    private var preferredDefinition = "1080p"
 
     init { loadSettings() }
     fun setQuery(value: String) { mutable.update { it.copy(query = value.take(100)) } }
