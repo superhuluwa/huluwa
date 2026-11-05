@@ -3,6 +3,7 @@ package com.huluwa.android.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.horizontalScroll
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.huluwa.android.HongguoFeedTab
@@ -39,26 +42,26 @@ import com.huluwa.android.data.*
     val back = { if (!vm.back()) onClose() }
     BackHandler(onBack = back)
     LaunchedEffect(Unit) { vm.loadDiscover() }
-    Scaffold(
-        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
-        containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            Surface(color = Color.White) {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
-                    Column(Modifier.weight(1f)) {
-                        Text(ui.detail?.series?.title ?: ui.selectedSeries?.title ?: "红果短视频",
-                            style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (ui.selectedSeries == null) "推荐 · 排行榜 · 想看的短剧" else "选集播放 · 自动连播",
-                            style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+    if (ui.selectedSeries != null) {
+        HongguoDetailContent(ui, vm, back)
+    } else {
+        Scaffold(
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+            containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                Surface(color = Color.White) {
+                    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+                        Column(Modifier.weight(1f)) {
+                            Text("红果短视频", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("推荐 · 排行榜 · 想看的短剧", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                        }
+                        IconButton(vm::showSettings) { Icon(Icons.Outlined.Settings, "连接设置") }
                     }
-                    IconButton(vm::showSettings) { Icon(Icons.Outlined.Settings, "连接设置") }
                 }
-            }
-        },
-    ) { padding ->
-        Box(Modifier.padding(padding).navigationBarsPadding().fillMaxSize()) {
-            if (ui.selectedSeries == null) HongguoHome(ui, vm) else HongguoDetailContent(ui, vm)
+            },
+        ) { padding ->
+            Box(Modifier.padding(padding).navigationBarsPadding().fillMaxSize()) { HongguoHome(ui, vm) }
         }
     }
     if (ui.settingsVisible) HongguoSettingsDialog(ui, vm)
@@ -245,78 +248,107 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     }
 }
 
-@Composable private fun HongguoDetailContent(ui: HongguoState, vm: HongguoViewModel) {
-    if (ui.detailLoading) { HongguoLoading("正在加载剧集…"); return }
-    if (ui.detailError != null) { HongguoError(ui.detailError) { ui.selectedSeries?.let(vm::openSeries) }; return }
+@Composable private fun HongguoDetailContent(ui: HongguoState, vm: HongguoViewModel, onBack: () -> Unit) {
+    if (ui.detailLoading) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) { HongguoLoading("正在加载剧集…", dark = true) }
+        return
+    }
+    if (ui.detailError != null) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            HongguoError(ui.detailError) { ui.selectedSeries?.let(vm::openSeries) }
+        }
+        return
+    }
     val detail = ui.detail ?: return
-    Column(Modifier.fillMaxSize()) {
-        val episode = ui.episode
-        val playback = ui.playback
-        val stream = ui.stream
-        Box(Modifier.fillMaxWidth().height(300.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-            HongguoPlayer(
-                playback, stream, ui.playRequest, ui.startPositionMs, ui.playLoading, ui.playError,
-                onProgress = { position, duration, force ->
-                    if (episode != null) vm.progress(detail.series.id, episode, position, duration, force)
-                },
-                onEnded = { vm.nextEpisode(ui.playRequest) },
-                onError = { vm.playerError(ui.playRequest, it) }, onRetry = vm::retryPlayback,
-            )
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(episode?.title ?: "选择分集", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-            val episodeIndex = detail.episodes.indexOfFirst { it.id == episode?.id }
-            TextButton(vm::previousEpisode, enabled = episodeIndex > 0 && detail.episodes.getOrNull(episodeIndex - 1)?.locked == false) { Text("上一集") }
-            TextButton({ vm.nextEpisode() }, enabled = detail.episodes.getOrNull(episodeIndex + 1)?.locked == false) { Text("下一集") }
-            if (playback != null) {
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    TextButton({ menu = true }) { Text(stream?.definition ?: "清晰度") }
-                    DropdownMenu(menu, { menu = false }) {
-                        playback.streams.forEachIndexed { index, variant ->
-                            DropdownMenuItem(text = { Text(variant.definition + if (index == ui.streamIndex) " ✓" else "") },
-                                onClick = { menu = false; vm.selectStream(index) })
+    val episode = ui.episode
+    val episodes = detail.episodes
+    val episodeIndex = episodes.indexOfFirst { it.id == episode?.id }
+    var showEpisodes by remember(detail.series.id) { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        HongguoPlayer(
+            playback = ui.playback, stream = ui.stream, request = ui.playRequest, startPosition = ui.startPositionMs,
+            title = detail.series.title, episodeNumber = episode?.number, episodeCount = episodes.size,
+            canPrevious = episodeIndex > 0 && !episodes[episodeIndex - 1].locked,
+            canNext = episodeIndex >= 0 && episodes.getOrNull(episodeIndex + 1)?.locked == false,
+            loading = ui.playLoading, error = ui.playError,
+            onBack = onBack, onPrevious = vm::previousEpisode, onNext = { vm.nextEpisode() },
+            onShowEpisodes = { showEpisodes = true }, onSelectStream = vm::selectStream,
+            onProgress = { position, duration, force ->
+                episode?.let { vm.progress(detail.series.id, it, position, duration, force) }
+            },
+            onEnded = { vm.nextEpisode(ui.playRequest) },
+            onError = { vm.playerError(ui.playRequest, it) }, onRetry = vm::retryPlayback,
+        )
+    }
+    if (showEpisodes) {
+        HongguoEpisodeSheet(detail, episode, onDismiss = { showEpisodes = false },
+            onSelect = { item -> showEpisodes = false; vm.playEpisode(item) })
+    }
+}
+
+/** 电视端选集样式：大号数字网格、当前集高亮，锁定集保留锁标记。 */
+@Composable private fun HongguoEpisodeSheet(
+    detail: HongguoDetail, current: HongguoEpisode?, onDismiss: () -> Unit, onSelect: (HongguoEpisode) -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .78f)).clickable(onClick = onDismiss),
+            contentAlignment = Alignment.BottomCenter) {
+            Surface(
+                Modifier.fillMaxWidth().navigationBarsPadding()
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                color = Color(0xFF171717), contentColor = Color.White,
+                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(detail.series.title, style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("共${detail.episodes.size}集 · 自动连播", color = Color.White.copy(alpha = .6f),
+                                style = MaterialTheme.typography.labelMedium)
+                        }
+                        IconButton(onDismiss) { Icon(Icons.Outlined.Close, "关闭分集", tint = Color.White) }
+                    }
+                    LazyColumn(
+                        Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(detail.episodes.chunked(5), key = { it.first().id }) { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                row.forEach { item ->
+                                    val selected = item.id == current?.id
+                                    Surface(
+                                        Modifier.weight(1f).height(52.dp)
+                                            .clickable(enabled = !item.locked) { onSelect(item) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (selected) Color(0xFFE44B40) else Color(0xFF292929),
+                                        contentColor = if (selected) Color.White else Color.White.copy(alpha = if (item.locked) .38f else .88f),
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (item.locked) Icon(Icons.Outlined.Lock, "需解锁", Modifier.size(18.dp))
+                                            else Text("${item.number}", style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+                                        }
+                                    }
+                                }
+                                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
                         }
                     }
-                }
-            }
-        }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (ui.playError != null) item { HongguoError(ui.playError, vm::retryPlayback) }
-            item {
-                Text(detail.series.title, style = MaterialTheme.typography.titleMedium)
-                Text("共 ${detail.episodes.size} 集", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                if (detail.series.intro.isNotBlank()) {
-                    var expanded by remember(detail.series.id) { mutableStateOf(false) }
-                    Text(detail.series.intro, Modifier.padding(top = 8.dp).clickable { expanded = !expanded },
-                        style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted,
-                        maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            items(detail.episodes.chunked(5), key = { it.first().id }) { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { item ->
-                        val selected = episode?.id == item.id
-                        OutlinedButton({ vm.playEpisode(item) }, Modifier.weight(1f), enabled = !item.locked,
-                            shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 2.dp, vertical = 10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = if (selected) Color(0xFFFFEAE6) else Color.White,
-                                contentColor = if (selected) Color(0xFFCA3D32) else HuluwaColors.Ink)) {
-                            if (item.locked) Icon(Icons.Outlined.Lock, "需解锁", Modifier.size(12.dp))
-                            Text("${item.number}", maxLines = 1)
-                        }
-                    }
-                    repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
     }
 }
 
-@Composable private fun HongguoLoading(message: String) {
+@Composable private fun HongguoLoading(message: String, dark: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(24.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
-        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-        Text(message, color = HuluwaColors.Muted)
+        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp,
+            color = if (dark) Color.White else MaterialTheme.colorScheme.primary)
+        Text(message, color = if (dark) Color.White.copy(alpha = .72f) else HuluwaColors.Muted)
     }
 }
 @Composable private fun HongguoError(message: String, retry: () -> Unit) {
