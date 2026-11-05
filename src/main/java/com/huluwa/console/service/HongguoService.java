@@ -26,7 +26,7 @@ import java.util.zip.GZIPInputStream;
 @Service
 public class HongguoService {
     private static final String ORIGIN = "https://api5-normal-sinfonlineb.fqnovel.com";
-    private static final String DEFAULT_SIGN_URL = "http://192.168.3.83:8901";
+    private static final String DEFAULT_SIGN_URL = "http://192.168.3.77:8901";
     private static final String PREFIX = "/reading/bookapi/";
     private static final Set<String> PROFILE_KEYS = Set.of(
             "device_id", "iid", "cdid", "device_type", "device_brand", "channel", "aid", "app_name",
