@@ -284,9 +284,9 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HongguoPlayer(
             playback = ui.playback, stream = ui.stream, request = ui.playRequest, startPosition = ui.startPositionMs,
-            title = detail.series.title, episodeNumber = episode?.number, episodeCount = episodes.size,
-            favorite = ui.favoriteSelected, loading = ui.playLoading, error = ui.playError,
-            onBack = onBack, onShowEpisodes = { showEpisodes = true }, onToggleFavorite = vm::toggleFavorite,
+            title = detail.series.title, intro = detail.series.intro, episodeNumber = episode?.number, episodeCount = episodes.size,
+            loading = ui.playLoading, error = ui.playError,
+            onBack = onBack, onShowEpisodes = { showEpisodes = true },
             onSwipeForward = { vm.nextEpisode() }, onSwipeBack = vm::previousEpisode,
             onFirstFrame = { vm.prefetchNextEpisode(ui.playRequest) },
             onProgress = { position, duration, force ->
