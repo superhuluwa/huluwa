@@ -399,7 +399,6 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                         }
                     }
                     loading -> CircularProgressIndicator(color = Color.White)
-                    else -> Text("请选择可播放的分集", color = Color.White)
                 }
             }
             if (portraitVideo && isCurrent) {
