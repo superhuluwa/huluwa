@@ -17,10 +17,12 @@ data class BrowserVideo(
 
 object MovieWebVideo {
     fun isMoviePage(url: String): Boolean = url.toHttpUrlOrNull()?.host in setOf("66vod.com", "www.66vod.com")
+    // 站点会轮换数字域名；原生入口与页面脚本共用规则，随机子域名和端口由 URL 解析处理。
+    private val mfcnHost = Regex("""^(?:[^.]+\.)*mfcn[0-9]+\.com$""", RegexOption.IGNORE_CASE)
     private val mfcnVideoPath = Regex("""/video/\d+\.html?""", RegexOption.IGNORE_CASE)
     fun isMfcnPage(url: String): Boolean {
         val uri = url.toHttpUrlOrNull() ?: return false
-        return (uri.host == "mfcn801.com" || uri.host.endsWith(".mfcn801.com")) &&
+        return mfcnHost.matches(uri.host) &&
             mfcnVideoPath.matches(uri.encodedPath)
     }
     fun isSupportedPage(url: String): Boolean = isMoviePage(url) || isMfcnPage(url)
@@ -77,7 +79,7 @@ object MovieWebVideo {
     val captureScript = """
         (function() {
           var mfcnVideo = /^\/video\/(\d+)\.html?$/i.exec(location.pathname);
-          var mfcnPage = (location.hostname === 'mfcn801.com' || location.hostname.endsWith('.mfcn801.com')) && mfcnVideo;
+          var mfcnPage = new RegExp(${JsonPrimitive(mfcnHost.pattern)}, 'i').test(location.hostname) && mfcnVideo;
           $mfcnAdaptScript
           if (!mfcnPage && !document.getElementById('huluwa-video-style')) {
             var style = document.createElement('style');
