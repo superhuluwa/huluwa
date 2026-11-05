@@ -105,6 +105,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     var showMore by remember { mutableStateOf(false) }
     var introExpanded by remember(title) { mutableStateOf(false) }
     var controlsVisible by remember(request) { mutableStateOf(true) }
+    var centerPlayVisible by remember(request) { mutableStateOf(false) }
     var interaction by remember(request) { mutableIntStateOf(0) }
     var playing by remember(request) { mutableStateOf(false) }
     var firstFrameSent by remember(request) { mutableStateOf(false) }
@@ -185,12 +186,17 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         seekFraction = null
     }
     val togglePlayback: () -> Unit = {
+        var pausedByUser = false
         player?.let {
-            if (it.playWhenReady) it.pause() else {
+            if (it.playWhenReady) {
+                it.pause()
+                pausedByUser = true
+            } else {
                 if (it.playbackState == Player.STATE_ENDED) it.seekTo(0)
                 it.play()
             }
         }
+        centerPlayVisible = pausedByUser
         controlsVisible = true
         interaction++
     }
@@ -263,9 +269,9 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 pageEpisode = pageEpisode, currentEpisodeId = currentEpisodeId, episodeCount = episodeCount,
                 seriesTitle = title, seriesIntro = intro, seriesCover = seriesCover, fullscreen = fullscreen,
                 player = player, loading = loading, error = error, position = position, duration = duration,
-                seekable = seekable, progress = progress, controlsVisible = controlsVisible, playing = playing,
+                seekable = seekable, progress = progress, centerPlayVisible = centerPlayVisible,
                 portraitVideo = portraitVideo, videoBackground = videoBackground, introExpanded = introExpanded,
-                onTap = { controlsVisible = !controlsVisible; interaction++ },
+                onTap = togglePlayback,
                 onTogglePlayback = togglePlayback, onSeek = seek, onSeekFinished = finishSeek,
                 onShowEpisodes = onShowEpisodes, onToggleIntro = { introExpanded = !introExpanded },
                 onFullscreen = { fullscreen = true; controlsVisible = true; interaction++ }, onRetry = onRetry,
@@ -331,7 +337,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     pageEpisode: HongguoEpisode, currentEpisodeId: String?, episodeCount: Int,
     seriesTitle: String, seriesIntro: String, seriesCover: String, fullscreen: Boolean,
     player: ExoPlayer?, loading: Boolean, error: String?, position: Long, duration: Long,
-    seekable: Boolean, progress: Float, controlsVisible: Boolean, playing: Boolean,
+    seekable: Boolean, progress: Float, centerPlayVisible: Boolean,
     portraitVideo: Boolean, videoBackground: Color, introExpanded: Boolean,
     onTap: () -> Unit, onTogglePlayback: () -> Unit, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit,
     onShowEpisodes: () -> Unit, onToggleIntro: () -> Unit, onFullscreen: () -> Unit, onRetry: () -> Unit,
@@ -370,12 +376,11 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                         Box(Modifier.matchParentSize().pointerInput(player) {
                             detectTapGestures { onTap() }
                         })
-                        androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
+                        androidx.compose.animation.AnimatedVisibility(visible = centerPlayVisible && !loading && error == null,
                             enter = fadeIn(), exit = fadeOut()) {
                             FilledIconButton(onTogglePlayback, Modifier.size(64.dp),
                                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
-                                Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                    if (playing) "暂停" else "播放", Modifier.size(36.dp))
+                                Icon(Icons.Outlined.PlayArrow, "播放", Modifier.size(36.dp))
                             }
                         }
                     }
