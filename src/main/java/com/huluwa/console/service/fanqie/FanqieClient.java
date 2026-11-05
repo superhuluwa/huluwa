@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
@@ -121,6 +122,8 @@ public final class FanqieClient {
     /** U+FFFD 替换符，用于 UTF-8 容错解码。 */
     private static final Pattern P_TAG = Pattern.compile("<[^>]+>");
     private static final Pattern P_BR = Pattern.compile("<br\\s*/?>");
+    private static final Pattern P_ENTITY =
+            Pattern.compile("&(?:#([0-9]+)|#[xX]([0-9a-fA-F]+)|[A-Za-z][A-Za-z0-9]+);");
     private static final Pattern P_P = Pattern.compile("<p[^>]*>(.*?)</p>", Pattern.DOTALL);
     private static final Pattern P_CONTENT_DIV =
             Pattern.compile("<div[^>]*class=\"[^\"]*content[^\"]*\"[^>]*>(.*?)</div>", Pattern.DOTALL);
@@ -871,15 +874,40 @@ public final class FanqieClient {
         while (m.find()) {
             String s = P_BR.matcher(m.group(1)).replaceAll("\n");
             s = P_TAG.matcher(s).replaceAll("");
-            s = s.replace("&nbsp;", " ").replace("&lt;", "<")
-                    .replace("&gt;", ">").replace("&amp;", "&")
-                    .replace("&quot;", "\"").replace("&#39;", "'")
-                    .replace("&apos;", "'").trim();
+            s = decodeHtmlEntities(s).trim();
             if (!s.isEmpty()) {
                 out.add(s);
             }
         }
         return out;
+    }
+
+    /** 只解码实体，保留纯文本里的换行和尖括号；非法数字实体原样保留。 */
+    public static String decodeHtmlEntities(String text) {
+        if (text == null) return "";
+        if (text.indexOf('&') < 0) return text;
+        return P_ENTITY.matcher(text).replaceAll(match -> {
+            String entity = match.group();
+            String decimal = match.group(1);
+            String hex = match.group(2);
+            String decoded;
+            if (decimal != null || hex != null) {
+                try {
+                    int codePoint = Integer.parseInt(decimal != null ? decimal : hex, decimal != null ? 10 : 16);
+                    if (codePoint == 0 || !Character.isValidCodePoint(codePoint) ||
+                            (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE)) {
+                        return entity;
+                    }
+                    decoded = new String(Character.toChars(codePoint));
+                } catch (NumberFormatException error) {
+                    return entity;
+                }
+            } else {
+                decoded = "&apos;".equals(entity) ? "'" : HtmlUtils.htmlUnescape(entity);
+            }
+            // replaceAll 的替换值可能包含 $ 或反斜杠，必须按字面量处理。
+            return Matcher.quoteReplacement(decoded.replace('\u00a0', ' '));
+        });
     }
 
     // ------------------------------------------------------------------

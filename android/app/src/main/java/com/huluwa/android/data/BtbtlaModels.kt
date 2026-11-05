@@ -107,11 +107,11 @@ data class FanqieBook(
         fun from(raw: JsonObject): FanqieBook? {
             if (raw.text("kind") != "fanqie-book") return null
             val id = raw.text("bookId")
-            if (id.isBlank() || raw.text("title").isBlank()) return null
-            return FanqieBook(id, raw.text("title"), raw.text("author"), raw.text("thumbUrl"),
-                raw.text("category"), raw.number("wordNumber")?.toLong() ?: 0L,
+            if (id.isBlank() || raw.fanqieText("title").isBlank()) return null
+            return FanqieBook(id, raw.fanqieText("title"), raw.fanqieText("author"), raw.text("thumbUrl"),
+                raw.fanqieText("category"), raw.number("wordNumber")?.toLong() ?: 0L,
                 raw.flag("finished"), raw.number("score")?.toDouble() ?: 0.0,
-                raw.text("abstract"), raw.text("lastChapterTitle"))
+                raw.fanqieText("abstract"), raw.fanqieText("lastChapterTitle"))
         }
     }
 }
@@ -130,7 +130,7 @@ data class FanqieReaderCard(
             if (raw.text("kind") != "fanqie-reader") return null
             val id = raw.text("bookId")
             if (id.isBlank()) return null
-            return FanqieReaderCard(id, raw.text("title"), raw.text("author"), raw.text("cover"),
+            return FanqieReaderCard(id, raw.fanqieText("title"), raw.fanqieText("author"), raw.text("cover"),
                 raw.number("progressChapter")?.toInt() ?: 0)
         }
     }
@@ -148,10 +148,10 @@ data class FanqieChapter(
     val paragraphs = content.split('\n').map(String::trim).filter(String::isNotBlank)
     companion object {
         fun from(raw: JsonObject): FanqieChapter = FanqieChapter(
-            raw.text("bookId"), raw.text("title"), raw.text("author"),
-            raw.number("order")?.toInt() ?: 1, raw.text("chapterTitle"), raw.text("content"),
+            raw.text("bookId"), raw.fanqieText("title"), raw.fanqieText("author"),
+            raw.number("order")?.toInt() ?: 1, raw.fanqieText("chapterTitle"), raw.fanqieText("content"),
             raw.number("chapterCount")?.toInt() ?: 0, raw.flag("hasPrev"), raw.flag("hasNext"),
-            raw.text("prevChapter"), raw.text("nextChapter"),
+            raw.fanqieText("prevChapter"), raw.fanqieText("nextChapter"),
             raw.number("paragraphIndex")?.toInt() ?: 0, raw.number("scrollOffset")?.toInt() ?: 0,
         )
     }
@@ -172,7 +172,7 @@ data class FanqieTocItem(val order: Int, val title: String) {
     companion object {
         fun from(raw: JsonObject): FanqieTocItem? {
             val order = raw.number("order")?.toInt() ?: return null
-            val title = raw.text("title")
+            val title = raw.fanqieText("title")
             if (title.isBlank()) return null
             return FanqieTocItem(order, title)
         }
@@ -193,8 +193,8 @@ data class FanqieBookShelf(
     companion object {
         fun from(raw: JsonObject): FanqieBookShelf? {
             val id = raw.text("bookId")
-            if (id.isBlank() || raw.text("title").isBlank()) return null
-            return FanqieBookShelf(id, raw.text("title"), raw.text("author"), raw.text("cover"),
+            if (id.isBlank() || raw.fanqieText("title").isBlank()) return null
+            return FanqieBookShelf(id, raw.fanqieText("title"), raw.fanqieText("author"), raw.text("cover"),
                 raw.number("chapterCount")?.toInt() ?: 0, raw.number("totalChars")?.toLong() ?: 0L,
                 raw.number("progressChapter")?.toInt() ?: 0, raw.number("downloadedChapterCount")?.toInt() ?: 0)
         }
@@ -206,7 +206,7 @@ data class FanqieBookUpdate(val bookId: String, val title: String, val chapterCo
     val downloadedChapterCount: Int, val newChapters: Int, val downloadedChapters: Int,
     val failedChapters: Int, val error: String?) {
     companion object {
-        fun from(raw: JsonObject) = FanqieBookUpdate(raw.text("bookId"), raw.text("title"),
+        fun from(raw: JsonObject) = FanqieBookUpdate(raw.text("bookId"), raw.fanqieText("title"),
             raw.number("chapterCount")?.toInt() ?: 0, raw.number("downloadedChapterCount")?.toInt() ?: 0,
             raw.number("newChapters")?.toInt() ?: 0, raw.number("downloadedChapters")?.toInt() ?: 0,
             raw.number("failedChapters")?.toInt() ?: 0, raw.text("error").ifBlank { null })
@@ -231,7 +231,7 @@ data class FanqieShelfUpdateStatus(val startedAt: Long, val running: Boolean, va
     companion object {
         fun from(raw: JsonObject) = FanqieShelfUpdateStatus(raw.number("startedAt")?.toLong() ?: 0L,
             raw.flag("running"), raw.number("totalBooks")?.toInt() ?: 0, raw.number("checkedBooks")?.toInt() ?: 0,
-            raw.text("currentBookId"), raw.text("currentTitle"), raw.rows("books").map { FanqieBookUpdate.from(it.asObject()) },
+            raw.text("currentBookId"), raw.fanqieText("currentTitle"), raw.rows("books").map { FanqieBookUpdate.from(it.asObject()) },
             raw.text("error").ifBlank { null })
     }
 }
