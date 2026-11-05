@@ -12,11 +12,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -24,10 +24,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -203,112 +204,119 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(top = if (fullscreen) 0.dp else 56.dp)) {
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                if (player != null) key(player) {
-                    AndroidView(
-                        factory = { viewContext ->
-                            PlayerView(viewContext).apply {
-                                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                                useController = false
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                setShutterBackgroundColor(HongguoPlayerBackground.toArgb())
-                                setBackgroundColor(HongguoPlayerBackground.toArgb())
-                                keepScreenOn = true
-                                this.player = player
+                val showFullscreenButton = !fullscreen && player != null && error == null
+                val videoAreaHeight = (maxHeight - if (showFullscreenButton) 56.dp else 0.dp).coerceAtLeast(0.dp)
+                Box(Modifier.fillMaxWidth().height(videoAreaHeight).align(Alignment.TopCenter), contentAlignment = Alignment.Center) {
+                    if (player != null) key(player) {
+                        AndroidView(
+                            factory = { viewContext ->
+                                PlayerView(viewContext).apply {
+                                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                                    useController = false
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    setShutterBackgroundColor(HongguoPlayerBackground.toArgb())
+                                    setBackgroundColor(HongguoPlayerBackground.toArgb())
+                                    keepScreenOn = true
+                                    this.player = player
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            onRelease = { view -> view.player = null },
+                        )
+                        Box(Modifier.matchParentSize()
+                            .pointerInput(player) {
+                                detectTapGestures {
+                                    controlsVisible = !controlsVisible
+                                    interaction++
+                                }
                             }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        onRelease = { view -> view.player = null },
-                    )
-                    Box(Modifier.matchParentSize()
-                        .pointerInput(player) {
-                            detectTapGestures {
-                                controlsVisible = !controlsVisible
-                                interaction++
+                            .pointerInput(player) {
+                                detectVerticalDragGestures(
+                                    onVerticalDrag = { change, distance ->
+                                        dragDistance += distance
+                                        if (dragDistance < -40f || dragDistance > 40f) change.consume()
+                                    },
+                                    onDragEnd = {
+                                        if (dragDistance < -80f) onSwipeForward()
+                                        else if (dragDistance > 80f) onSwipeBack()
+                                        dragDistance = 0f
+                                    },
+                                    onDragCancel = { dragDistance = 0f },
+                                )
                             }
-                        }
-                        .pointerInput(player) {
-                            detectVerticalDragGestures(
-                                onVerticalDrag = { change, distance ->
-                                    dragDistance += distance
-                                    if (dragDistance < -40f || dragDistance > 40f) change.consume()
-                                },
-                                onDragEnd = {
-                                    if (dragDistance < -80f) onSwipeForward()
-                                    else if (dragDistance > 80f) onSwipeBack()
-                                    dragDistance = 0f
-                                },
-                                onDragCancel = { dragDistance = 0f },
-                            )
-                        }
-                    )
-                    androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
-                        enter = fadeIn(), exit = fadeOut()) {
-                        FilledIconButton(togglePlayback, Modifier.size(64.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
-                            Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                                if (playing) "暂停" else "播放", Modifier.size(36.dp))
+                        )
+                        androidx.compose.animation.AnimatedVisibility(visible = (controlsVisible || !playing) && !loading && error == null,
+                            enter = fadeIn(), exit = fadeOut()) {
+                            FilledIconButton(togglePlayback, Modifier.size(56.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = .35f), contentColor = Color.White)) {
+                                Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                                    if (playing) "暂停" else "播放", Modifier.size(30.dp))
+                            }
                         }
                     }
-                }
-                when {
-                    error != null -> Surface(
-                        modifier = Modifier.padding(24.dp), color = Color.Black.copy(alpha = .8f), contentColor = Color.White,
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(error, style = MaterialTheme.typography.bodyMedium)
-                            TextButton(onRetry, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("重新播放") }
+                    when {
+                        error != null -> Surface(
+                            modifier = Modifier.padding(24.dp), color = Color.Black.copy(alpha = .8f), contentColor = Color.White,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(error, style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onRetry, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("重新播放") }
+                            }
                         }
+                        loading -> CircularProgressIndicator(color = Color.White)
+                        player == null -> Text("请选择可播放的分集", color = Color.White)
                     }
-                    loading -> CircularProgressIndicator(color = Color.White)
-                    player == null -> Text("请选择可播放的分集", color = Color.White)
                 }
-                if (!fullscreen && player != null && error == null) {
-                    val videoHeight = minOf(maxHeight, maxWidth / videoAspectRatio)
+                if (showFullscreenButton) {
+                    val videoHeight = minOf(videoAreaHeight, maxWidth / videoAspectRatio)
                     FilledTonalButton(
                         onClick = { fullscreen = true; controlsVisible = true; interaction++ },
-                        modifier = Modifier.offset(y = minOf(videoHeight / 2 + 32.dp, maxHeight / 2 - 24.dp)),
-                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.align(Alignment.TopCenter)
+                            .offset(y = (videoAreaHeight + videoHeight) / 2 + 8.dp).height(40.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color.White.copy(alpha = .04f), contentColor = Color.White),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     ) {
-                        Icon(Icons.Outlined.Fullscreen, null, Modifier.size(20.dp))
+                        Icon(Icons.Outlined.ScreenRotation, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("全屏观看", style = MaterialTheme.typography.labelLarge)
+                        Text("全屏观看", fontSize = 13.sp, fontWeight = FontWeight.Normal)
                     }
                 }
             }
             if (!fullscreen) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onShowEpisodes),
+                    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onShowEpisodes),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(title, Modifier.weight(1f, fill = false), color = Color.White,
-                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                            fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 4.dp).size(22.dp), tint = Color.White)
+                        Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(20.dp), tint = Color.White)
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (intro.isBlank()) "$episodeLabel · 共${episodeCount}集" else "$episodeLabel | $intro",
-                            Modifier.weight(1f).padding(vertical = 12.dp), color = Color.White.copy(alpha = .72f),
-                            style = MaterialTheme.typography.bodyMedium, maxLines = if (introExpanded) 4 else 1, overflow = TextOverflow.Ellipsis)
+                            Modifier.weight(1f).padding(vertical = 8.dp), color = Color.White.copy(alpha = .72f),
+                            fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal, maxLines = if (introExpanded) 4 else 1, overflow = TextOverflow.Ellipsis)
                         if (intro.isNotBlank()) TextButton({ introExpanded = !introExpanded },
+                            modifier = Modifier.height(40.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                             colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
-                            Text(if (introExpanded) "收起" else "展开")
+                            Text(if (introExpanded) "收起" else "展开", fontSize = 14.sp, fontWeight = FontWeight.Normal)
                         }
                     }
                     HongguoSeekBar(progress, seekable, seek, finishSeek)
-                    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
+                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(onClick = onShowEpisodes, modifier = Modifier.weight(1f), color = HongguoPlayerSurface,
-                            contentColor = Color.White, shape = RoundedCornerShape(12.dp)) {
-                            Row(Modifier.padding(horizontal = 16.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("选集 · 全${episodeCount}集", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        Surface(onClick = onShowEpisodes, modifier = Modifier.weight(1f).height(44.dp), color = HongguoPlayerSurface,
+                            contentColor = Color.White, shape = RoundedCornerShape(10.dp)) {
+                            Row(Modifier.padding(horizontal = 16.dp).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("选集 · 全${episodeCount}集", Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Normal)
                                 Icon(Icons.Outlined.KeyboardArrowUp, null)
                             }
                         }
-                        IconButton({ fullscreen = true; controlsVisible = true; interaction++ }) {
-                            Icon(Icons.Outlined.Fullscreen, "全屏观看", Modifier.size(28.dp), tint = Color.White)
+                        IconButton({ fullscreen = true; controlsVisible = true; interaction++ }, Modifier.size(40.dp)) {
+                            Icon(Icons.Outlined.Fullscreen, "全屏观看",
+                                Modifier.size(22.dp).border(1.5.dp, Color.White, RoundedCornerShape(5.dp)).padding(2.dp), tint = Color.White)
                         }
                     }
                 }
@@ -320,14 +328,14 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     else Brush.verticalGradient(listOf(HongguoPlayerBackground, HongguoPlayerBackground)))
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(leavePlayer) { Icon(Icons.Outlined.ChevronLeft, if (fullscreen) "退出全屏" else "返回", Modifier.size(32.dp), tint = Color.White) }
-                Text(episodeLabel, Modifier.weight(1f), color = Color.White, style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1)
+                IconButton(leavePlayer) { Icon(Icons.Outlined.ChevronLeft, if (fullscreen) "退出全屏" else "返回", Modifier.size(28.dp), tint = Color.White) }
+                Text(episodeLabel, Modifier.weight(1f), color = Color.White, fontSize = 18.sp, lineHeight = 26.sp,
+                    fontWeight = FontWeight.Medium, maxLines = 1)
                 Box {
                     TextButton({ showSpeed = true }, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
-                        Icon(Icons.Outlined.Timer, null, Modifier.size(22.dp))
+                        Icon(Icons.Outlined.AvTimer, null, Modifier.size(22.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("${speed}x", style = MaterialTheme.typography.titleMedium)
+                        Text("${speed}x", fontSize = 16.sp, fontWeight = FontWeight.Normal)
                     }
                     DropdownMenu(expanded = showSpeed, onDismissRequest = { showSpeed = false }, containerColor = HongguoPlayerSurface) {
                         listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f).forEach { value ->
@@ -366,20 +374,25 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     }
 }
 
-/** 保留完整触控高度，视觉上使用细线与圆点。 */
+/** 轨道与圆点共用画布坐标，Slider 保留拖动和无障碍交互。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun HongguoSeekBar(progress: Float, enabled: Boolean, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit) {
-    Slider(value = progress, onValueChange = onSeek, onValueChangeFinished = onSeekFinished, enabled = enabled,
-        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "播放进度" },
-        thumb = { Box(Modifier.size(5.dp).background(Color.White, CircleShape)) },
-        track = {
-            Canvas(Modifier.fillMaxWidth().height(2.dp)) {
-                val radius = CornerRadius(size.height / 2)
-                drawRoundRect(Color.White.copy(alpha = .2f), cornerRadius = radius)
-                drawRoundRect(Color.White.copy(alpha = .65f), size = Size(size.width * progress, size.height), cornerRadius = radius)
-            }
-        },
-    )
+    Box(Modifier.fillMaxWidth().height(24.dp)) {
+        Canvas(Modifier.matchParentSize()) {
+            val radius = 2.dp.toPx()
+            val start = Offset(radius, center.y)
+            val end = Offset(size.width - radius, center.y)
+            val thumb = Offset(start.x + (end.x - start.x) * progress, center.y)
+            val stroke = 1.5.dp.toPx()
+            drawLine(Color.White.copy(alpha = .2f), start, end, stroke, StrokeCap.Round)
+            drawLine(Color.White.copy(alpha = .65f), start, thumb, stroke, StrokeCap.Round)
+            drawCircle(Color.White, radius, thumb)
+        }
+        Slider(value = progress, onValueChange = onSeek, onValueChangeFinished = onSeekFinished, enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(24.dp).semantics { contentDescription = "播放进度" },
+            thumb = { Spacer(Modifier.size(4.dp)) }, track = {},
+        )
+    }
 }
 
 /** 竖屏显示浅色系统栏图标，全屏隐藏系统栏，离开播放页时恢复宿主设置。 */
