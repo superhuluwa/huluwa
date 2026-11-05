@@ -15,10 +15,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,12 +37,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -305,7 +317,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         VerticalPager(
             state = pager,
             modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = !fullscreen,
+            userScrollEnabled = !fullscreen && seekFraction == null,
             beyondViewportPageCount = 1,
             key = { pages[it].id },
         ) { page ->
@@ -468,6 +480,9 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         if (!fullscreen && !portraitVideo) {
             HongguoPlayerInfo(seriesTitle, seriesIntro, episodeLabel, episodeCount, introExpanded,
                 onToggleIntro = onToggleIntro, onShowEpisodes = onShowEpisodes)
+            if (isCurrent) {
+                Box(Modifier.padding(horizontal = 16.dp)) { HongguoSeekBar(progress, duration > 0, onSeek, onSeekFinished) }
+            }
         }
         if (!fullscreen) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = if (portraitVideo) 4.dp else 0.dp, bottom = 8.dp),
@@ -542,24 +557,72 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     }
 }
 
-/** 轨道与圆点共用画布坐标；滑块使用更大的触控高度，便于左右拖动定位。 */
-@OptIn(ExperimentalMaterial3Api::class)
+/** 绘制与触摸共用轨道坐标，在 Initial 阶段消费触摸，避免进度手势被纵向翻页抢走。 */
 @Composable private fun HongguoSeekBar(progress: Float, enabled: Boolean, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(40.dp)) {
-        Canvas(Modifier.matchParentSize()) {
-            val radius = 2.dp.toPx()
-            val start = Offset(radius, center.y)
-            val end = Offset(size.width - radius, center.y)
-            val thumb = Offset(start.x + (end.x - start.x) * progress, center.y)
-            val stroke = 1.5.dp.toPx()
-            drawLine(Color.White.copy(alpha = .2f), start, end, stroke, StrokeCap.Round)
-            drawLine(Color.White.copy(alpha = .65f), start, thumb, stroke, StrokeCap.Round)
-            drawCircle(Color.White, radius, thumb)
+    val latestSeek by rememberUpdatedState(onSeek)
+    val latestFinishSeek by rememberUpdatedState(onSeekFinished)
+    Canvas(Modifier.fillMaxWidth().height(48.dp)
+        .progressSemantics(progress, 0f..1f)
+        .semantics {
+            contentDescription = "播放进度"
+            if (enabled) {
+                setProgress { target ->
+                    onSeek(target.coerceIn(0f, 1f))
+                    onSeekFinished()
+                    true
+                }
+            } else disabled()
         }
-        Slider(value = progress, onValueChange = onSeek, onValueChangeFinished = onSeekFinished, enabled = enabled,
-            modifier = Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = "播放进度" },
-            thumb = { Spacer(Modifier.size(4.dp)) }, track = {},
-        )
+        .onKeyEvent { event ->
+            if (!enabled) return@onKeyEvent false
+            val target = when (event.key) {
+                Key.DirectionLeft -> progress - .01f
+                Key.DirectionRight -> progress + .01f
+                Key.MoveHome -> 0f
+                Key.MoveEnd -> 1f
+                else -> return@onKeyEvent false
+            }
+            when (event.type) {
+                KeyEventType.KeyDown -> onSeek(target.coerceIn(0f, 1f))
+                KeyEventType.KeyUp -> onSeekFinished()
+            }
+            true
+        }
+        .focusable(enabled)
+        .pointerInput(enabled) {
+            if (!enabled) return@pointerInput
+            val radius = 2.dp.toPx()
+            fun fractionAt(x: Float): Float = ((x - radius) / (size.width - radius * 2).coerceAtLeast(1f)).coerceIn(0f, 1f)
+            awaitEachGesture {
+                val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                down.consume()
+                // 每次按下获取最新回调，整段手势绑定同一播放请求。
+                val seek = latestSeek
+                val finishSeek = latestFinishSeek
+                try {
+                    seek(fractionAt(down.position.x))
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (change.isConsumed) break
+                        change.consume()
+                        seek(fractionAt(change.position.x))
+                        if (!change.pressed) break
+                    }
+                } finally {
+                    // 点击、拖动结束或手势取消都落定进度并退出拖动状态。
+                    finishSeek()
+                }
+            }
+        }) {
+        val radius = 2.dp.toPx()
+        val start = Offset(radius, center.y)
+        val end = Offset((size.width - radius).coerceAtLeast(radius), center.y)
+        val thumb = Offset(start.x + (end.x - start.x) * progress.coerceIn(0f, 1f), center.y)
+        val stroke = 1.5.dp.toPx()
+        drawLine(Color.White.copy(alpha = .2f), start, end, stroke, StrokeCap.Round)
+        drawLine(Color.White.copy(alpha = .65f), start, thumb, stroke, StrokeCap.Round)
+        drawCircle(Color.White, radius, thumb)
     }
 }
 
