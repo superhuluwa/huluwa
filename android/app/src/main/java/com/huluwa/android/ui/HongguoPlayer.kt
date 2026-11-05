@@ -515,7 +515,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     onToggleIntro: () -> Unit, onShowEpisodes: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable(onClick = onShowEpisodes),
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable(onClick = onShowEpisodes),
             verticalAlignment = Alignment.CenterVertically) {
             Text(seriesTitle, Modifier.weight(1f, fill = false), color = Color.White,
                 fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium,
@@ -524,11 +524,11 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (seriesIntro.isBlank()) "$episodeLabel · 共${episodeCount}集" else "$episodeLabel | $seriesIntro",
-                Modifier.weight(1f).padding(vertical = 8.dp), color = Color.White.copy(alpha = .72f),
+                Modifier.weight(1f).padding(vertical = 4.dp), color = Color.White.copy(alpha = .72f),
                 fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal,
                 maxLines = if (introExpanded) 4 else 1, overflow = TextOverflow.Ellipsis)
             if (seriesIntro.isNotBlank()) TextButton(onToggleIntro,
-                modifier = Modifier.height(40.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
                 Text(if (introExpanded) "收起" else "展开", fontSize = 14.sp, fontWeight = FontWeight.Normal)
             }
@@ -561,7 +561,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
 @Composable private fun HongguoSeekBar(progress: Float, enabled: Boolean, onSeek: (Float) -> Unit, onSeekFinished: () -> Unit) {
     val latestSeek by rememberUpdatedState(onSeek)
     val latestFinishSeek by rememberUpdatedState(onSeekFinished)
-    Canvas(Modifier.fillMaxWidth().height(48.dp)
+    Canvas(Modifier.fillMaxWidth().height(24.dp)
         .progressSemantics(progress, 0f..1f)
         .semantics {
             contentDescription = "播放进度"
