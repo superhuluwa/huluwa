@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """给已有红果 sign_server.py 补充自动设备资料和播放状态恢复。
 
-增加 /info 的设备字段和 POST /recover；保留 /sign 协议和原有进程恢复实现。
+增加 /info 的设备字段和 POST /recover；为播放 URL 的 /sign 增加上游预检与按需恢复，
+保留 /sign 成功响应协议和原有进程恢复实现。
 应用后需重启签名进程。默认备份原文件，已应用时不重复修改。
 """
 import argparse
@@ -76,7 +77,76 @@ def patch_device_info(source):
 RECOVERY_STATE = '''        # HULUWA_RECOVERY_STATE_BEGIN
         self._huluwa_recovery_at = 0.0
         self._huluwa_recovery_result = None
+        self._huluwa_last_playback_code = None
+        self._huluwa_last_playback_at = 0
+        self._huluwa_playback_recoveries = 0
         # HULUWA_RECOVERY_STATE_END
+'''
+
+PLAYBACK_SIGNING = '''    # HULUWA_PLAYBACK_SIGNING_BEGIN
+    def sign_for_request(self, url):
+        """旧调用端也能按需恢复：只预检可信红果 GET 播放模型，不改变成功签名的形状。"""
+        import urllib.parse
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            query = urllib.parse.parse_qs(parsed.query)
+            video_id = (query.get("video_id") or [""])[0]
+            playback = (parsed.scheme == "https" and parsed.port in (None, 443)
+                        and parsed.username is None and parsed.password is None
+                        and parsed.hostname in ("api5-normal-sinfonlinea.fqnovel.com",
+                                                "api5-normal-sinfonlineb.fqnovel.com")
+                        and parsed.path.rstrip("/") == "/reading/bookapi/video_tab/video_model/v"
+                        and video_id.isascii() and video_id.isdigit() and len(video_id) <= 24)
+        except (TypeError, ValueError):
+            playback = False
+        if not playback:
+            return self.sign(url)
+        info = self.info()
+        agent = ((info or {}).get("deviceProfile") or {}).get("user_agent") or UA
+        signatures = self.sign(url)
+        if self._probe_playback(url, signatures, agent) != 110:
+            return signatures
+        print("[signer] playback preflight denied (110); recovering background context", flush=True)
+        result = self.recover()
+        if not result.get("ok"):
+            raise RuntimeError("红果播放被拒绝（110），签名 App 暂未恢复")
+        info = self.info()
+        agent = ((info or {}).get("deviceProfile") or {}).get("user_agent") or UA
+        signatures = self.sign(url)
+        if self._probe_playback(url, signatures, agent) == 110:
+            raise RuntimeError("红果播放在自动恢复后仍被拒绝（110），请稍后重试")
+        return signatures
+
+    def _probe_playback(self, url, signatures, agent):
+        # URL 已在 sign_for_request 中限制为固定 HTTPS 域名和播放路径，不跟随重定向。
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, fp, code, message, headers, new_url):
+                return None
+        code = None
+        try:
+            headers = {"User-Agent": agent, "Accept-Encoding": "gzip"}
+            headers.update(signatures or {})
+            request = urllib.request.Request(url, headers=headers)
+            opener = urllib.request.build_opener(NoRedirect())
+            with opener.open(request, timeout=4) as response:
+                raw = response.read(1024 * 1024 + 1)
+                if response.status != 200 or len(raw) > 1024 * 1024:
+                    return None
+            if raw.startswith(b"\\x1f\\x8b"):
+                raw = gzip.decompress(raw)
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                value = data.get("code")
+                code = int(value) if value is not None else None
+            return code
+        except Exception as error:
+            # 网络、限流和未知响应不触发 App 重启，交给原调用端处理。
+            print("[signer] playback preflight unavailable (%s)" % type(error).__name__, flush=True)
+            return None
+        finally:
+            self._huluwa_last_playback_code = code
+            self._huluwa_last_playback_at = int(time.time())
+    # HULUWA_PLAYBACK_SIGNING_END
 '''
 
 RECOVERY_METHOD = '''    # HULUWA_RECOVERY_METHOD_BEGIN
@@ -88,6 +158,7 @@ RECOVERY_METHOD = '''    # HULUWA_RECOVERY_METHOD_BEGIN
             if self._huluwa_recovery_result is not None and now - self._huluwa_recovery_at < 60:
                 return dict(self._huluwa_recovery_result, reused=True)
             self._huluwa_recovery_at = now
+            self._huluwa_playback_recoveries += 1
             self._huluwa_recovery_result = {"ok": False, "error": "签名 App 暂未恢复"}
             try:
                 self.reset()
@@ -131,6 +202,10 @@ RECOVERY_ROUTE = '''        # HULUWA_RECOVERY_ROUTE_BEGIN
 
 RECOVERY_INFO = '''                # HULUWA_RECOVERY_INFO_BEGIN
                 info["supportsRecovery"] = True
+                info["playbackPreflight"] = True
+                info["lastPlaybackCheck"] = {"code": self.signer._huluwa_last_playback_code,
+                    "at": self.signer._huluwa_last_playback_at,
+                    "recoveries": self.signer._huluwa_playback_recoveries}
                 # HULUWA_RECOVERY_INFO_END
 '''
 
@@ -157,6 +232,9 @@ def patch(source):
                            RECOVERY_STATE, '        self.lock = threading.RLock()\n')
     source = replace_block(source, '# HULUWA_RECOVERY_METHOD_BEGIN', '# HULUWA_RECOVERY_METHOD_END',
                            RECOVERY_METHOD, '    def reset(self):\n', after=False)
+    source = replace_block(source, '# HULUWA_PLAYBACK_SIGNING_BEGIN', '# HULUWA_PLAYBACK_SIGNING_END',
+                           PLAYBACK_SIGNING, '    def reset(self):\n', after=False)
+    source = source.replace('sig = self.signer.sign(url)', 'sig = self.signer.sign_for_request(url)', 1)
     source = replace_block(source, '# HULUWA_RECOVERY_ROUTE_BEGIN', '# HULUWA_RECOVERY_ROUTE_END',
                            RECOVERY_ROUTE, '    def do_POST(self):\n        path = self.path.split("?")[0]\n')
     source = replace_block(source, '# HULUWA_RECOVERY_INFO_BEGIN', '# HULUWA_RECOVERY_INFO_END',
