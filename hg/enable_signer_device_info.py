@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""给已有红果 sign_server.py 的 /info 增加当前签名 App 的设备资料。
+"""给已有红果 sign_server.py 补充自动设备资料和播放状态恢复。
 
-只修改 Frida 的 info RPC；保留原服务的签名、进程恢复和 HTTP 实现。
+增加 /info 的设备字段和 POST /recover；保留 /sign 协议和原有进程恢复实现。
 应用后需重启签名进程。默认备份原文件，已应用时不重复修改。
 """
 import argparse
@@ -51,7 +51,7 @@ DEVICE_INFO = r'''
 '''
 
 
-def patch(source):
+def patch_device_info(source):
     if MARKER in source:
         begin = source.rfind('\n', 0, source.index(MARKER)) + 1
         end_marker = '// HULUWA_DEVICE_PROFILE_END'
@@ -73,6 +73,98 @@ def patch(source):
     return source[:begin] + section.replace(target, DEVICE_INFO + target, 1) + source[end:]
 
 
+RECOVERY_STATE = '''        # HULUWA_RECOVERY_STATE_BEGIN
+        self._huluwa_recovery_at = 0.0
+        self._huluwa_recovery_result = None
+        # HULUWA_RECOVERY_STATE_END
+'''
+
+RECOVERY_METHOD = '''    # HULUWA_RECOVERY_METHOD_BEGIN
+    def recover(self):
+        """后台重新初始化 App，保留账号、设备资料和数据；一分钟最多恢复一次。"""
+        import subprocess
+        with self.lock:
+            now = time.monotonic()
+            if self._huluwa_recovery_result is not None and now - self._huluwa_recovery_at < 60:
+                return dict(self._huluwa_recovery_result, reused=True)
+            self._huluwa_recovery_at = now
+            self._huluwa_recovery_result = {"ok": False, "error": "签名 App 暂未恢复"}
+            try:
+                self.reset()
+                adb = [os.environ.get("ADB_PATH", "adb")]
+                if self.serial:
+                    adb += ["-s", self.serial]
+                subprocess.run(adb + ["shell", "am", "force-stop", self.pkg],
+                               check=True, capture_output=True, timeout=10)
+                # 使用现有 ContentProvider 初始化方式，避免 redroid 前台 GPU 崩溃。
+                subprocess.run(adb + ["shell", "content", "call", "--uri",
+                               "content://" + self.pkg + ".file_provider", "--method", "huluwa_sign_init"],
+                               check=True, capture_output=True, timeout=15)
+                warmup = min(30, max(5, int(os.environ.get("APP_WARMUP", "30"))))
+                time.sleep(warmup)
+                info = self.info()
+                profile = (info or {}).get("deviceProfile") or {}
+                params = profile.get("params") or {}
+                if not all(params.get(k) for k in ("device_id", "iid", "cdid")):
+                    raise RuntimeError("App 的设备信息尚未就绪")
+                signatures = self.sign(build_verify_url(), timeout=15)
+                if not (signatures and signatures.get("X-Medusa") and signatures.get("X-Helios")):
+                    raise RuntimeError("App 签名状态尚未就绪")
+                self._huluwa_recovery_result = {"ok": True, "reused": False, "recoveredAt": int(time.time())}
+                print("[signer] playback context recovered in background", flush=True)
+            except Exception as error:
+                self.reset()
+                print("[signer] playback recovery failed: %r" % error, flush=True)
+                self._huluwa_recovery_result = {"ok": False, "error": "签名 App 暂未恢复，请稍后重试"}
+            return dict(self._huluwa_recovery_result)
+    # HULUWA_RECOVERY_METHOD_END
+'''
+
+RECOVERY_ROUTE = '''        # HULUWA_RECOVERY_ROUTE_BEGIN
+        if path == "/recover":
+            self._read_json()
+            result = self.signer.recover()
+            self._send(200 if result.get("ok") else 503, result)
+            return
+        # HULUWA_RECOVERY_ROUTE_END
+'''
+
+RECOVERY_INFO = '''                # HULUWA_RECOVERY_INFO_BEGIN
+                info["supportsRecovery"] = True
+                # HULUWA_RECOVERY_INFO_END
+'''
+
+
+def replace_block(source, begin_marker, end_marker, block, anchor, after=True):
+    if begin_marker in source:
+        begin = source.rfind('\n', 0, source.index(begin_marker)) + 1
+        end = source.find(end_marker, begin)
+        line_end = source.find('\n', end + len(end_marker)) if end >= 0 else -1
+        if line_end < 0:
+            raise ValueError('已有恢复补丁不完整；没有修改文件')
+        return source[:begin] + block + source[line_end + 1:]
+    if source.count(anchor) != 1:
+        raise ValueError('签名服务的恢复接入位置不匹配；没有修改文件')
+    return source.replace(anchor, anchor + block if after else block + anchor, 1)
+
+
+def patch(source):
+    source = patch_device_info(source)
+    source = source.replace('self.lock = threading.Lock()', 'self.lock = threading.RLock()', 1)
+    if 'self.lock = threading.RLock()' not in source:
+        raise ValueError('签名服务锁结构不匹配；没有修改文件')
+    source = replace_block(source, '# HULUWA_RECOVERY_STATE_BEGIN', '# HULUWA_RECOVERY_STATE_END',
+                           RECOVERY_STATE, '        self.lock = threading.RLock()\n')
+    source = replace_block(source, '# HULUWA_RECOVERY_METHOD_BEGIN', '# HULUWA_RECOVERY_METHOD_END',
+                           RECOVERY_METHOD, '    def reset(self):\n', after=False)
+    source = replace_block(source, '# HULUWA_RECOVERY_ROUTE_BEGIN', '# HULUWA_RECOVERY_ROUTE_END',
+                           RECOVERY_ROUTE, '    def do_POST(self):\n        path = self.path.split("?")[0]\n')
+    source = replace_block(source, '# HULUWA_RECOVERY_INFO_BEGIN', '# HULUWA_RECOVERY_INFO_END',
+                           RECOVERY_INFO, '                info = self.signer.info()\n')
+    source = source.replace('"POST /sign", "POST /verify"]', '"POST /sign", "POST /verify", "POST /recover"]')
+    return source
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path, help='现有 sign_server.py')
@@ -90,7 +182,7 @@ def main():
         args.source.write_text(updated, encoding='utf-8')
         print('已更新:', args.source, '备份:', backup)
     else:
-        print('已包含自动设备资料，无需重复修改:', args.source)
+        print('已包含自动设备资料和恢复能力，无需重复修改:', args.source)
 
 
 if __name__ == '__main__':

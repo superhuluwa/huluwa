@@ -161,6 +161,34 @@ public class HongguoService {
 
     private JsonNode request(String path, Map<String, String> business) {
         String signerUrl = signUrl();
+        JsonNode result = requestOnce(path, business, signerUrl);
+        boolean playback = "video_tab/video_model/v".equals(path);
+        if (playback && result.path("code").asInt(-1) == 110) {
+            // 110 只说明上游拒绝访问，设备 ID 可能仍正确；只恢复一次签名 App，再重新取设备并签名。
+            recoverSigner(signerUrl);
+            result = requestOnce(path, business, signerUrl);
+        }
+        int code = result.path("code").asInt(-1);
+        if (code == 110) throw new BusinessException(502, playback
+                ? "红果拒绝了播放请求（110），自动恢复后仍未通过，请稍后重试"
+                : "红果拒绝了本次请求（110），请稍后重试");
+        if (code != 0) throw new BusinessException(502, "红果请求失败（" + code + "）：" + text(result, "message"));
+        return result;
+    }
+
+    private void recoverSigner(String signerUrl) {
+        HttpResponse<byte[]> response = send(HttpRequest.newBuilder(URI.create(signerUrl + "/recover"))
+                .timeout(Duration.ofSeconds(60)).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).build());
+        if (response.statusCode() == 404) {
+            throw new BusinessException(502, "红果拒绝播放请求（110），请升级签名服务以启用自动恢复");
+        }
+        if (response.statusCode() != 200 || !readJson(response, "签名服务恢复接口").path("ok").asBoolean()) {
+            throw new BusinessException(502, "红果拒绝播放请求（110），签名 App 自动恢复未完成，请稍后重试");
+        }
+    }
+
+    private JsonNode requestOnce(String path, Map<String, String> business, String signerUrl) {
         ObjectNode profile = profile(signerUrl);
         Map<String, String> params = new LinkedHashMap<>(Map.ofEntries(
                 Map.entry("device_platform", "android"), Map.entry("aid", "8662"), Map.entry("app_name", "novelread"),
@@ -194,11 +222,7 @@ public class HongguoService {
             }
         });
         if (!found.containsAll(SIGN_HEADERS)) throw new BusinessException(502, "签名服务未返回完整签名，请检查 App 状态");
-        JsonNode result = readJson(send(request.build()), "红果接口");
-        int code = result.path("code").asInt(-1);
-        if (code == 110) throw new BusinessException(502, "红果设备身份暂不可用，请稍后重试，设备信息会自动重新获取");
-        if (code != 0) throw new BusinessException(502, "红果请求失败（" + code + "）：" + text(result, "message"));
-        return result;
+        return readJson(send(request.build()), "红果接口");
     }
 
     private HttpResponse<byte[]> send(HttpRequest request) {
