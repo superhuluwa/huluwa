@@ -99,6 +99,164 @@ public class HongguoService {
         return Map.of("items", new ArrayList<>(series.values()), "nextOffset", offset + 20, "hasMore", more);
     }
 
+    /** 首页“推荐”：短剧频道精选；首批不足时继续拼接公开真人剧/漫剧频道。 */
+    public Map<String, Object> discover() {
+        Map<String, Map<String, Object>> series = new LinkedHashMap<>();
+        for (String[] channel : List.of(new String[]{"-1", "16"}, new String[]{"39", "39"}, new String[]{"36", "36"})) {
+            if (series.size() >= 20) break;
+            JsonNode response = request("bookmall/tab/v", Map.ofEntries(
+                    Map.entry("tab_type", channel[0]), Map.entry("offset", "0"),
+                    Map.entry("client_req_type", "3"), Map.entry("bottom_tab_type", "7"),
+                    Map.entry("bottom_tab_type_list", "7,0,1,2,3,4")));
+            for (JsonNode tab : response.path("data").path("tab_item")) {
+                if (tab.path("tab_type").asInt(-1) != Integer.parseInt(channel[1])) continue;
+                collectSeries(tab.path("cell_data"), series);
+            }
+        }
+        if (series.isEmpty()) throw new BusinessException(502, "红果暂未返回推荐短剧，请稍后重试");
+        return Map.of("items", new ArrayList<>(series.values()));
+    }
+
+    /** 短剧排行榜：返回内容分类、榜单项和稳定分页游标。 */
+    public Map<String, Object> ranking(String content, String board, String cursor) {
+        RankingCursor cur = RankingCursor.decode(cursor);
+        String selectedContent = value(content);
+        String selectedBoard = value(board);
+        if (cursor == null || cursor.isBlank()) return rankingRequest(selectedContent, selectedBoard, null);
+        if (!selectedContent.isBlank() && !selectedContent.equals(cur.content()))
+            throw new BusinessException(400, "游标属于其他排行榜，请清空内容分类后重试");
+        if (!selectedBoard.isBlank() && !selectedBoard.equals(cur.board()))
+            throw new BusinessException(400, "游标属于其他榜单，请清空榜单后重试");
+        return rankingRequest(cur.content(), cur.board(), cur);
+    }
+
+    private Map<String, Object> rankingRequest(String content, String board, RankingCursor cur) {
+        String selectedContent = content.isBlank() ? "all" : content;
+        int offset = cur == null ? 0 : cur.offset();
+        Map<String, String> business = new LinkedHashMap<>();
+        business.put("cell_id", "7470092475068071998");
+        business.put("tab_type", "26");
+        business.put("selected_items", selectedContent);
+        if (!board.isBlank()) business.put("sub_selected_items", board);
+        business.put("offset", String.valueOf(offset));
+        business.put("limit", "0");
+        business.put("client_req_type", "2");
+        business.put("client_template", "2");
+        business.put("unlimited_selector_change_type", offset > 0 ? "2" : "1");
+        business.put("user_is_login", "0");
+        if (cur != null) {
+            if (!cur.seen().isBlank() && !"ranklist_celebrity".equals(selectedContent))
+                business.put("filter_ids", cur.seen());
+            if (!cur.session().isBlank()) business.put("session_id", cur.session());
+        }
+        JsonNode response = request("bookmall/cell/change/v1", business);
+        JsonNode data = response.path("data");
+        JsonNode view = data.path("cell_view");
+        List<Map<String, Object>> contents = new ArrayList<>();
+        JsonNode selector = view.path("cell_selector").path("outer_row").path("items");
+        for (JsonNode item : selector) {
+            String id = text(item, "selector_item_id");
+            if (id.isBlank()) continue;
+            List<Map<String, Object>> boards = new ArrayList<>();
+            for (JsonNode child : item.path("sub_cell_selector").path("outer_row").path("items")) {
+                String childId = text(child, "selector_item_id");
+                if (childId.isBlank()) continue;
+                boards.add(Map.of("id", childId, "name", text(child, "show_name"),
+                        "selected", child.path("is_selected").asBoolean()));
+            }
+            contents.add(Map.of("id", id, "name", text(item, "show_name"),
+                    "selected", item.path("is_selected").asBoolean(), "boards", boards));
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        List<String> seen = new ArrayList<>();
+        if (cur != null && !cur.seen().isBlank()) seen.addAll(List.of(cur.seen().split(",")));
+        for (JsonNode cell : view.path("cell_data")) {
+            for (JsonNode video : cell.path("video_data")) {
+                String sid = text(video, "series_id", "series_id_str"), title = text(video, "title", "series_title");
+                if (!sid.matches("[0-9]+") || title.isBlank()) continue;
+                seen.add(sid);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", sid); row.put("title", title); row.put("cover", text(video, "cover", "series_cover"));
+                row.put("episodeCount", video.path("episode_cnt").asInt());
+                row.put("score", text(video.path("rec_text_item"), "RecommendText"));
+                row.put("promoted", "平台推荐".equals(row.get("score")));
+                row.put("kind", "series");
+                items.add(row);
+            }
+            for (JsonNode user : cell.path("ugc_user_data")) {
+                JsonNode base = user.path("user_info").path("base_info");
+                String actorId = text(base, "actor_id_str", "actor_id"), userId = text(base, "user_id");
+                String name = text(base, "user_name");
+                if ((actorId.isBlank() && userId.isBlank()) || name.isBlank()) continue;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", actorId.isBlank() ? userId : actorId); row.put("actorId", actorId);
+                row.put("userId", userId); row.put("title", name); row.put("cover", text(base, "user_avatar"));
+                row.put("score", text(user.path("rec_text_item"), "RecommendText"));
+                row.put("intro", text(user, "intro")); row.put("kind", "actor"); row.put("promoted", false);
+                List<String> details = new ArrayList<>();
+                for (JsonNode line : user.path("sub_title_list")) if (!text(line, "content").isBlank()) details.add(text(line, "content"));
+                row.put("details", details);
+                JsonNode change = user.path("rank_change_data");
+                if (!change.isMissingNode()) row.put("change", Map.of("kind", change.path("rank_change_type").asInt(),
+                        "places", change.path("ChangeNum").asInt()));
+                items.add(row);
+            }
+        }
+        if (items.isEmpty() && offset == 0) throw new BusinessException(502, "该榜单暂未返回数据");
+        String session = text(data, "session_id");
+        int next = data.path("next_offset").asInt(offset + items.size());
+        boolean more = data.path("has_more").asBoolean(false);
+        String currentContent = selectedContent, currentBoard = board;
+        for (Map<String, Object> item : contents) if (Boolean.TRUE.equals(item.get("selected"))) {
+            currentContent = String.valueOf(item.get("id"));
+            @SuppressWarnings("unchecked") List<Map<String, Object>> boards = (List<Map<String, Object>>) item.get("boards");
+            for (Map<String, Object> b : boards) if (Boolean.TRUE.equals(b.get("selected"))) currentBoard = String.valueOf(b.get("id"));
+        }
+        String nextCursor = more && next > offset ? RankingCursor.encode(currentContent, currentBoard, next, session,
+                String.join(",", seen)) : "";
+        return Map.of("content", currentContent, "board", currentBoard, "version", text(data, "rank_version"),
+                "contents", contents, "items", items, "hasMore", !nextCursor.isBlank(), "cursor", nextCursor);
+    }
+
+    private void collectSeries(JsonNode cells, Map<String, Map<String, Object>> out) {
+        for (JsonNode cell : cells) {
+            for (JsonNode video : cell.path("video_data")) {
+                JsonNode detail = video.path("video_detail");
+                String sid = text(video, "series_id", "series_id_str");
+                String vid = text(video, "vid", "video_id");
+                String title = text(detail, "series_title", "title");
+                if (title.isBlank()) title = text(video, "title");
+                if (!sid.matches("[0-9]+") || title.isBlank()) continue;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", sid); row.put("firstVid", vid); row.put("title", title);
+                row.put("cover", text(detail, "series_cover", "cover"));
+                row.put("intro", text(detail, "series_intro", "intro"));
+                row.put("episodeCount", detail.path("episode_cnt").asInt(video.path("episode_cnt").asInt()));
+                out.putIfAbsent(sid, row);
+            }
+            collectSeries(cell.path("cell_data"), out);
+        }
+    }
+
+    private record RankingCursor(String content, String board, int offset, String session, String seen) {
+        static RankingCursor decode(String raw) {
+            if (raw == null || raw.isBlank()) return null;
+            try {
+                String value = new String(java.util.Base64.getUrlDecoder().decode(raw), StandardCharsets.UTF_8);
+                JsonNode node = MAPPER.readTree(value);
+                return new RankingCursor(node.path("content").asText("all"), node.path("board").asText(""),
+                        node.path("offset").asInt(), node.path("session").asText(""), node.path("seen").asText(""));
+            } catch (Exception error) { throw new BusinessException(400, "排行榜游标无效，请刷新后重试"); }
+        }
+        static String encode(String content, String board, int offset, String session, String seen) {
+            try {
+                String value = MAPPER.writeValueAsString(Map.of(
+                        "content", content, "board", board, "offset", offset, "session", session, "seen", seen));
+                return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException error) { throw new BusinessException(500, "排行榜游标生成失败"); }
+        }
+    }
+
     public Map<String, Object> detail(String seriesId) {
         id(seriesId);
         JsonNode data = request("video_tab/video_detail/v", Map.of("video_series_id", seriesId,
@@ -292,6 +450,8 @@ public class HongguoService {
     private static void id(String value) {
         if (value == null || !value.matches("[0-9]{1,24}")) throw new BusinessException(400, "红果剧集或分集编号无效");
     }
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static String value(String value) { return value == null ? "" : value.trim(); }
     private static String text(JsonNode node, String... keys) {
         for (String key : keys) {
             String value = node.path(key).asText(""); if (!value.isBlank()) return value;

@@ -27,6 +27,15 @@ public class HongguoController {
     public ApiResult<Map<String, Object>> search(@RequestParam String query, @RequestParam(defaultValue = "0") int offset) {
         return ApiResult.ok(service.search(query, offset));
     }
+    @GetMapping("/discover")
+    public ApiResult<Map<String, Object>> discover() {
+        return ApiResult.ok(service.discover());
+    }
+    @GetMapping("/ranking")
+    public ApiResult<Map<String, Object>> ranking(@RequestParam(required = false) String content,
+            @RequestParam(required = false) String board, @RequestParam(required = false) String cursor) {
+        return ApiResult.ok(service.ranking(content, board, cursor));
+    }
     @GetMapping("/series/{id}")
     public ApiResult<Map<String, Object>> detail(@PathVariable String id) { return ApiResult.ok(service.detail(id)); }
     @GetMapping("/episodes/{id}/playback")

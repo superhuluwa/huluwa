@@ -23,6 +23,25 @@ data class HongguoStream(
 data class HongguoPlayback(val videoId: String, val streams: List<HongguoStream>, val expireTime: Long, val userAgent: String)
 data class HongguoSettings(val signUrl: String, val configured: Boolean, val deviceModel: String, val message: String = "")
 data class HongguoSearchPage(val items: List<HongguoSeries>, val nextOffset: Int, val hasMore: Boolean)
+data class HongguoRankBoard(val id: String, val name: String, val selected: Boolean)
+data class HongguoRankContent(val id: String, val name: String, val selected: Boolean, val boards: List<HongguoRankBoard>)
+data class HongguoRankItem(
+    val id: String, val title: String, val cover: String, val score: String, val episodeCount: Int,
+    val kind: String, val userId: String, val intro: String, val details: List<String>, val promoted: Boolean,
+) {
+    val actor get() = kind == "actor"
+    companion object {
+        fun from(json: JsonObject) = HongguoRankItem(json.text("id"), json.text("title"), json.text("cover"),
+            json.text("score"), json.number("episodeCount")?.toInt() ?: 0, json.text("kind", fallback = "series"),
+            json.text("userId"), json.text("intro"), json.rows("details").mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+            json.flag("promoted"))
+    }
+}
+data class HongguoRanking(
+    val content: String, val board: String, val contents: List<HongguoRankContent>, val items: List<HongguoRankItem>,
+    val hasMore: Boolean, val cursor: String,
+)
+data class HongguoDiscoverPage(val items: List<HongguoSeries>)
 
 class HongguoRepository(private val api: ApiClient) {
     private fun settings(json: JsonObject) = HongguoSettings(json.text("signUrl"), json.flag("configured"), json.text("deviceModel"), json.text("message"))
@@ -51,5 +70,26 @@ class HongguoRepository(private val api: ApiClient) {
                 item.number("width")?.toInt() ?: 0, item.number("height")?.toInt() ?: 0,
                 item.number("size")?.toLong() ?: 0, item.flag("encrypted"), item.text("encryptionMethod"), item.text("spadeA"), item.text("kid"))
         }, json.number("expireTime")?.toLong() ?: 0, json.text("userAgent"))
+    }
+    suspend fun discover(): HongguoDiscoverPage {
+        val json = api.get("hongguo", "discover").asObject()
+        return HongguoDiscoverPage(json.rows("items").map { HongguoSeries.from(it.asObject()) })
+    }
+    suspend fun ranking(content: String = "", board: String = "", cursor: String = ""): HongguoRanking {
+        val query = buildMap {
+            if (content.isNotBlank()) put("content", content)
+            if (board.isNotBlank()) put("board", board)
+            if (cursor.isNotBlank()) put("cursor", cursor)
+        }
+        val json = api.get("hongguo", "ranking", query = query).asObject()
+        val contents = json.rows("contents").map { row ->
+            val item = row.asObject()
+            HongguoRankContent(item.text("id"), item.text("name"), item.flag("selected"),
+                item.rows("boards").map { child ->
+                    val b = child.asObject(); HongguoRankBoard(b.text("id"), b.text("name"), b.flag("selected"))
+                })
+        }
+        return HongguoRanking(json.text("content"), json.text("board"), contents,
+            json.rows("items").map { HongguoRankItem.from(it.asObject()) }, json.flag("hasMore"), json.text("cursor"))
     }
 }

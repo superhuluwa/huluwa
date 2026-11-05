@@ -11,10 +11,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class HongguoFeedTab { Recommend, Ranking, Search }
+
 data class HongguoState(
+    val tab: HongguoFeedTab = HongguoFeedTab.Recommend,
     val query: String = "", val submittedQuery: String = "", val results: List<HongguoSeries> = emptyList(),
     val searched: Boolean = false, val searching: Boolean = false, val loadingMore: Boolean = false,
     val nextOffset: Int = 0, val hasMore: Boolean = false, val searchError: String? = null,
+    val discover: List<HongguoSeries> = emptyList(), val discoverLoading: Boolean = false,
+    val discoverLoaded: Boolean = false, val discoverError: String? = null,
+    val rankContent: String = "", val rankBoard: String = "", val rankCursor: String = "",
+    val rankItems: List<HongguoRankItem> = emptyList(), val rankContents: List<HongguoRankContent> = emptyList(),
+    val rankLoading: Boolean = false, val rankMore: Boolean = false, val rankLoaded: Boolean = false,
+    val rankHasMore: Boolean = false, val rankError: String? = null,
     val detail: HongguoDetail? = null, val detailLoading: Boolean = false, val detailError: String? = null,
     val selectedSeries: HongguoSeries? = null, val episode: HongguoEpisode? = null,
     val playback: HongguoPlayback? = null, val streamIndex: Int = 0, val playRequest: Long = 0,
@@ -23,6 +32,8 @@ data class HongguoState(
     val settingsLoading: Boolean = false, val settingsSaving: Boolean = false, val settingsError: String? = null,
 ) {
     val stream get() = playback?.streams?.getOrNull(streamIndex)
+    val currentRankContent get() = rankContents.firstOrNull { it.selected || it.id == rankContent }
+    val currentRankBoards get() = currentRankContent?.boards.orEmpty()
 }
 
 class HongguoViewModel(application: Application) : AndroidViewModel(application) {
@@ -32,6 +43,8 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     private val mutable = MutableStateFlow(HongguoState())
     val state = mutable.asStateFlow()
     private var searchJob: Job? = null
+    private var discoverJob: Job? = null
+    private var rankJob: Job? = null
     private var detailJob: Job? = null
     private var playbackJob: Job? = null
     private val positions = mutableMapOf<String, HongguoWatchProgress>()
@@ -40,6 +53,51 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
 
     init { loadSettings() }
     fun setQuery(value: String) { mutable.update { it.copy(query = value.take(100)) } }
+    fun selectTab(tab: HongguoFeedTab) {
+        mutable.update { it.copy(tab = tab) }
+        when (tab) {
+            HongguoFeedTab.Recommend -> if (!mutable.value.discoverLoading) loadDiscover()
+            HongguoFeedTab.Ranking -> if (!mutable.value.rankLoaded) loadRanking()
+            HongguoFeedTab.Search -> Unit
+        }
+    }
+    fun loadDiscover() {
+        val current = mutable.value
+        if (current.discoverLoading) return
+        mutable.update { it.copy(discoverLoading = true, discoverError = null) }
+        discoverJob?.cancel()
+        discoverJob = viewModelScope.launch {
+            try {
+                val page = repository.discover()
+                mutable.update { it.copy(discover = page.items, discoverLoading = false, discoverLoaded = true) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutable.update { it.copy(discoverLoading = false,
+                discoverError = error.userMessage()) } }
+        }
+    }
+    fun loadRanking(content: String = mutable.value.rankContent, board: String = mutable.value.rankBoard,
+                    more: Boolean = false) {
+        val current = mutable.value
+        if (current.rankLoading || current.rankMore || (more && !current.rankHasMore)) return
+        val cursor = if (more) current.rankCursor else ""
+        mutable.update { it.copy(rankContent = content, rankBoard = board, rankCursor = if (more) it.rankCursor else "",
+            rankLoading = !more, rankMore = more, rankError = null, rankItems = if (more) it.rankItems else emptyList()) }
+        rankJob?.cancel(); rankJob = viewModelScope.launch {
+            try {
+                val ranking = repository.ranking(content, board, cursor)
+                mutable.update { old ->
+                    val rows = if (more) (old.rankItems + ranking.items).distinctBy { it.kind + it.id } else ranking.items
+                    old.copy(rankItems = rows, rankContent = ranking.content, rankBoard = ranking.board,
+                        rankContents = ranking.contents, rankCursor = ranking.cursor, rankHasMore = ranking.hasMore,
+                        rankLoading = false, rankMore = false, rankLoaded = true)
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutable.update { it.copy(rankLoading = false, rankMore = false,
+                rankError = error.userMessage()) } }
+        }
+    }
+    fun selectRankContent(id: String) { loadRanking(content = id, board = "") }
+    fun selectRankBoard(id: String) { loadRanking(content = mutable.value.rankContent, board = id) }
     fun showSettings() { mutable.update { it.copy(settingsVisible = true, settingsError = null) }; loadSettings() }
     fun hideSettings() { if (!mutable.value.settingsSaving) mutable.update { it.copy(settingsVisible = false) } }
     private fun loadSettings() {
@@ -77,6 +135,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     }
     fun search(more: Boolean = false) {
         val current = mutable.value
+        if (!more) mutable.update { it.copy(tab = HongguoFeedTab.Search) }
         if (more && (current.searching || current.loadingMore || !current.hasMore)) return
         val query = (if (more) current.submittedQuery else current.query).trim()
         if (query.isBlank()) return
@@ -171,6 +230,9 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     }
     fun back(): Boolean {
         if (mutable.value.settingsVisible) { hideSettings(); return true }
+        if (mutable.value.selectedSeries == null && mutable.value.tab != HongguoFeedTab.Recommend) {
+            mutable.update { it.copy(tab = HongguoFeedTab.Recommend) }; return true
+        }
         if (mutable.value.selectedSeries == null) return false
         detailJob?.cancel(); playbackJob?.cancel()
         mutable.update { it.copy(selectedSeries = null, detail = null, detailLoading = false, detailError = null,

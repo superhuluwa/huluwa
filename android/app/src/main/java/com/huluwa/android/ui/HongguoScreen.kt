@@ -5,7 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.huluwa.android.HongguoFeedTab
 import com.huluwa.android.HongguoState
 import com.huluwa.android.HongguoViewModel
 import com.huluwa.android.data.*
@@ -34,6 +38,7 @@ import com.huluwa.android.data.*
     val ui by vm.state.collectAsStateWithLifecycle()
     val back = { if (!vm.back()) onClose() }
     BackHandler(onBack = back)
+    LaunchedEffect(Unit) { vm.loadDiscover() }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -44,7 +49,7 @@ import com.huluwa.android.data.*
                     Column(Modifier.weight(1f)) {
                         Text(ui.detail?.series?.title ?: ui.selectedSeries?.title ?: "红果短视频",
                             style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (ui.selectedSeries == null) "搜索短剧，接着上次继续看" else "选集播放 · 自动连播",
+                        Text(if (ui.selectedSeries == null) "推荐 · 排行榜 · 想看的短剧" else "选集播放 · 自动连播",
                             style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                     }
                     IconButton(vm::showSettings) { Icon(Icons.Outlined.Settings, "连接设置") }
@@ -53,10 +58,152 @@ import com.huluwa.android.data.*
         },
     ) { padding ->
         Box(Modifier.padding(padding).navigationBarsPadding().fillMaxSize()) {
-            if (ui.selectedSeries == null) HongguoSearch(ui, vm) else HongguoDetailContent(ui, vm)
+            if (ui.selectedSeries == null) HongguoHome(ui, vm) else HongguoDetailContent(ui, vm)
         }
     }
     if (ui.settingsVisible) HongguoSettingsDialog(ui, vm)
+}
+
+@Composable private fun HongguoHome(ui: HongguoState, vm: HongguoViewModel) {
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = ui.tab.ordinal, containerColor = Color.White) {
+            listOf(HongguoFeedTab.Recommend to "推荐", HongguoFeedTab.Ranking to "排行榜", HongguoFeedTab.Search to "搜索")
+                .forEachIndexed { index, (tab, label) ->
+                    Tab(selected = ui.tab == tab, onClick = { vm.selectTab(tab) },
+                        text = { Text(label, fontWeight = if (ui.tab == tab) FontWeight.SemiBold else FontWeight.Normal) })
+                }
+        }
+        when (ui.tab) {
+            HongguoFeedTab.Recommend -> HongguoDiscover(ui, vm)
+            HongguoFeedTab.Ranking -> HongguoRanking(ui, vm)
+            HongguoFeedTab.Search -> HongguoSearch(ui, vm)
+        }
+    }
+}
+
+@Composable private fun HongguoDiscover(ui: HongguoState, vm: HongguoViewModel) {
+    val focus = LocalFocusManager.current
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("为你推荐", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("短剧频道精选，点开即可选集观看", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+        }
+        if (ui.discoverLoading) item { HongguoLoading("正在加载推荐…") }
+        if (ui.discoverError != null) item { HongguoError(ui.discoverError) { vm.loadDiscover() } }
+        if (!ui.discoverLoading && ui.discover.isEmpty() && ui.discoverError == null) item {
+            Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                Text("暂无推荐，稍后再来看看", color = HuluwaColors.Muted)
+            }
+        }
+        items(ui.discover, key = { "discover-${it.id}" }) { series ->
+            HongguoSeriesCard(series) { focus.clearFocus(); vm.openSeries(series) }
+        }
+    }
+}
+
+@Composable private fun HongguoRanking(ui: HongguoState, vm: HongguoViewModel) {
+    val focus = LocalFocusManager.current
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("短剧排行榜", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("真人剧、漫剧、演员榜实时热度", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+        }
+        if (ui.rankContents.isNotEmpty()) item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ui.rankContents.forEach { content ->
+                        FilterChip(ui.rankContent == content.id, { vm.selectRankContent(content.id) },
+                            label = { Text(content.name) })
+                    }
+                }
+                if (ui.currentRankBoards.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ui.currentRankBoards.forEach { board ->
+                        AssistChip(onClick = { vm.selectRankBoard(board.id) },
+                            label = { Text(board.name) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (ui.rankBoard == board.id) Color(0xFFFFEAE6) else Color.White,
+                                labelColor = if (ui.rankBoard == board.id) Color(0xFFCA3D32) else HuluwaColors.Ink))
+                    }
+                }
+            }
+        }
+        if (ui.rankLoading) item { HongguoLoading("正在加载排行榜…") }
+        if (ui.rankError != null) item { HongguoError(ui.rankError) { vm.loadRanking() } }
+        if (!ui.rankLoading && ui.rankItems.isEmpty() && ui.rankError == null) item {
+            Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                Text("榜单暂无数据，稍后再来看看", color = HuluwaColors.Muted)
+            }
+        }
+        itemsIndexed(ui.rankItems, key = { _, item -> "rank-${item.kind}-${item.id}" }) { index, item ->
+            if (item.actor) HongguoActorRankRow(index, item)
+            else HongguoRankRow(index, item, ui.rankItems) { focus.clearFocus(); vm.openSeries(
+                HongguoSeries(item.id, item.title, item.cover, item.intro, item.episodeCount)) }
+        }
+        if (ui.rankMore) item { HongguoLoading("正在加载更多…") }
+        else if (ui.rankHasMore && ui.rankItems.isNotEmpty()) item {
+            TextButton({ vm.loadRanking(more = true) }, Modifier.fillMaxWidth()) { Text("加载更多") }
+        }
+    }
+}
+
+@Composable private fun HongguoRankRow(index: Int, item: HongguoRankItem, all: List<HongguoRankItem>, onOpen: () -> Unit) {
+    val position = item.rankDisplayPosition(all, index)
+    Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), shape = RoundedCornerShape(14.dp), color = Color.White) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(item.rankLabel(all, index), Modifier.width(34.dp), fontWeight = FontWeight.Bold,
+                color = if (position in 1..3) Color(0xFFE44B40) else HuluwaColors.Muted)
+            AsyncImage(item.cover, item.title, Modifier.width(62.dp).height(84.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(item.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(item.score.ifBlank { if (item.episodeCount > 0) "共 ${item.episodeCount} 集" else "红果短剧" },
+                    style = MaterialTheme.typography.labelMedium, color = if (item.promoted) HuluwaColors.Muted else Color(0xFFE44B40))
+                if (item.episodeCount > 0 && item.score.isNotBlank()) Text("共 ${item.episodeCount} 集",
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+            }
+            Icon(Icons.Outlined.ChevronRight, null, tint = HuluwaColors.Muted)
+        }
+    }
+}
+
+@Composable private fun HongguoActorRankRow(index: Int, item: HongguoRankItem) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = Color.White) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${index + 1}", Modifier.width(34.dp), fontWeight = FontWeight.Bold,
+                color = if (index < 3) Color(0xFFE44B40) else HuluwaColors.Muted)
+            AsyncImage(item.cover, item.title, Modifier.size(56.dp).clip(RoundedCornerShape(28.dp)), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.title, fontWeight = FontWeight.SemiBold)
+                Text(item.score, style = MaterialTheme.typography.labelMedium, color = Color(0xFFE44B40))
+                if (item.details.isNotEmpty()) Text(item.details.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+private fun HongguoRankItem.rankDisplayPosition(all: List<HongguoRankItem>, index: Int): Int {
+    if (!promoted) return index + 1
+    return all.drop(index + 1).firstOrNull { !it.promoted }?.let { all.indexOf(it) + 1 } ?: (index + 1)
+}
+private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): String =
+    if (promoted) "推荐" else rankDisplayPosition(all, index).toString()
+
+@Composable private fun HongguoSeriesCard(series: HongguoSeries, onOpen: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), shape = RoundedCornerShape(16.dp), color = Color.White) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            AsyncImage(series.cover, series.title, Modifier.width(78.dp).height(108.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f).heightIn(min = 108.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text(series.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (series.episodeCount > 0) "共 ${series.episodeCount} 集" else "查看分集",
+                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                if (series.intro.isNotBlank()) Text(series.intro, style = MaterialTheme.typography.bodySmall,
+                    color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("开始观看", color = Color(0xFFE44B40), style = MaterialTheme.typography.labelLarge)
+            }
+            Icon(Icons.Outlined.ChevronRight, null, tint = HuluwaColors.Muted)
+        }
+    }
 }
 
 @Composable private fun HongguoSearch(ui: HongguoState, vm: HongguoViewModel) {
@@ -72,7 +219,6 @@ import com.huluwa.android.data.*
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (ui.settingsLoading && !ui.searched) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             if (ui.settings?.configured == false) item {
                 Panel {
                     Text("红果服务暂不可用", fontWeight = FontWeight.SemiBold)
@@ -88,20 +234,8 @@ import com.huluwa.android.data.*
                     Text(if (ui.searched) "没有找到相关短剧，试试其他剧名" else "输入剧名，找到想看的短剧", color = HuluwaColors.Muted)
                 }
             }
-            items(ui.results, key = { it.id }) { series ->
-                Surface(Modifier.fillMaxWidth().clickable { focus.clearFocus(); vm.openSeries(series) },
-                    shape = RoundedCornerShape(16.dp), color = Color.White) {
-                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        AsyncImage(series.cover, series.title, Modifier.width(78.dp).height(108.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
-                        Column(Modifier.weight(1f).heightIn(min = 108.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            Text(series.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(if (series.episodeCount > 0) "共 ${series.episodeCount} 集" else "查看分集", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-                            if (series.intro.isNotBlank()) Text(series.intro, style = MaterialTheme.typography.bodySmall,
-                                color = HuluwaColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text("开始观看", color = Color(0xFFE44B40), style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                }
+            items(ui.results, key = { "search-${it.id}" }) { series ->
+                HongguoSeriesCard(series) { focus.clearFocus(); vm.openSeries(series) }
             }
             if (ui.loadingMore) item { HongguoLoading("正在加载更多…") }
             else if (ui.hasMore && ui.results.isNotEmpty()) item {
