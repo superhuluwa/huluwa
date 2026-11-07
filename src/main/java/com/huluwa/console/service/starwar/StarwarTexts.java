@@ -39,6 +39,11 @@ public final class StarwarTexts {
     public static final String INFO = "信息";
     public static final String ERROR = "错误";
     public static final String HELP = "帮助";
+    /** 列表操作动词：进入 / 退出 */
+    public static final String ENTER = "进入";
+    public static final String EXIT = "退出";
+    /** 结算页「继续」与「继续游戏」 */
+    public static final String CONTINUE = "继续";
 
     // ---------------------------------------------------------------- 服务器通讯
 
@@ -123,7 +128,6 @@ public final class StarwarTexts {
     // ---------------------------------------------------------------- 结算
 
     public static final String GAME_OVER = "游戏结束!";
-    public static final String CONTINUE = "继续";
     public static final String CONTINUE_GAME = "继续游戏";
     public static final String AGAIN = "再来一局!";
     public static final String RESULT_TITLE = "游戏排名结果";

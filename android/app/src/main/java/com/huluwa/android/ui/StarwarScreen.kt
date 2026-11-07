@@ -59,13 +59,27 @@ import kotlinx.coroutines.delay
 fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val back = {
+    // 对局中点返回先按原文提示「正在游戏中,确定要退出吗?」
+    var exitConfirm by remember { mutableStateOf(false) }
+    val doBack: () -> Unit = {
         when (ui.stage) {
             StarwarStage.Battle, StarwarStage.Result -> vm.leaveRoom()
             StarwarStage.Room -> vm.leaveRoom()
-            StarwarStage.Rooms -> vm.loadRooms()   // 回到大厅
+            StarwarStage.Rooms -> vm.backToLobby()
             StarwarStage.Lobby -> onClose()
         }
+    }
+    val back: () -> Unit = {
+        if (ui.stage == StarwarStage.Battle) exitConfirm = true else doBack()
+    }
+    if (exitConfirm) {
+        AlertDialog(
+            onDismissRequest = { exitConfirm = false },
+            title = { Text("退出") },
+            text = { Text("正在游戏中,确定要退出吗?") },
+            confirmButton = { TextButton({ exitConfirm = false; doBack() }) { Text("确定") } },
+            dismissButton = { TextButton({ exitConfirm = false }) { Text("返回") } },
+        )
     }
     BackHandler(onBack = back)
     LaunchedEffect(ui.toast) {
@@ -120,6 +134,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     if (ui.hangarOpen) StarwarHangarDialog(ui, vm)
     if (ui.rankingOpen) StarwarRankingDialog(ui, vm)
     if (ui.opponent != null) StarwarOpponentDialog(ui, vm)
+    if (ui.statusOpen) StarwarStatusDialog(ui, vm)
     if (ui.chatOpen) StarwarChatDialog(ui, vm)
     if (ui.phraseSheetOpen) StarwarPhraseDialog(ui, vm)
 }
@@ -188,7 +203,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 
 
 @Composable private fun StarwarProfileCard(ui: StarwarState, vm: StarwarViewModel) {
-    Panel {
+    Panel(onClick = { vm.openStatus() }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp).background(HuluwaColors.SoftGreen, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center) {
@@ -302,11 +317,18 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                     StarwarRoomRow(room) { vm.tapRoom(room) }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                TextButton(onClick = { vm.page(-1) }) { Text("上页") }
-                Text("第 ${ui.page + 1} / ${page.pages} 页", style = MaterialTheme.typography.bodySmall,
-                    color = HuluwaColors.Muted, modifier = Modifier.align(Alignment.CenterVertically))
-                TextButton(onClick = { vm.page(1) }) { Text("下页") }
+            // 原版分页栏：首页 / 上页 / 下页 / 末页 / 刷新（顺序与原文一致）
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { vm.firstPage() }) { Text("首页", style = MaterialTheme.typography.labelMedium) }
+                    TextButton(onClick = { vm.page(-1) }) { Text("上页", style = MaterialTheme.typography.labelMedium) }
+                    TextButton(onClick = { vm.page(1) }) { Text("下页", style = MaterialTheme.typography.labelMedium) }
+                    TextButton(onClick = { vm.lastPage() }) { Text("末页", style = MaterialTheme.typography.labelMedium) }
+                    TextButton(onClick = { vm.refreshRooms() }) { Text("刷新", style = MaterialTheme.typography.labelMedium) }
+                }
+                Text("第 ${ui.page + 1} / ${page.pages} 页 · 共 ${page.total} 个房间",
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted,
+                    modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
             }
         }
     }
@@ -334,8 +356,16 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                 "settled" -> "已结束"
                 else -> room.status
             }
-            Text(statusText, style = MaterialTheme.typography.labelMedium,
-                color = if (room.status == "waiting") HuluwaColors.Pine else HuluwaColors.Muted)
+            Column(horizontalAlignment = Alignment.End) {
+                Text(statusText, style = MaterialTheme.typography.labelMedium,
+                    color = if (room.status == "waiting") HuluwaColors.Pine else HuluwaColors.Muted)
+                if (room.status == "waiting") {
+                    // 原版房间列表右侧的「进入」按钮
+                    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("进入", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }
@@ -641,14 +671,18 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rows.forEach { standing ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${standing.ranking}", style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = when (standing.ranking) {
-                                1 -> Color(0xFFD9A300)
-                                2 -> Color(0xFF9AA4B2)
-                                3 -> Color(0xFFB87333)
-                                else -> HuluwaColors.Muted
-                            }, modifier = Modifier.width(32.dp))
+                        Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) {
+                            if (standing.ranking == 1) {
+                                // 冠军用原始 crown.bmp 王冠贴图
+                                StarwarImage(StarwarArt.CROWN, 20.dp)
+                            } else {
+                                Text("${standing.ranking}", style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (standing.ranking == 2) Color(0xFF9AA4B2)
+                                            else if (standing.ranking == 3) Color(0xFFB87333)
+                                            else HuluwaColors.Muted)
+                            }
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(standing.nickname.ifBlank { standing.username },
                                 style = MaterialTheme.typography.bodyMedium)
@@ -667,7 +701,8 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
             style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
         Spacer(Modifier.weight(1f))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { vm.exitBattle() }, modifier = Modifier.weight(1f)) { Text("返回") }
+            OutlinedButton(onClick = { vm.exitBattle() }, modifier = Modifier.weight(1f)) { Text("继续") }
+            OutlinedButton(onClick = { vm.backToRoomsFromResult() }, modifier = Modifier.weight(1f)) { Text("返回") }
             Button(onClick = { vm.playAgain() }, modifier = Modifier.weight(1f)) { Text("再来一局!") }
         }
     }
@@ -904,6 +939,58 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton({ vm.closeRanking() }) { Text("返回") }
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun StarwarStatusDialog(ui: StarwarState, vm: StarwarViewModel) {
+    Dialog(onDismissRequest = { vm.closeStatus() }) {
+        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("我的状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.plane(ui.profile.plane), 40.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(ui.profile.nick.ifBlank { ui.profile.user },
+                            style = MaterialTheme.typography.titleSmall)
+                        Text("等级:${ui.profile.level} · ${ui.profile.rank}",
+                            style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+                        Text("胜率:${ui.profile.winRate}% · 飞机:${ui.profile.plane}",
+                            style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+                    }
+                }
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        StarwarImage(StarwarArt.GOLD, 28.dp)
+                        Text("${ui.profile.gold}", style = MaterialTheme.typography.labelMedium)
+                        Text("K币", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        StarwarImage(StarwarArt.CRYSTAL, 28.dp)
+                        Text("${ui.profile.crystal}", style = MaterialTheme.typography.labelMedium)
+                        Text("水晶", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        StarwarImage(StarwarArt.CROWN, 28.dp)
+                        Text("${ui.profile.wins}", style = MaterialTheme.typography.labelMedium)
+                        Text("胜场", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        StarwarImage(StarwarArt.AI, 28.dp)
+                        Text("${ui.profile.losses}", style = MaterialTheme.typography.labelMedium)
+                        Text("负场", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    }
+                }
+                HorizontalDivider()
+                Text("我的状态", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                Text("${ui.profile.wins} 胜 ${ui.profile.losses} 负 · 累计 ${ui.profile.matches} 场",
+                    style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton({ vm.closeStatus() }) { Text("确定") }
                 }
             }
         }

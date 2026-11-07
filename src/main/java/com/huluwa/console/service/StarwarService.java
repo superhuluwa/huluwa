@@ -214,12 +214,16 @@ public class StarwarService {
                 "hangar", StarwarTexts.MY_HANGAR,
                 "trade", StarwarTexts.TRADE_MARKET,
                 "ranking", StarwarTexts.RANKING));
-        out.put("buttons", Map.of(
-                "ok", StarwarTexts.OK, "back", StarwarTexts.BACK,
-                "menu", StarwarTexts.MENU, "info", StarwarTexts.INFO,
-                "error", StarwarTexts.ERROR, "help", StarwarTexts.HELP,
-                "createRoom", StarwarTexts.ROOM_CREATE, "enterRoom", StarwarTexts.ROOM_IN,
-                "quickStart", StarwarTexts.ROOM_QUICK_START, "kick", StarwarTexts.ROOM_KICK));
+        out.put("buttons", Map.ofEntries(
+                Map.entry("ok", StarwarTexts.OK), Map.entry("back", StarwarTexts.BACK),
+                Map.entry("menu", StarwarTexts.MENU), Map.entry("info", StarwarTexts.INFO),
+                Map.entry("error", StarwarTexts.ERROR), Map.entry("help", StarwarTexts.HELP),
+                Map.entry("enter", StarwarTexts.ENTER), Map.entry("exit", StarwarTexts.EXIT),
+                Map.entry("continue", StarwarTexts.CONTINUE),
+                Map.entry("createRoom", StarwarTexts.ROOM_CREATE),
+                Map.entry("enterRoom", StarwarTexts.ROOM_IN),
+                Map.entry("quickStart", StarwarTexts.ROOM_QUICK_START),
+                Map.entry("kick", StarwarTexts.ROOM_KICK)));
         out.put("server", Map.of(
                 "error", StarwarTexts.SERVER_ERROR,
                 "timeout", StarwarTexts.SERVER_TIMEOUT,

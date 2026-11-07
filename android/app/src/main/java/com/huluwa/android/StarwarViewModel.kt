@@ -64,6 +64,7 @@ data class StarwarState(
     val rankingOpen: Boolean = false,
     val ranking: List<StarwarRankItem> = emptyList(),
     val opponent: Map<String, String>? = null,
+    val statusOpen: Boolean = false,
 ) {
     val roomId: String get() = room?.id.orEmpty()
     val isOwner: Boolean get() = room?.owner == profile.user
@@ -189,6 +190,31 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun refreshRooms() = loadRooms(mutable.value.zone, mutable.value.page)
+
+    /** 从专区房间列表回到大厅 */
+    fun backToLobby() = mutable.update {
+        it.copy(stage = StarwarStage.Lobby, roomPage = null, page = 0)
+    }
+
+    /** 「首页」：跳到第 0 页 */
+    fun firstPage() {
+        if (mutable.value.page == 0) {
+            mutable.update { it.copy(toast = "已经是第一页!") }
+            return
+        }
+        loadRooms(mutable.value.zone, 0)
+    }
+
+    /** 「末页」：跳到最后一页 */
+    fun lastPage() {
+        val pages = mutable.value.roomPage?.pages ?: 1
+        val last = maxOf(0, pages - 1)
+        if (mutable.value.page >= last) {
+            mutable.update { it.copy(toast = "已经是最后一页!") }
+            return
+        }
+        loadRooms(mutable.value.zone, last)
+    }
 
     // ---------------------------------------------------------------- 创建 / 进入房间
 
@@ -449,6 +475,15 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
     /** 退出结算回到大厅 */
     fun exitBattle() = leaveRoom()
 
+    /** 结算页「返回」：只回房间等待区，不退出房间 */
+    fun backToRoomsFromResult() {
+        mutable.update {
+            it.copy(stage = StarwarStage.Room, world = null, standings = emptyList(),
+                result = emptyList(), matchId = "")
+        }
+        if (mutable.value.roomId.isNotBlank()) loadRoom(mutable.value.roomId)
+    }
+
     // ---------------------------------------------------------------- 商店 / 机库 / 排行 / 资料
 
     fun openShop() {
@@ -519,6 +554,10 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
         }
     }
     fun closeOpponent() = mutable.update { it.copy(opponent = null) }
+
+    /** 「我的状态」：等级 / 胜率 / 飞机（原文三行标签） */
+    fun openStatus() = mutable.update { it.copy(statusOpen = true) }
+    fun closeStatus() = mutable.update { it.copy(statusOpen = false) }
 
     fun addFriend(name: String) {
         viewModelScope.launch {
