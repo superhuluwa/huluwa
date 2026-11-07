@@ -20,6 +20,10 @@ object ServerAddress {
     }
     fun socket(server: String, token: String): HttpUrl = normalize(server).toHttpUrlOrNull()!!.newBuilder()
         .addPathSegment("ws").addPathSegment("chat").addQueryParameter("token", token).build()
+
+    /** 星球大战对战通道：与聊天通道分开，避免 20Hz 世界快照挤占聊天连接。 */
+    fun starwarSocket(server: String, token: String): HttpUrl = normalize(server).toHttpUrlOrNull()!!.newBuilder()
+        .addPathSegment("ws").addPathSegment("starwar").addQueryParameter("token", token).build()
     /** 把服务端返回的相对路径（如 /api/public/...）拼到当前服务器地址（含可能的子路径）上。 */
     fun publicUrl(server: String, path: String): HttpUrl {
         val builder = normalize(server).toHttpUrlOrNull()!!.newBuilder()

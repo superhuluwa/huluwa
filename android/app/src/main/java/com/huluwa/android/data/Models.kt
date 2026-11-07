@@ -64,9 +64,10 @@ data class Session(
     /** 由客户端生成的管理入口；服务端配置的灯塔不在此列。 */
     val isAppManaged: Boolean get() = kind == "upgrade" || managementService != null
     /** 使用原生功能页，不走聊天消息接口；与入口是否由服务端下发无关。 */
-    val isLocal: Boolean get() = isAppManaged || kind in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND)
+    // 星球大战走原生对战界面（大厅/房间/等待聊天室/对战/结算），与灯塔、红果同属本地会话
+    val isLocal: Boolean get() = isAppManaged || kind in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND, STARWAR_SESSION_KIND)
     /** 本地管理服务归入系统；灯塔、红果和系统通知等日常功能会话仍在功能入口。 */
-    val isSystemSession: Boolean get() = isLocal && kind !in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND)
+    val isSystemSession: Boolean get() = isLocal && kind !in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND, STARWAR_SESSION_KIND)
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject): Session {
