@@ -1057,17 +1057,36 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
             Column(Modifier.padding(20.dp).heightIn(max = 520.dp)) {
                 Text(shop.title.ifBlank { "飞机商店" }, style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold)
-                Text("${shop.gold} K币 · ${shop.crystal} 水晶", style = MaterialTheme.typography.labelMedium,
-                    color = HuluwaColors.Muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.GOLD, 16.dp)
+                    Text(" ${shop.gold}", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.width(12.dp))
+                    StarwarImage(StarwarArt.CRYSTAL, 16.dp)
+                    Text(" ${shop.crystal}", style = MaterialTheme.typography.labelMedium)
+                }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(shop.items, key = { it.type + it.id }) { item ->
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            // 飞机用原始 plane 贴图预览；引擎用 engine 贴图
+                            StarwarImage(
+                                if (item.type == "plane") StarwarArt.plane(item.id) else StarwarArt.ENGINE,
+                                36.dp)
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(item.name, style = MaterialTheme.typography.bodyMedium)
                                 Text(item.desc, style = MaterialTheme.typography.labelSmall,
                                     color = HuluwaColors.Muted)
-                                Text(if (item.gold > 0) "${item.gold} K币" else "${item.crystal} 水晶",
-                                    style = MaterialTheme.typography.labelSmall, color = Color(0xFFD9A300))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (item.gold > 0) {
+                                        StarwarImage(StarwarArt.GOLD, 14.dp)
+                                        Text(" ${item.gold}", style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFD9A300))
+                                    } else {
+                                        StarwarImage(StarwarArt.CRYSTAL, 14.dp)
+                                        Text(" ${item.crystal}", style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF4E8BD9))
+                                    }
+                                }
                             }
                             if (item.owned) {
                                 Text("已拥有", style = MaterialTheme.typography.labelSmall,
@@ -1094,9 +1113,14 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(ui.hangar) { item ->
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            val isPlane = item["type"] == "plane"
+                            StarwarImage(
+                                if (isPlane) StarwarArt.plane(item["id"].orEmpty()) else StarwarArt.ENGINE,
+                                32.dp)
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(item["id"].orEmpty(), style = MaterialTheme.typography.bodyMedium)
-                                Text(if (item["type"] == "plane") "飞机" else "引擎",
+                                Text(if (isPlane) "飞机" else "引擎",
                                     style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                             }
                             TextButton({ vm.equip(item["type"].orEmpty(), item["id"].orEmpty()) }) { Text("装备") }
