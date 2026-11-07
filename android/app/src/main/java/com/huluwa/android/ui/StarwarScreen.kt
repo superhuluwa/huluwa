@@ -127,6 +127,10 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
         }
     }
 
+    // 原版背景音乐：大厅与房间循环播放，对局中降低音量，结算后停止
+    StarwarMusic(enabled = ui.stage == StarwarStage.Lobby || ui.stage == StarwarStage.Rooms
+            || ui.stage == StarwarStage.Room)
+
     if (ui.createRoomOpen) StarwarCreateRoomDialog(ui, vm)
     if (ui.passwordPromptRoom != null) StarwarPasswordDialog(ui, vm)
     if (ui.helpOpen) StarwarHelpDialog(ui, vm)
@@ -540,7 +544,12 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
             "bullet2" to painterOf(context, StarwarArt.BULLET2),
             "prop" to painterOf(context, StarwarArt.PROP),
             "explode" to painterOf(context, StarwarArt.EXPLODE2),
-            "stone" to painterOf(context, StarwarArt.STONE1),
+            "stone1" to painterOf(context, StarwarArt.STONE1),
+            "stone2" to painterOf(context, StarwarArt.STONE2),
+            "prop_heal" to painterOf(context, StarwarArt.LIVE),
+            "prop_shield" to painterOf(context, StarwarArt.CRYSTAL),
+            "prop_slow" to painterOf(context, StarwarArt.TIMEBAR),
+            "prop_score" to painterOf(context, StarwarArt.LOTTERY),
         )
     }
     BoxWithConstraints(Modifier.fillMaxSize().padding(8.dp)) {
@@ -573,12 +582,25 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                 }
                 // 道具：原始道具贴图
                 world.props.forEach { prop ->
-                    bitmaps["prop"]?.let {
+                    val propKey = "prop_" + prop.kind
+                    (bitmaps[propKey] ?: bitmaps["prop"])?.let {
                         drawImage(
                             it, dstOffset = IntOffset(
                                 ((prop.x - 10) * sx).toInt(), ((prop.y - 10) * sy).toInt()),
                             dstSize = IntSize((20 * sx).toInt().coerceAtLeast(2),
                                 (20 * sy).toInt().coerceAtLeast(2)))
+                    }
+                }
+                // 陨石：原版 stone1 / stone2
+                world.stones.forEach { stone ->
+                    val key = if (stone.kind == 2) "stone2" else "stone1"
+                    val size = if (stone.kind == 2) 18 else 12
+                    bitmaps[key]?.let {
+                        drawImage(
+                            it, dstOffset = IntOffset(
+                                ((stone.x - size / 2f) * sx).toInt(), ((stone.y - size / 2f) * sy).toInt()),
+                            dstSize = IntSize((size * sx).toInt().coerceAtLeast(2),
+                                (size * sy).toInt().coerceAtLeast(2)))
                     }
                 }
                 // 玩家：原始飞机贴图（阵亡改用爆炸贴图）

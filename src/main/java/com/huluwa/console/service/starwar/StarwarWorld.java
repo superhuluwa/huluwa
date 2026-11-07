@@ -95,6 +95,21 @@ public final class StarwarWorld {
         }
     }
 
+    /** 陨石障碍：原版 stone1.bmp / stone2.bmp，缓慢下落，撞到扣血 */
+    public static final class Stone {
+        public double x;
+        public double y;
+        public final int kind;      // 1 = stone1, 2 = stone2（大陨石更痛）
+        public final double vy;
+
+        public Stone(double x, double y, int kind, double vy) {
+            this.x = x;
+            this.y = y;
+            this.kind = kind;
+            this.vy = vy;
+        }
+    }
+
     /** 道具：玩家吃后降低难度（缩小判定、回血、加分、加护盾） */
     public static final class Prop {
         public double x;
@@ -118,6 +133,7 @@ public final class StarwarWorld {
     public final Map<String, PlayerState> players = new ConcurrentHashMap<>();
     public final List<Bullet> bullets = new ArrayList<>();
     public final List<Prop> props = new ArrayList<>();
+    public final List<Stone> stones = new ArrayList<>();
 
     public long elapsedMs;
     public int ticks;
@@ -247,6 +263,40 @@ public final class StarwarWorld {
             }
         }
 
+        // 3.5) 陨石障碍：原版四处滚落的石块
+        if (stones.size() < 6 && random.nextInt(100) < 8 + difficulty * 2) {
+            int kind = random.nextInt(100) < 70 ? 1 : 2;
+            stones.add(new Stone(random.nextDouble() * WIDTH, -8, kind, 0.8 + difficulty * 0.12));
+        }
+        java.util.Iterator<Stone> stoneIt = stones.iterator();
+        while (stoneIt.hasNext()) {
+            Stone stone = stoneIt.next();
+            stone.y += stone.vy;
+            if (stone.y > HEIGHT + 10) {
+                stoneIt.remove();
+                continue;
+            }
+            double radius = stone.kind == 1 ? 6 : 9;
+            for (PlayerState state : players.values()) {
+                if (!state.alive || state.shieldTicks > 0) {
+                    continue;
+                }
+                double dx = state.x - stone.x;
+                double dy = state.y - stone.y;
+                double rr = radius + PLANE_RADIUS;
+                if (dx * dx + dy * dy <= rr * rr) {
+                    stoneIt.remove();
+                    state.hp -= stone.kind == 1 ? HIT_DAMAGE : HIT_DAMAGE * 2;
+                    if (state.hp <= 0) {
+                        state.hp = 0;
+                        state.alive = false;
+                        deaths.add(state.username);
+                    }
+                    break;
+                }
+            }
+        }
+
         // 4) 道具（仅开启道具的房间）
         if (itemsEnabled) {
             if (props.size() < 3 && random.nextInt(100) < 2) {
@@ -357,6 +407,10 @@ public final class StarwarWorld {
         for (Bullet bullet : bullets) {
             bulletRows.add(Map.of("x", round(bullet.x), "y", round(bullet.y)));
         }
+        List<Map<String, Object>> stoneRows = new ArrayList<>(stones.size());
+        for (Stone stone : stones) {
+            stoneRows.add(Map.of("x", round(stone.x), "y", round(stone.y), "kind", stone.kind));
+        }
         List<Map<String, Object>> propRows = new ArrayList<>(props.size());
         for (Prop prop : props) {
             propRows.add(Map.of("x", round(prop.x), "y", round(prop.y), "kind", prop.kind));
@@ -370,6 +424,7 @@ public final class StarwarWorld {
         out.put("players", playerRows);
         out.put("bullets", bulletRows);
         out.put("props", propRows);
+        out.put("stones", stoneRows);
         out.put("settled", settled);
         return out;
     }

@@ -36,6 +36,7 @@ data class StarwarWorldPlayer(
 
 data class StarwarBullet(val x: Float, val y: Float)
 data class StarwarProp(val x: Float, val y: Float, val kind: String)
+data class StarwarStone(val x: Float, val y: Float, val kind: Int)
 
 data class StarwarWorld(
     val matchId: String = "", val tick: Int = 0, val elapsed: Long = 0,
@@ -43,6 +44,7 @@ data class StarwarWorld(
     val players: List<StarwarWorldPlayer> = emptyList(),
     val bullets: List<StarwarBullet> = emptyList(),
     val props: List<StarwarProp> = emptyList(),
+    val stones: List<StarwarStone> = emptyList(),
     val settled: Boolean = false,
 )
 
@@ -162,6 +164,9 @@ fun parseStarwarWorld(raw: JsonObject): StarwarWorld = StarwarWorld(
     } ?: emptyList(),
     props = raw["props"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {
         StarwarProp(it.double("x").toFloat(), it.double("y").toFloat(), it.str("kind"))
+    } ?: emptyList(),
+    stones = raw["stones"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {
+        StarwarStone(it.double("x").toFloat(), it.double("y").toFloat(), it.int("kind", 1))
     } ?: emptyList(),
     settled = raw.bool("settled"),
 )
