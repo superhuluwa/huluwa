@@ -199,6 +199,8 @@ public class StarwarService {
         out.put("texts", texts());
         out.put("help", help());
         out.put("chatNotice", StarwarTexts.CHAT_NOTICE_PREFIX + StarwarTexts.CHAT_RULES);
+        out.put("activityNotice", StarwarTexts.activitySchedule());
+        out.put("activityFree", StarwarTexts.activityFreeNow(java.time.LocalDateTime.now()));
         out.put("online", onlineCount());
         return out;
     }
@@ -412,6 +414,11 @@ public class StarwarService {
             case 1 -> { coin = DEFAULT_COIN_COST.getOrDefault(zone, 10); crystal = 0; }
             case 2 -> { coin = 0; crystal = DEFAULT_CRYSTAL_COST.getOrDefault(zone, 1); }
             default -> { coin = 0; crystal = 0; }
+        }
+        // 活动专区在活动时段（每日 20:00-22:00）免创建费
+        if ("activity".equals(zone) && StarwarTexts.activityFreeNow(java.time.LocalDateTime.now())) {
+            coin = 0;
+            crystal = 0;
         }
         if (coin > intOf(profile.get("gold"))) {
             throw new BusinessException(400, "K币不足");
@@ -958,8 +965,10 @@ public class StarwarService {
         int winnerScore = standings.isEmpty() ? 0 : standings.get(0).score();
 
         for (StarwarWorld.Standing standing : standings) {
-            int rewardCoin = rankRewardCoin(standing.ranking(), standings.size());
-            int rewardCrystal = rankRewardCrystal(standing.ranking(), standings.size());
+            // 活动专区为官方活动场，奖励翻倍
+            double multiplier = StarwarTexts.rewardMultiplier(world.zone);
+            int rewardCoin = (int) Math.round(rankRewardCoin(standing.ranking(), standings.size()) * multiplier);
+            int rewardCrystal = (int) Math.round(rankRewardCrystal(standing.ranking(), standings.size()) * multiplier);
             jdbc.update("""
                     INSERT OR REPLACE INTO starwar_match_result
                     (match_id, username, ranking, score, survive_ms, hp_left, reward_coin, reward_crystal)

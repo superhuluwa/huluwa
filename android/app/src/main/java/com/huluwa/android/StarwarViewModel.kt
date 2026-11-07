@@ -30,6 +30,8 @@ data class StarwarState(
     val texts: StarwarTexts = StarwarTexts(),
     val help: StarwarHelp = StarwarHelp(),
     val chatNotice: String = "",
+    val activityNotice: String = "",
+    val activityFree: Boolean = false,
     val online: Int = 0,
 
     // 房间列表
@@ -121,6 +123,8 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
                             ?: kotlinx.serialization.json.JsonObject(emptyMap())),
                         help = parseHelp(raw["help"] as? kotlinx.serialization.json.JsonObject),
                         chatNotice = raw.str("chatNotice"),
+                        activityNotice = raw.str("activityNotice"),
+                        activityFree = raw.boolean("activityFree"),
                         online = raw.int("online"),
                     )
                 }

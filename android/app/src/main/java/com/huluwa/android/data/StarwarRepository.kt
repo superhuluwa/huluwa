@@ -31,6 +31,7 @@ data class StarwarWorldPlayer(
     val user: String = "", val nick: String = "", val plane: String = "plane",
     val x: Float = 0f, val y: Float = 0f, val hp: Int = 100, val score: Int = 0,
     val alive: Boolean = true, val shield: Boolean = false, val survived: Long = 0,
+    val reachedTarget: Boolean = false,
 )
 
 data class StarwarBullet(val x: Float, val y: Float)
@@ -153,7 +154,7 @@ fun parseStarwarWorld(raw: JsonObject): StarwarWorld = StarwarWorld(
             user = p.str("user"), nick = p.str("nick"), plane = p.str("plane", "plane"),
             x = p.double("x").toFloat(), y = p.double("y").toFloat(), hp = p.int("hp"),
             score = p.int("score"), alive = p.bool("alive", true), shield = p.bool("shield"),
-            survived = p.long("survived"),
+            survived = p.long("survived"), reachedTarget = p.bool("reachedTarget"),
         )
     } ?: emptyList(),
     bullets = raw["bullets"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {

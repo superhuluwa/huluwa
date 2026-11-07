@@ -29,11 +29,14 @@ public final class StarwarWorld {
     /** 撑过 20 秒即为「撑住」；超过后继续累积分数（原版名字的由来） */
     public static final int SURVIVE_TARGET_MS = StarwarTexts.SURVIVE_TARGET_MS;
 
-    /** 每局最长时长（避免房间永远不结束）：60 秒 */
-    public static final int MAX_MATCH_MS = 60_000;
+    /** 每局最长时长：20 秒目标 + 20 秒加时 = 40 秒，避免房间永远不结束 */
+    public static final int MAX_MATCH_MS = 40_000;
 
     /** 飞机碰撞半径 */
     public static final int PLANE_RADIUS = 5;
+
+    /** 方向键移动速度（px/tick）：60px/s，与原版低端机手感对齐 */
+    public static final double MOVE_SPEED = 3.0;
 
     /** 子弹半径 */
     public static final int BULLET_RADIUS = 3;
@@ -61,6 +64,8 @@ public final class StarwarWorld {
         public int shieldTicks;
         /** 最后一次收到客户端输入的时间，用于剔除掉线玩家 */
         public long lastInputAt;
+        /** 是否已经撑满 20 秒（达标奖励只给一次） */
+        public boolean reachedTarget;
 
         public PlayerState(String username, String nickname, String plane) {
             this.username = username;
@@ -174,9 +179,12 @@ public final class StarwarWorld {
         elapsedMs += TICK_MS;
         ticks++;
 
-        // 难度：每 5 秒提高一档，子弹变快、密度变大
-        int difficulty = 1 + (int) (elapsedMs / 5000);
-        double speed = 1.2 + difficulty * 0.25;
+        // 难度曲线对齐原版「是男人就撑20秒」：20 秒是分水岭，
+        // 前 20 秒逐步加难（每 4 秒一档，共 5 档），20 秒后进入「撑住了」的奖励阶段，难度封顶。
+        int difficulty = elapsedMs >= SURVIVE_TARGET_MS
+                ? 6
+                : 1 + (int) (elapsedMs / 4000);
+        double speed = 1.15 + difficulty * 0.22;
 
         // 1) 推进玩家位置
         for (PlayerState state : players.values()) {
@@ -191,9 +199,13 @@ public final class StarwarWorld {
             double ny = state.y + state.dy * 3.0;
             state.x = Math.max(PLANE_RADIUS, Math.min(WIDTH - PLANE_RADIUS, nx));
             state.y = Math.max(PLANE_RADIUS, Math.min(HEIGHT - PLANE_RADIUS, ny));
-            // 存活计分：每秒 10 分，超过 20 秒后翻倍
+            // 存活计分：撑到 20 秒给「达标奖励」+200，之后每秒 20 分继续累加
             if (state.survivedMs % 1000 < TICK_MS) {
                 state.score += state.survivedMs > SURVIVE_TARGET_MS ? 20 : 10;
+                if (state.survivedMs >= SURVIVE_TARGET_MS && !state.reachedTarget) {
+                    state.reachedTarget = true;
+                    state.score += 200;
+                }
             }
         }
 
@@ -338,6 +350,7 @@ public final class StarwarWorld {
             row.put("alive", state.alive);
             row.put("shield", state.shieldTicks > 0);
             row.put("survived", state.survivedMs);
+            row.put("reachedTarget", state.reachedTarget);
             playerRows.add(row);
         }
         List<Map<String, Object>> bulletRows = new ArrayList<>(bullets.size());

@@ -202,6 +202,25 @@ public final class StarwarTexts {
         };
     }
 
+    /** 专区奖惩倍率：活动专区为官方活动场，结算奖励翻倍 */
+    public static double rewardMultiplier(String zone) {
+        return "activity".equals(zone) ? 2.0 : 1.0;
+    }
+
+    /**
+     * 活动专区是否免创建费（原文只在活动期开放）。
+     * 这里按「每日 20:00-22:00」的活动时段判断，其余时间照常收费。
+     */
+    public static boolean activityFreeNow(java.time.LocalDateTime now) {
+        int hour = now.getHour();
+        return hour >= 20 && hour < 22;
+    }
+
+    /** 活动时段说明文案 */
+    public static String activitySchedule() {
+        return "活动专区每日 20:00-22:00 免创建费，结算奖励翻倍。";
+    }
+
     /** 九大星球（maps.inf 原文顺序与城市代号） */
     public static final List<Planet> PLANETS = List.of(
             new Planet(2, "地球", "dixing"),

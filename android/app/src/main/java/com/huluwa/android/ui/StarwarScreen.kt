@@ -196,6 +196,22 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                 StarwarMenuButton(Icons.Outlined.EmojiEvents, "排行榜") { vm.openRanking() }
             }
         }
+        if (ui.activityNotice.isNotBlank()) item {
+            // 活动专区提示：每日 20:00-22:00 免创建费、奖励翻倍
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.LOTTERY, 28.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(if (ui.activityFree) "活动进行中" else "活动专区",
+                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                            color = if (ui.activityFree) Color(0xFFD9A300) else HuluwaColors.Muted)
+                        Text(ui.activityNotice, style = MaterialTheme.typography.labelSmall,
+                            color = HuluwaColors.Muted)
+                    }
+                }
+            }
+        }
         item { StarwarPlanetsCard(ui) }
         item { StarwarHelpCard(ui, vm) }
     }
@@ -595,6 +611,22 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                 Spacer(Modifier.width(4.dp))
                 Text("${(world.elapsed / 1000.0)} 秒", color = Color(0xFFCCD6E8),
                     style = MaterialTheme.typography.labelLarge)
+            }
+            // 20 秒目标进度条：原文「是男人就撑20秒」
+            val me = world.players.firstOrNull { it.user == ui.profile.user }
+            val progress = ((world.elapsed.toFloat() / 20_000f).coerceIn(0f, 1f))
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 32.dp, vertical = 60.dp)) {
+                Text(if (me?.reachedTarget == true) "撑住20秒！" else "撑住 20 秒",
+                    color = if (me?.reachedTarget == true) Color(0xFF7CE8B0) else Color(0xAAFFFFFF),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                Spacer(Modifier.height(3.dp))
+                Box(Modifier.fillMaxWidth().height(5.dp)
+                    .background(Color(0x44FFFFFF), RoundedCornerShape(3.dp))) {
+                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight()
+                        .background(if (me?.reachedTarget == true) Color(0xFF7CE8B0) else Color(0xFFFFC15A),
+                            RoundedCornerShape(3.dp)))
+                }
             }
             // 玩家列表：AI 头像 + 昵称 + 分数
             Column(Modifier.align(Alignment.BottomStart).padding(8.dp),
