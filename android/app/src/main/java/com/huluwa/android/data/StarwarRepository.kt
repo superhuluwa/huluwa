@@ -31,12 +31,13 @@ data class StarwarWorldPlayer(
     val user: String = "", val nick: String = "", val plane: String = "plane",
     val x: Float = 0f, val y: Float = 0f, val hp: Int = 100, val score: Int = 0,
     val alive: Boolean = true, val shield: Boolean = false, val survived: Long = 0,
-    val reachedTarget: Boolean = false,
+    val reachedTarget: Boolean = false, val shells: Int = 3, val surround: Boolean = false,
 )
 
 data class StarwarBullet(val x: Float, val y: Float)
 data class StarwarProp(val x: Float, val y: Float, val kind: String)
 data class StarwarStone(val x: Float, val y: Float, val kind: Int)
+data class StarwarMissile(val x: Float, val y: Float)
 
 data class StarwarWorld(
     val matchId: String = "", val tick: Int = 0, val elapsed: Long = 0,
@@ -45,6 +46,7 @@ data class StarwarWorld(
     val bullets: List<StarwarBullet> = emptyList(),
     val props: List<StarwarProp> = emptyList(),
     val stones: List<StarwarStone> = emptyList(),
+    val missiles: List<StarwarMissile> = emptyList(),
     val settled: Boolean = false,
 )
 
@@ -157,6 +159,7 @@ fun parseStarwarWorld(raw: JsonObject): StarwarWorld = StarwarWorld(
             x = p.double("x").toFloat(), y = p.double("y").toFloat(), hp = p.int("hp"),
             score = p.int("score"), alive = p.bool("alive", true), shield = p.bool("shield"),
             survived = p.long("survived"), reachedTarget = p.bool("reachedTarget"),
+            shells = p.int("shells", 3), surround = p.bool("surround"),
         )
     } ?: emptyList(),
     bullets = raw["bullets"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {
@@ -167,6 +170,9 @@ fun parseStarwarWorld(raw: JsonObject): StarwarWorld = StarwarWorld(
     } ?: emptyList(),
     stones = raw["stones"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {
         StarwarStone(it.double("x").toFloat(), it.double("y").toFloat(), it.int("kind", 1))
+    } ?: emptyList(),
+    missiles = raw["missiles"]?.jsonArray?.mapNotNull { it as? JsonObject }?.map {
+        StarwarMissile(it.double("x").toFloat(), it.double("y").toFloat())
     } ?: emptyList(),
     settled = raw.bool("settled"),
 )

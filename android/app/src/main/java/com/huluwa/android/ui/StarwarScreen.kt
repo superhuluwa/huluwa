@@ -651,6 +651,8 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             "flash" to painterOf(context, StarwarArt.FLASH),
             "surround" to painterOf(context, StarwarArt.SURROUND),
             "launch" to painterOf(context, StarwarArt.LAUNCH),
+            "shell" to painterOf(context, StarwarArt.SHELL),
+            "surround" to painterOf(context, StarwarArt.SURROUND),
             "stone1" to painterOf(context, StarwarArt.STONE1),
             "stone2" to painterOf(context, StarwarArt.STONE2),
             "prop_heal" to painterOf(context, StarwarArt.LIVE),
@@ -691,6 +693,16 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                                 ((bullet.x - 6) * sx).toInt(), ((bullet.y - 6) * sy).toInt()),
                             dstSize = IntSize((12 * sx).toInt().coerceAtLeast(2),
                                 (12 * sy).toInt().coerceAtLeast(2)))
+                    }
+                }
+                // 导弹：原版 shell.bmp
+                world.missiles.forEach { missile ->
+                    bitmaps["shell"]?.let {
+                        drawImage(
+                            it, dstOffset = IntOffset(
+                                ((missile.x - 3) * sx).toInt(), ((missile.y - 10) * sy).toInt()),
+                            dstSize = IntSize((6 * sx).toInt().coerceAtLeast(2),
+                                (20 * sy).toInt().coerceAtLeast(2)))
                     }
                 }
                 // 道具：原始道具贴图
@@ -752,9 +764,15 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                             dstSize = IntSize((w * sx).toInt().coerceAtLeast(2),
                                 (h * sy).toInt().coerceAtLeast(2)))
                     }
+                    // 护盾：原版 surround.bmp 光圈
                     if (player.shield) {
-                        drawCircle(Color(0x445AA7FF), radius = 14f * minOf(sx, sy),
-                            center = Offset(player.x * sx, player.y * sy))
+                        bitmaps["surround"]?.let {
+                            drawImage(
+                                it, dstOffset = IntOffset(
+                                    ((player.x - 14) * sx).toInt(), ((player.y - 14) * sy).toInt()),
+                                dstSize = IntSize((28 * sx).toInt().coerceAtLeast(4),
+                                    (28 * sy).toInt().coerceAtLeast(4)))
+                        }
                     }
                 }
             }
@@ -806,7 +824,7 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                     Spacer(Modifier.width(4.dp))
                     StarwarImage(StarwarArt.PROP, 20.dp)
                     Spacer(Modifier.width(4.dp))
-                    Text("×${if (myPlayer.shield) 1 else 0}",
+                    Text("×${myPlayer.shells}",
                         color = Color(0xFFCCD6E8), style = MaterialTheme.typography.labelSmall)
                 }
             }

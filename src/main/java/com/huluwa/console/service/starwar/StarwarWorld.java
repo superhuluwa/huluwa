@@ -66,6 +66,10 @@ public final class StarwarWorld {
         public long lastInputAt;
         /** 是否已经撑满 20 秒（达标奖励只给一次） */
         public boolean reachedTarget;
+        /** 剩余导弹（原版 shell.bmp 弹壳）：每局初始 3 发，命中陨石可清场 */
+        public int shells = 3;
+        /** 护盾剩余 tick（surround.bmp 光圈） */
+        public int surroundTicks;
 
         public PlayerState(String username, String nickname, String plane) {
             this.username = username;
@@ -110,6 +114,17 @@ public final class StarwarWorld {
         }
     }
 
+    /** 导弹（shell.bmp）：从玩家位置向上飞出，纯表现，命中逻辑在 fireMissile */
+    public static final class Missile {
+        public double x;
+        public double y;
+
+        public Missile(double x, double y) {
+            this.x = x;
+            this.y = y;
+        }
+    }
+
     /** 道具：玩家吃后降低难度（缩小判定、回血、加分、加护盾） */
     public static final class Prop {
         public double x;
@@ -134,6 +149,8 @@ public final class StarwarWorld {
     public final List<Bullet> bullets = new ArrayList<>();
     public final List<Prop> props = new ArrayList<>();
     public final List<Stone> stones = new ArrayList<>();
+    /** 导弹飞行轨迹（原版 shell.bmp），纯表现 */
+    public final List<Missile> missiles = new ArrayList<>();
 
     public long elapsedMs;
     public int ticks;
@@ -171,18 +188,44 @@ public final class StarwarWorld {
         state.lastInputAt = System.currentTimeMillis();
     }
 
-    /** 「使用道具」：消耗一次护盾（原版 ok / * 键） */
+    /**
+     * 「使用道具」（原版 ok / * 键，操作说明里写明「按OK或*键使用道具」）。
+     *
+     * <p>优先释放护盾光圈（surround.bmp）；护盾已在生效时改用导弹（shell.bmp），
+     * 导弹会击落画面内最近的一批陨石。两者都用完则返回 false。</p>
+     */
     public boolean useItem(String username) {
         PlayerState state = players.get(username);
         if (state == null || !state.alive) {
             return false;
         }
-        // 每局只给一次护盾，用道具键触发
-        if (state.shieldTicks > 0) {
-            return false;
+        if (state.surroundTicks <= 0 && state.shieldTicks <= 0) {
+            state.surroundTicks = 60;   // 3 秒光圈
+            state.shieldTicks = 60;
+            return true;
         }
-        state.shieldTicks = 40; // 2 秒无敌
-        return true;
+        if (state.shells > 0) {
+            state.shells--;
+            fireMissile(state);
+            return true;
+        }
+        return false;
+    }
+
+    /** 导弹：清除离自己最近的至多 3 块陨石，每块加 50 分 */
+    private void fireMissile(PlayerState state) {
+        List<Stone> sorted = new ArrayList<>(stones);
+        sorted.sort((a, b) -> {
+            double da = (a.x - state.x) * (a.x - state.x) + (a.y - state.y) * (a.y - state.y);
+            double db = (b.x - state.x) * (b.x - state.x) + (b.y - state.y) * (b.y - state.y);
+            return Double.compare(da, db);
+        });
+        int hit = Math.min(3, sorted.size());
+        for (int i = 0; i < hit; i++) {
+            stones.remove(sorted.get(i));
+            state.score += 50;
+        }
+        missiles.add(new Missile(state.x, state.y));
     }
 
     /**
@@ -210,6 +253,9 @@ public final class StarwarWorld {
             state.survivedMs = elapsedMs;
             if (state.shieldTicks > 0) {
                 state.shieldTicks--;
+            }
+            if (state.surroundTicks > 0) {
+                state.surroundTicks--;
             }
             double nx = state.x + state.dx * 3.0;
             double ny = state.y + state.dy * 3.0;
@@ -260,6 +306,16 @@ public final class StarwarWorld {
                     }
                     break;
                 }
+            }
+        }
+
+        // 导弹推进（向上飞出画面后移除）
+        java.util.Iterator<Missile> missileIt = missiles.iterator();
+        while (missileIt.hasNext()) {
+            Missile m = missileIt.next();
+            m.y -= 6;
+            if (m.y < -20) {
+                missileIt.remove();
             }
         }
 
@@ -399,6 +455,8 @@ public final class StarwarWorld {
             row.put("score", state.score);
             row.put("alive", state.alive);
             row.put("shield", state.shieldTicks > 0);
+            row.put("shells", state.shells);
+            row.put("surround", state.surroundTicks > 0);
             row.put("survived", state.survivedMs);
             row.put("reachedTarget", state.reachedTarget);
             playerRows.add(row);
@@ -425,6 +483,11 @@ public final class StarwarWorld {
         out.put("bullets", bulletRows);
         out.put("props", propRows);
         out.put("stones", stoneRows);
+        List<Map<String, Object>> missileRows = new ArrayList<>(missiles.size());
+        for (Missile m : missiles) {
+            missileRows.add(Map.of("x", round(m.x), "y", round(m.y)));
+        }
+        out.put("missiles", missileRows);
         out.put("settled", settled);
         return out;
     }
