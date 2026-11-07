@@ -70,6 +70,9 @@ data class StarwarState(
     val settingsOpen: Boolean = false,
     val phraseEditOpen: Boolean = false,
     val phraseDraft: List<String> = emptyList(),
+    /** 音量 0..1（原文「音量调节：超级大玩家主界面->系统设置」） */
+    val volume: Float = 0.35f,
+    val systemMenuOpen: Boolean = false,
 ) {
     val roomId: String get() = room?.id.orEmpty()
     val isOwner: Boolean get() = room?.owner == profile.user
@@ -429,6 +432,15 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
             phraseDraft = it.chat.phrases.ifEmpty { it.texts.defaultPhrases })
     }
     fun closePhraseEdit() = mutable.update { it.copy(phraseEditOpen = false) }
+
+    /** 左软键：调出系统菜单 */
+    fun openSystemMenu() = mutable.update { it.copy(systemMenuOpen = true) }
+    fun closeSystemMenu() = mutable.update { it.copy(systemMenuOpen = false) }
+
+    /** 音量调节（0..1，步进 0.1） */
+    fun setVolume(value: Float) = mutable.update {
+        it.copy(volume = value.coerceIn(0f, 1f))
+    }
     fun setPhraseDraft(index: Int, value: String) = mutable.update { state ->
         val draft = state.phraseDraft.toMutableList()
         if (index in draft.indices) draft[index] = value.take(30)

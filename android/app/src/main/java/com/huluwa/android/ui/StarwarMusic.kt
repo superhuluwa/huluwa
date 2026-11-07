@@ -17,15 +17,20 @@ import com.huluwa.android.R
  * 谐波构成按原曲的 program 号（弦乐/铜管/贝斯）近似还原。</p>
  */
 @Composable
-fun StarwarMusic(enabled: Boolean) {
+fun StarwarMusic(enabled: Boolean, volume: Float = 0.35f) {
     val context = LocalContext.current
     val player = remember {
         runCatching {
             MediaPlayer.create(context, R.raw.starwar_backmusic)?.apply {
                 isLooping = true
-                setVolume(0.35f, 0.35f)
+                setVolume(volume.coerceIn(0f, 1f), volume.coerceIn(0f, 1f))
             }
         }.getOrNull()
+    }
+    // 音量变化实时生效
+    DisposableEffect(volume) {
+        runCatching { player?.setVolume(volume.coerceIn(0f, 1f), volume.coerceIn(0f, 1f)) }
+        onDispose { }
     }
     DisposableEffect(enabled) {
         if (enabled) {

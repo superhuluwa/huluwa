@@ -130,8 +130,11 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     }
 
     // 原版背景音乐：大厅与房间循环播放，对局中降低音量，结算后停止
-    StarwarMusic(enabled = ui.stage == StarwarStage.Lobby || ui.stage == StarwarStage.Rooms
-            || ui.stage == StarwarStage.Room)
+    StarwarMusic(
+        enabled = ui.stage == StarwarStage.Lobby || ui.stage == StarwarStage.Rooms
+                || ui.stage == StarwarStage.Room,
+        volume = ui.volume,
+    )
 
     if (ui.createRoomOpen) StarwarCreateRoomDialog(ui, vm)
     if (ui.passwordPromptRoom != null) StarwarPasswordDialog(ui, vm)
@@ -143,6 +146,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     if (ui.statusOpen) StarwarStatusDialog(ui, vm)
     if (ui.settingsOpen) StarwarSettingsDialog(ui, vm)
     if (ui.phraseEditOpen) StarwarPhraseEditDialog(ui, vm)
+    if (ui.systemMenuOpen) StarwarSystemMenuDialog(ui, vm)
     if (ui.chatOpen) StarwarChatDialog(ui, vm)
     if (ui.phraseSheetOpen) StarwarPhraseDialog(ui, vm)
 }
@@ -159,9 +163,13 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
                     color = HuluwaColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (ui.stage == StarwarStage.Battle || ui.stage == StarwarStage.Room) {
-                IconButton(onClick = { /* 打开聊天：原文 # 键 */ }) {
+                IconButton(onClick = { vm.openChat() }) {
                     Icon(Icons.Outlined.Chat, "聊天")
                 }
+            }
+            // 左软键：调出系统菜单（原版「左软键：调出系统菜单/确定」）
+            IconButton(onClick = { vm.openSystemMenu() }) {
+                Icon(Icons.Outlined.Menu, "菜单")
             }
         }
     }
@@ -1101,6 +1109,62 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton({ vm.openPhraseEdit() }) { Text("短语设置") }
                     TextButton({ vm.togglePhraseSheet() }) { Text("返回") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 左软键「系统菜单」。原版操作说明写明「音量调节：超级大玩家主界面->系统设置」，
+ * 这里把音量滑条、帮助、我的状态、退出房间集中到一个菜单里。
+ */
+@Composable private fun StarwarSystemMenuDialog(ui: StarwarState, vm: StarwarViewModel) {
+    Dialog(onDismissRequest = { vm.closeSystemMenu() }) {
+        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("菜单", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("音量调节", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.VolumeMute, null, Modifier.size(18.dp), tint = HuluwaColors.Muted)
+                    Slider(
+                        value = ui.volume,
+                        onValueChange = { vm.setVolume(it) },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                    Icon(Icons.Outlined.VolumeUp, null, Modifier.size(18.dp), tint = HuluwaColors.Muted)
+                    Text("${(ui.volume * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                }
+                HorizontalDivider()
+                TextButton({ vm.closeSystemMenu(); vm.showHelp() }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Info, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("游戏帮助", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                }
+                TextButton({ vm.closeSystemMenu(); vm.openStatus() }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Person, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("我的状态", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                }
+                TextButton({ vm.closeSystemMenu(); vm.openPhraseEdit() }, Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("短语设置", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                }
+                if (ui.stage == StarwarStage.Room || ui.stage == StarwarStage.Battle) {
+                    HorizontalDivider()
+                    TextButton({ vm.closeSystemMenu(); vm.leaveRoom() }, Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.ExitToApp, null, Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text("退出", color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton({ vm.closeSystemMenu() }) { Text("返回") }
                 }
             }
         }
