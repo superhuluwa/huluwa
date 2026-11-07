@@ -96,12 +96,13 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
             vm.dismissError()
         }
     }
-    // 等待聊天室轮询：WebSocket 只推新消息，进入房间时补一次历史
+    // 等待聊天室与房间状态轮询：WebSocket 只推新消息，这里负责补历史和成员变化
     LaunchedEffect(ui.stage, ui.roomId) {
         if (ui.stage == StarwarStage.Room && ui.roomId.isNotBlank()) {
             while (true) {
-                delay(5_000)
+                delay(3_000)
                 vm.loadRoom(ui.roomId)
+                vm.loadChat(ui.roomId, ui.chat.messages.lastOrNull()?.id ?: 0)
             }
         }
     }
@@ -421,21 +422,84 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
             items(room.memberList, key = { it.user }) { member ->
                 StarwarMemberRow(member, ui, vm)
             }
+            // 等待聊天室：原版进入房间即可看到聊天室，不用另外点开
             item {
-                Spacer(Modifier.height(4.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { vm.openChat() }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Outlined.Chat, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("聊天室")
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("聊天室", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { vm.togglePhraseSheet() }) {
+                        Text("短语", style = MaterialTheme.typography.labelSmall)
                     }
-                    OutlinedButton(onClick = { vm.togglePhraseSheet() }, modifier = Modifier.weight(1f)) {
-                        Text("短语")
+                    TextButton(onClick = { vm.openChat() }) {
+                        Text("聊天窗口", style = MaterialTheme.typography.labelSmall)
                     }
+                }
+            }
+            item {
+                // 聊天室公告（原文「聊天室公告：」+ 规则）
+                if (ui.chat.notice.isNotBlank()) {
+                    Text(ui.chat.notice, style = MaterialTheme.typography.labelSmall,
+                        color = HuluwaColors.Muted,
+                        modifier = Modifier.background(Color(0xFFFFF6E0), RoundedCornerShape(6.dp))
+                            .padding(8.dp).fillMaxWidth())
+                }
+            }
+            item {
+                Column(Modifier.fillMaxWidth().heightIn(max = 180.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (ui.chat.messages.isEmpty()) {
+                        Text("聊天室公告：请爱护聊天环境，发言间隔 10 秒",
+                            style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                    } else {
+                        ui.chat.messages.takeLast(5).forEach { StarwarChatBubble(it) }
+                    }
+                }
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        ui.chatInput, vm::setChatInput,
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("请输入聊天内容", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Button({ vm.sendChat() }, enabled = ui.chatInput.isNotBlank()) {
+                        Text("发送", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (ui.chat.nextAllowedAt > System.currentTimeMillis()) {
+                    Text("聊天间隔10秒,请勿刷屏!", style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFD9A300), modifier = Modifier.padding(top = 4.dp))
                 }
             }
         }
         StarwarRoomActions(ui, vm, room, me)
+    }
+}
+
+/** 聊天气泡：系统消息居中灰字，玩家发言左右分列 */
+@Composable
+internal fun StarwarChatBubble(message: StarwarChatMessage) {
+    if (message.kind == "system") {
+        Text(message.content, style = MaterialTheme.typography.labelSmall,
+            color = HuluwaColors.Muted, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            textAlign = TextAlign.Center)
+        return
+    }
+    Row(Modifier.fillMaxWidth(),
+        horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start) {
+        Column(
+            Modifier.background(
+                if (message.mine) HuluwaColors.SoftGreen else Color(0xFFF1F3F4),
+                RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 5.dp)
+        ) {
+            if (!message.mine) {
+                Text(message.nick, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+            }
+            Text(message.content, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
