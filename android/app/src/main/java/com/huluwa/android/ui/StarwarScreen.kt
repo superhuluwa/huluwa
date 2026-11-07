@@ -418,7 +418,13 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                     }
                 }
             }
-            item { Text("玩家列表", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+            item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StarwarImage(StarwarArt.LIST_ICON, 18.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("玩家列表", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
+        }
             items(room.memberList, key = { it.user }) { member ->
                 StarwarMemberRow(member, ui, vm)
             }
@@ -608,6 +614,14 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             "bullet2" to painterOf(context, StarwarArt.BULLET2),
             "prop" to painterOf(context, StarwarArt.PROP),
             "explode" to painterOf(context, StarwarArt.EXPLODE2),
+            "explode1" to painterOf(context, StarwarArt.EXPLODE1),
+            "explode3" to painterOf(context, StarwarArt.EXPLODE3),
+            "damage1" to painterOf(context, StarwarArt.DAMAGE1),
+            "damage2" to painterOf(context, StarwarArt.DAMAGE2),
+            "damage3" to painterOf(context, StarwarArt.DAMAGE3),
+            "shell" to painterOf(context, StarwarArt.SHELL),
+            "flash" to painterOf(context, StarwarArt.FLASH),
+            "surround" to painterOf(context, StarwarArt.SURROUND),
             "stone1" to painterOf(context, StarwarArt.STONE1),
             "stone2" to painterOf(context, StarwarArt.STONE2),
             "prop_heal" to painterOf(context, StarwarArt.LIVE),
@@ -669,8 +683,19 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                 }
                 // 玩家：原始飞机贴图（阵亡改用爆炸贴图）
                 world.players.forEach { player ->
-                    val key = if (player.alive) "plane" else "explode"
-                    bitmaps[key]?.let {
+                    // 存活时按剩余血量选受损贴图；阵亡后按时间轮换三帧爆炸
+                    val key = when {
+                        !player.alive -> when ((world.tick / 4) % 3) {
+                            0 -> "explode1"
+                            1 -> "explode"
+                            else -> "explode3"
+                        }
+                        player.hp <= 20 -> "damage3"
+                        player.hp <= 40 -> "damage2"
+                        player.hp <= 60 -> "damage1"
+                        else -> "plane"
+                    }
+                    (bitmaps[key] ?: bitmaps["plane"])?.let {
                         val w = if (player.alive) 20 else 28
                         val h = if (player.alive) 26 else 28
                         drawImage(
@@ -779,8 +804,12 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 @Composable private fun StarwarResult(ui: StarwarState, vm: StarwarViewModel) {
     val rows = if (ui.result.isNotEmpty()) ui.result else ui.standings
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("游戏排名结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically) {
+            StarwarImage(StarwarArt.SCORES, 26.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("游戏排名结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
         if (rows.isEmpty()) {
             Text("游戏结束！", style = MaterialTheme.typography.bodyMedium,
                 color = HuluwaColors.Muted, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
@@ -894,7 +923,13 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
         Surface(RoundedCornerShape(16.dp), color = Color.White) {
             LazyColumn(Modifier.padding(20.dp).heightIn(max = 520.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { Text("游戏帮助", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StarwarImage(StarwarArt.OPERATE, 22.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("游戏帮助", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
                 item { Text(ui.help.introTitle, fontWeight = FontWeight.SemiBold) }
                 item { Text(ui.help.intro, style = MaterialTheme.typography.bodySmall) }
                 item { Text(ui.help.howToTitle, fontWeight = FontWeight.SemiBold) }
@@ -1042,7 +1077,11 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
     Dialog(onDismissRequest = { vm.closeRanking() }) {
         Surface(RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 520.dp)) {
-                Text("游戏排行榜", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.SCORES, 22.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("游戏排行榜", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(ui.ranking) { row ->
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
