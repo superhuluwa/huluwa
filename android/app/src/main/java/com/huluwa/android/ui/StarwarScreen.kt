@@ -1191,7 +1191,19 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                                 Text(if (isPlane) "飞机" else "引擎",
                                     style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                             }
-                            TextButton({ vm.equip(item["type"].orEmpty(), item["id"].orEmpty()) }) { Text("装备") }
+                            val equipped = (isPlane && item["id"] == ui.profile.plane) ||
+                                    (!isPlane && item["id"] == ui.profile.engine)
+                            if (equipped) {
+                                // 原版 youuse.bmp：表示「你正在使用」
+                                StarwarImage(StarwarArt.YOU_USE, 18.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Text("使用中", style = MaterialTheme.typography.labelSmall,
+                                    color = HuluwaColors.Pine)
+                            } else {
+                                TextButton({ vm.equip(item["type"].orEmpty(), item["id"].orEmpty()) }) {
+                                    Text("装备")
+                                }
+                            }
                         }
                     }
                 }
