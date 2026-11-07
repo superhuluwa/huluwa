@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -141,6 +142,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     if (ui.opponent != null) StarwarOpponentDialog(ui, vm)
     if (ui.statusOpen) StarwarStatusDialog(ui, vm)
     if (ui.settingsOpen) StarwarSettingsDialog(ui, vm)
+    if (ui.phraseEditOpen) StarwarPhraseEditDialog(ui, vm)
     if (ui.chatOpen) StarwarChatDialog(ui, vm)
     if (ui.phraseSheetOpen) StarwarPhraseDialog(ui, vm)
 }
@@ -1013,7 +1015,35 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                         .padding(vertical = 10.dp))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton({ vm.openPhraseEdit() }) { Text("短语设置") }
                     TextButton({ vm.togglePhraseSheet() }) { Text("返回") }
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun StarwarPhraseEditDialog(ui: StarwarState, vm: StarwarViewModel) {
+    Dialog(onDismissRequest = { vm.closePhraseEdit() }) {
+        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+            Column(Modifier.padding(20.dp).heightIn(max = 560.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("短语设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("原版 6 条快捷短语，聊天时一键发送", style = MaterialTheme.typography.labelSmall,
+                    color = HuluwaColors.Muted)
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(ui.phraseDraft) { index, value ->
+                        OutlinedTextField(
+                            value, { vm.setPhraseDraft(index, it) },
+                            label = { Text("短语 ${index + 1}", style = MaterialTheme.typography.labelSmall) },
+                            singleLine = true, modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton({ vm.closePhraseEdit() }) { Text("返回") }
+                    Button({ vm.savePhrases() }) { Text("确定") }
                 }
             }
         }

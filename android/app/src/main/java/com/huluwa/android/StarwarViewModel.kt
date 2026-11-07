@@ -68,6 +68,8 @@ data class StarwarState(
     val opponent: Map<String, String>? = null,
     val statusOpen: Boolean = false,
     val settingsOpen: Boolean = false,
+    val phraseEditOpen: Boolean = false,
+    val phraseDraft: List<String> = emptyList(),
 ) {
     val roomId: String get() = room?.id.orEmpty()
     val isOwner: Boolean get() = room?.owner == profile.user
@@ -420,6 +422,34 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
     fun openChat() = mutable.update { it.copy(chatOpen = true) }
     fun closeChat() = mutable.update { it.copy(chatOpen = false) }
     fun togglePhraseSheet() = mutable.update { it.copy(phraseSheetOpen = !it.phraseSheetOpen) }
+
+    /** 「短语设置」：打开编辑，草稿取当前 6 条短语 */
+    fun openPhraseEdit() = mutable.update {
+        it.copy(phraseEditOpen = true, phraseSheetOpen = false,
+            phraseDraft = it.chat.phrases.ifEmpty { it.texts.defaultPhrases })
+    }
+    fun closePhraseEdit() = mutable.update { it.copy(phraseEditOpen = false) }
+    fun setPhraseDraft(index: Int, value: String) = mutable.update { state ->
+        val draft = state.phraseDraft.toMutableList()
+        if (index in draft.indices) draft[index] = value.take(30)
+        state.copy(phraseDraft = draft)
+    }
+
+    /** 保存短语：服务端要求正好 6 条，每条 1-30 字 */
+    fun savePhrases() {
+        viewModelScope.launch {
+            try {
+                val saved = repository.savePhrases(mutable.value.phraseDraft)
+                val list = saved.jsonArray.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+                mutable.update {
+                    it.copy(phraseEditOpen = false,
+                        chat = it.chat.copy(phrases = list))
+                }
+                showToast("短语已保存")
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutable.update { it.copy(error = error.userMessage()) } }
+        }
+    }
 
     fun sendChat(content: String = mutable.value.chatInput, kind: String = "text") {
         val roomId = mutable.value.roomId
