@@ -186,7 +186,7 @@ private fun titleOf(ui: StarwarState): String = when (ui.stage) {
 private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
     StarwarStage.Lobby -> "${ui.profile.rank} · Lv.${ui.profile.level} · 胜率 ${ui.profile.winRate}%"
     StarwarStage.Rooms -> "第 ${ui.page + 1} / ${ui.roomPage?.pages ?: 1} 页 · 共 ${ui.roomPage?.total ?: 0} 个房间"
-    StarwarStage.Room -> "房间 ${ui.room?.id} · ${ui.room?.mapName ?: ""}"
+    StarwarStage.Room -> "房间 ${ui.room?.id} · ${ui.room?.mapName.orEmpty()}"
     StarwarStage.Battle -> "剩 ${ui.world?.players?.firstOrNull { it.user == ui.profile.user }?.hp ?: 0} 血"
     StarwarStage.Result -> "本局结束"
 }
@@ -1474,10 +1474,17 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 Text("对手资料", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(data["nick"].orEmpty().ifBlank { data["user"].orEmpty() },
                     style = MaterialTheme.typography.titleSmall)
-                Text("等级:${data["level"]} · ${data["rank"]}", style = MaterialTheme.typography.bodySmall)
-                Text("胜率:${data["winRate"]}% · ${data["wins"]} 胜 ${data["losses"]} 负",
+                // Kotlin 字符串模板里不能直接嵌套双引号，先取到局部变量再拼
+                val opLevel = data["level"].orEmpty()
+                val opRank = data["rank"].orEmpty()
+                val opWinRate = data["winRate"].orEmpty()
+                val opWins = data["wins"].orEmpty()
+                val opLosses = data["losses"].orEmpty()
+                val opPlane = data["plane"].orEmpty()
+                Text("等级:$opLevel · $opRank", style = MaterialTheme.typography.bodySmall)
+                Text("胜率:$opWinRate% · $opWins 胜 $opLosses 负",
                     style = MaterialTheme.typography.bodySmall)
-                Text("飞机:${data["plane"]}", style = MaterialTheme.typography.bodySmall)
+                Text("飞机:$opPlane", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton({ vm.addFriend(data["user"].orEmpty()) }) { Text("加为好友") }
                     TextButton({ vm.closeOpponent() }) { Text("返回") }

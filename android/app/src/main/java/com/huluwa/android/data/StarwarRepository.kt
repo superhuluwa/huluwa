@@ -213,11 +213,11 @@ fun parseStarwarStanding(raw: JsonObject) = StarwarStanding(
 /** 星球大战接口封装。实时帧走 /ws/starwar，见 [StarwarRealtime]。 */
 class StarwarRepository(private val api: ApiClient) {
 
-    fun lobby() = api.get("starwar", "lobby").asObject()
-    fun texts() = api.get("starwar", "texts").asObject()
-    fun help() = api.get("starwar", "help").asObject()
-    fun profile() = api.get("starwar", "profile").asObject()
-    fun status() = api.get("starwar", "status").asObject()
+    suspend fun lobby() = api.get("starwar", "lobby").asObject()
+    suspend fun texts() = api.get("starwar", "texts").asObject()
+    suspend fun help() = api.get("starwar", "help").asObject()
+    suspend fun profile() = api.get("starwar", "profile").asObject()
+    suspend fun status() = api.get("starwar", "status").asObject()
 
     suspend fun saveNickname(nickname: String) =
         api.post("starwar", "profile", "nickname", body = jsonBody { put("nickname", nickname) }).asObject()
@@ -260,22 +260,22 @@ class StarwarRepository(private val api: ApiClient) {
     suspend fun say(id: String, content: String, kind: String = "text") =
         api.post("starwar", "rooms", id, "chat", body = jsonBody { put("content", content); put("kind", kind) }).asObject()
 
-    fun phrases() = api.get("starwar", "phrases")
+    suspend fun phrases() = api.get("starwar", "phrases")
     suspend fun savePhrases(list: List<String>) =
         api.post("starwar", "phrases", body = JsonArray(list.map { JsonPrimitive(it) }))
 
-    fun friends() = api.get("starwar", "friends")
+    suspend fun friends() = api.get("starwar", "friends")
     suspend fun addFriend(target: String) =
         api.post("starwar", "friends", body = jsonBody { put("target", target) }).asObject()
-    fun opponent(name: String) = api.get("starwar", "players", name).asObject()
+    suspend fun opponent(name: String) = api.get("starwar", "players", name).asObject()
 
-    fun shop() = api.get("starwar", "shop").asObject()
+    suspend fun shop() = api.get("starwar", "shop").asObject()
     suspend fun buy(type: String, id: String) =
         api.post("starwar", "shop", "buy", body = jsonBody { put("type", type); put("id", id) }).asObject()
-    fun hangar() = api.get("starwar", "hangar")
+    suspend fun hangar() = api.get("starwar", "hangar")
     suspend fun equip(type: String, id: String) =
         api.post("starwar", "hangar", "equip", body = jsonBody { put("type", type); put("id", id) }).asObject()
-    fun market() = api.get("starwar", "market").asObject()
+    suspend fun market() = api.get("starwar", "market").asObject()
 
     suspend fun ranking(scope: String, page: Int) =
         api.get("starwar", "ranking", query = mapOf("scope" to scope, "page" to "$page")).asObject()
