@@ -36,6 +36,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.graphics.asImageBitmap
+
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.huluwa.android.StarwarStage
@@ -188,7 +192,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp).background(HuluwaColors.SoftGreen, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center) {
-                Text("✈", style = MaterialTheme.typography.headlineMedium)
+                StarwarImage(StarwarArt.plane(ui.profile.plane), 44.dp)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -213,7 +217,9 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
     Panel(onClick = onClick) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).background(HuluwaColors.SoftGreen, RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center) { Text("🚀") }
+                contentAlignment = Alignment.Center) {
+                StarwarImage(StarwarArt.PLANE, 32.dp)
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(zone.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -248,7 +254,8 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                     Box(Modifier.size(40.dp).background(
                         if (planet.locked) Color(0xFFE0E0E0) else HuluwaColors.SoftGreen),
                         contentAlignment = Alignment.Center) {
-                        Text(if (planet.locked) "🔒" else "🪐")
+                        if (planet.locked) StarwarImage(StarwarArt.LOCK, 30.dp)
+                        else StarwarImage(StarwarArt.planet(planet.icon), 34.dp)
                     }
                     Text(planet.name, style = MaterialTheme.typography.labelSmall)
                     Text(planet.unlockText, style = MaterialTheme.typography.labelSmall,
@@ -401,7 +408,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(36.dp).background(
                 if (member.team == 1) Color(0xFFFFE0E0) else HuluwaColors.SoftGreen, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center) { Text("✈") }
+                contentAlignment = Alignment.Center) { StarwarImage(StarwarArt.plane(member.plane), 28.dp) }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -475,70 +482,122 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun StarwarCanvas(ui: StarwarState, vm: StarwarViewModel) {
     val world = ui.world ?: return
-    val scale = remember(world.width, world.height) { 1f }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // 原始位图转 ImageBitmap 并缓存：每帧不重复解码
+    val bitmaps = remember {
+        mapOf(
+            "plane" to painterOf(context, StarwarArt.PLANE),
+            "bullet" to painterOf(context, StarwarArt.BULLET1),
+            "bullet2" to painterOf(context, StarwarArt.BULLET2),
+            "prop" to painterOf(context, StarwarArt.PROP),
+            "explode" to painterOf(context, StarwarArt.EXPLODE2),
+            "stone" to painterOf(context, StarwarArt.STONE1),
+        )
+    }
     BoxWithConstraints(Modifier.fillMaxSize().padding(8.dp)) {
-        val canvasWidth = maxWidth
-        val canvasHeight = maxHeight
-        Canvas(Modifier.fillMaxSize().background(Color(0xFF101828), RoundedCornerShape(8.dp))
-            .pointerInput(world.matchId) {
-                detectDragGestures(onDragEnd = { vm.input(0, 0) }) { change, drag ->
-                    change.consume()
-                    // 拖拽即移动：把位移换算成方向输入
-                    val dx = if (drag.x > 1f) 1 else if (drag.x < -1f) -1 else 0
-                    val dy = if (drag.y > 1f) 1 else if (drag.y < -1f) -1 else 0
-                    vm.input(dx, dy)
+        val scaleX = (maxWidth.value * 3f) / world.width
+        val scaleY = (maxHeight.value * 3f) / world.height
+        Box(
+            Modifier.fillMaxSize()
+                .background(Color(0xFF05070C), RoundedCornerShape(8.dp))
+                .pointerInput(world.matchId) {
+                    detectDragGestures(onDragEnd = { vm.input(0, 0) }) { change, drag ->
+                        change.consume()
+                        val dx = if (drag.x > 1f) 1 else if (drag.x < -1f) -1 else 0
+                        val dy = if (drag.y > 1f) 1 else if (drag.y < -1f) -1 else 0
+                        vm.input(dx, dy)
+                    }
                 }
-            }) {
-            val sx = size.width / world.width
-            val sy = size.height / world.height
-            // 子弹
-            world.bullets.forEach { bullet ->
-                drawCircle(Color(0xFFFF5A5A), radius = 3f * minOf(sx, sy),
-                    center = Offset(bullet.x * sx, bullet.y * sy))
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val sx = size.width / world.width
+                val sy = size.height / world.height
+                // 子弹：原始 12×12 同心圆贴图
+                world.bullets.forEach { bullet ->
+                    bitmaps["bullet"]?.let {
+                        drawImage(
+                            it, dstOffset = IntOffset(
+                                ((bullet.x - 6) * sx).toInt(), ((bullet.y - 6) * sy).toInt()),
+                            dstSize = IntSize((12 * sx).toInt().coerceAtLeast(2),
+                                (12 * sy).toInt().coerceAtLeast(2)))
+                    }
+                }
+                // 道具：原始道具贴图
+                world.props.forEach { prop ->
+                    bitmaps["prop"]?.let {
+                        drawImage(
+                            it, dstOffset = IntOffset(
+                                ((prop.x - 10) * sx).toInt(), ((prop.y - 10) * sy).toInt()),
+                            dstSize = IntSize((20 * sx).toInt().coerceAtLeast(2),
+                                (20 * sy).toInt().coerceAtLeast(2)))
+                    }
+                }
+                // 玩家：原始飞机贴图（阵亡改用爆炸贴图）
+                world.players.forEach { player ->
+                    val key = if (player.alive) "plane" else "explode"
+                    bitmaps[key]?.let {
+                        val w = if (player.alive) 20 else 28
+                        val h = if (player.alive) 26 else 28
+                        drawImage(
+                            it, dstOffset = IntOffset(
+                                ((player.x - w / 2f) * sx).toInt(), ((player.y - h / 2f) * sy).toInt()),
+                            dstSize = IntSize((w * sx).toInt().coerceAtLeast(2),
+                                (h * sy).toInt().coerceAtLeast(2)))
+                    }
+                    if (player.shield) {
+                        drawCircle(Color(0x445AA7FF), radius = 14f * minOf(sx, sy),
+                            center = Offset(player.x * sx, player.y * sy))
+                    }
+                }
             }
-            // 道具
-            world.props.forEach { prop ->
-                val color = when (prop.kind) {
-                    "heal" -> Color(0xFF5AD55A)
-                    "shield" -> Color(0xFF5AA7FF)
-                    "slow" -> Color(0xFFFFD45A)
-                    else -> Color(0xFFC55AFF)
-                }
-                drawCircle(color, radius = 6f * minOf(sx, sy), center = Offset(prop.x * sx, prop.y * sy))
+            // 生命条：原始 health 贴图做底
+            Row(Modifier.align(Alignment.TopStart).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                StarwarImage(StarwarArt.HEALTH, 16.dp)
+                Spacer(Modifier.width(4.dp))
+                Text("${world.players.firstOrNull { it.user == ui.profile.user }?.hp ?: 0}",
+                    color = Color(0xFF9FE8B0), style = MaterialTheme.typography.labelLarge)
             }
-            // 玩家
-            world.players.forEach { player ->
-                val center = Offset(player.x * sx, player.y * sy)
-                if (player.shield) {
-                    drawCircle(Color(0x665AA7FF), radius = 12f * minOf(sx, sy), center = center)
+            Row(Modifier.align(Alignment.TopEnd).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                StarwarImage(StarwarArt.TIMEBAR, 16.dp)
+                Spacer(Modifier.width(4.dp))
+                Text("${(world.elapsed / 1000.0)} 秒", color = Color(0xFFCCD6E8),
+                    style = MaterialTheme.typography.labelLarge)
+            }
+            // 玩家列表：AI 头像 + 昵称 + 分数
+            Column(Modifier.align(Alignment.BottomStart).padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                world.players.forEach { player ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StarwarImage(StarwarArt.AI, 14.dp)
+                        Spacer(Modifier.width(3.dp))
+                        Text(player.nick, color = if (player.alive) Color.White else Color.Gray,
+                            style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.width(4.dp))
+                        Text("${player.score}", color = Color(0xFF8FE3C0),
+                            style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-                drawPlayer(center, minOf(sx, sy), player.alive,
-                    if (player.user == ui.profile.user) Color(0xFF7CE8B0) else Color(0xFFFFC15A))
             }
         }
-        Text("${(world.elapsed / 1000.0)} 秒", color = Color(0x88FFFFFF),
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
-        Text("生命 ${world.players.firstOrNull { it.user == ui.profile.user }?.hp ?: 0}",
-            color = Color(0x88FFFFFF), style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.align(Alignment.TopStart).padding(8.dp))
     }
 }
 
-private fun DrawScope.drawPlayer(center: Offset, unit: Float, alive: Boolean, color: Color) {
-    if (!alive) {
-        drawCircle(Color(0x55FF5A5A), radius = 8f * unit, center = center)
-        return
-    }
-    val size = Size(14f * unit, 14f * unit)
-    drawRect(color, topLeft = Offset(center.x - size.width / 2, center.y - size.height / 2), size = size)
-    drawRect(Color.White, topLeft = Offset(center.x - 1f * unit, center.y - size.height / 2 - 3f * unit),
-        size = Size(2f * unit, 4f * unit))
+/** 资源 id → ImageBitmap（Compose 绘制用） */
+private fun painterOf(context: android.content.Context, resId: Int): androidx.compose.ui.graphics.ImageBitmap {
+    val d = androidx.core.content.ContextCompat.getDrawable(context, resId)
+        ?: return androidx.compose.ui.graphics.ImageBitmap(1, 1)
+    val bmp = android.graphics.Bitmap.createBitmap(
+        d.intrinsicWidth.coerceAtLeast(1), d.intrinsicHeight.coerceAtLeast(1),
+        android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    d.setBounds(0, 0, canvas.width, canvas.height)
+    d.draw(canvas)
+    return bmp.asImageBitmap()
 }
 
-/** 原版软键盘：2/8/4/6 方向、5 确定、* 使用道具、# 聊天 */
 @Composable private fun StarwarKeypad(ui: StarwarState, vm: StarwarViewModel) {
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
