@@ -284,7 +284,11 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable private fun StarwarPlanetsCard(ui: StarwarState) {
     Panel {
-        Text("九大星球", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StarwarImage(StarwarArt.SUN, 20.dp)
+            Spacer(Modifier.width(6.dp))
+            Text("九大星球", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        }
         Spacer(Modifier.height(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ui.planets.forEach { planet ->
@@ -363,6 +367,8 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.RANK, 16.dp)
+                    Spacer(Modifier.width(6.dp))
                     Text(room.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (room.hasPassword) {
@@ -527,7 +533,16 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             left = maxOf(0L, endEpochMs - System.currentTimeMillis())
         }
     }
-    Box(Modifier.background(HuluwaColors.Pine, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+    Row(Modifier.background(HuluwaColors.Pine, RoundedCornerShape(8.dp))
+        .padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // 倒计时进度用原版 prgs1/2/3 三态贴图
+        val frame = when ((left + 999) / 1000) {
+            1L -> StarwarArt.PRGS3
+            2L -> StarwarArt.PRGS2
+            else -> StarwarArt.PRGS1
+        }
+        StarwarImage(frame, 14.dp)
+        Spacer(Modifier.width(4.dp))
         Text("${(left + 999) / 1000} 秒后开始", color = Color.White,
             style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
@@ -553,6 +568,8 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                     style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
             }
             if (member.user != ui.profile.user) {
+                // 对方标：原版 oppos.bmp（组队战用 oppouse.bmp 表示「对面使用中」）
+                StarwarImage(if (member.team == 0) StarwarArt.OPPOS else StarwarArt.OPPO_USE, 20.dp)
                 IconButton({ vm.openOpponent(member.user) }, Modifier.size(32.dp)) {
                     Icon(Icons.Outlined.Info, "对手资料", Modifier.size(18.dp), tint = HuluwaColors.Muted)
                 }
@@ -620,7 +637,8 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
     val bitmaps = remember {
         mapOf(
             "plane" to painterOf(context, StarwarArt.PLANE),
-            "bullet" to painterOf(context, StarwarArt.BULLET1),
+            "bullet" to painterOf(context, StarwarArt.BULLET),
+            "bullet1" to painterOf(context, StarwarArt.BULLET1),
             "bullet2" to painterOf(context, StarwarArt.BULLET2),
             "prop" to painterOf(context, StarwarArt.PROP),
             "explode" to painterOf(context, StarwarArt.EXPLODE2),
@@ -632,6 +650,7 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             "shell" to painterOf(context, StarwarArt.SHELL),
             "flash" to painterOf(context, StarwarArt.FLASH),
             "surround" to painterOf(context, StarwarArt.SURROUND),
+            "launch" to painterOf(context, StarwarArt.LAUNCH),
             "stone1" to painterOf(context, StarwarArt.STONE1),
             "stone2" to painterOf(context, StarwarArt.STONE2),
             "prop_heal" to painterOf(context, StarwarArt.LIVE),
@@ -660,7 +679,13 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                 val sy = size.height / world.height
                 // 子弹：原始 12×12 同心圆贴图
                 world.bullets.forEach { bullet ->
-                    bitmaps["bullet"]?.let {
+                    // 原版三种子弹：按局内时间轮换，视觉上不单调
+                    val bulletKey = when ((world.elapsed / 5000) % 3) {
+                        0L -> "bullet"
+                        1L -> "bullet1"
+                        else -> "bullet2"
+                    }
+                    bitmaps[bulletKey]?.let {
                         drawImage(
                             it, dstOffset = IntOffset(
                                 ((bullet.x - 6) * sx).toInt(), ((bullet.y - 6) * sy).toInt()),
@@ -689,6 +714,19 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                                 ((stone.x - size / 2f) * sx).toInt(), ((stone.y - size / 2f) * sy).toInt()),
                             dstSize = IntSize((size * sx).toInt().coerceAtLeast(2),
                                 (size * sy).toInt().coerceAtLeast(2)))
+                    }
+                }
+                // 开局发射特效：原版 lauch.bmp，前 1 秒显示在自机下方
+                if (world.elapsed < 1000) {
+                    val mine = world.players.firstOrNull { it.user == ui.profile.user }
+                    if (mine != null) {
+                        bitmaps["launch"]?.let {
+                            drawImage(
+                                it, dstOffset = IntOffset(
+                                    ((mine.x - 10) * sx).toInt(), ((mine.y + 8) * sy).toInt()),
+                                dstSize = IntSize((20 * sx).toInt().coerceAtLeast(2),
+                                    (40 * sy).toInt().coerceAtLeast(2)))
+                        }
                     }
                 }
                 // 玩家：原始飞机贴图（阵亡改用爆炸贴图）
@@ -749,16 +787,46 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                             RoundedCornerShape(3.dp)))
                 }
             }
+            // 组队战队伍标识：原版 team.bmp
+            if ("team" == ui.room?.zone) {
+                Row(Modifier.align(Alignment.CenterStart).padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.TEAM, 22.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("组队战", color = Color(0xFFCCD6E8),
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            // 道具栏：原版 pslot.bmp 槽位 + prop 道具贴着
+            val myPlayer = world.players.firstOrNull { it.user == ui.profile.user }
+            if (myPlayer != null) {
+                Row(Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    StarwarImage(StarwarArt.PSLOT, 26.dp)
+                    Spacer(Modifier.width(4.dp))
+                    StarwarImage(StarwarArt.PROP, 20.dp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("×${if (myPlayer.shield) 1 else 0}",
+                        color = Color(0xFFCCD6E8), style = MaterialTheme.typography.labelSmall)
+                }
+            }
             // 玩家列表：AI 头像 + 昵称 + 分数
             Column(Modifier.align(Alignment.BottomStart).padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 world.players.forEach { player ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 己方用 selfs，对方用 oppoself（原版「对面的己方」标记）
+                        val mineTag = player.user == ui.profile.user
+                        StarwarImage(
+                            if (mineTag) StarwarArt.SELFS else StarwarArt.OPPO_SELF, 14.dp)
+                        Spacer(Modifier.width(3.dp))
                         StarwarImage(StarwarArt.AI, 14.dp)
                         Spacer(Modifier.width(3.dp))
                         Text(player.nick, color = if (player.alive) Color.White else Color.Gray,
                             style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.width(4.dp))
+                        StarwarImage(StarwarArt.NUMBER, 10.dp)
+                        Spacer(Modifier.width(2.dp))
                         Text("${player.score}", color = Color(0xFF8FE3C0),
                             style = MaterialTheme.typography.labelSmall)
                     }
