@@ -55,6 +55,14 @@ public final class StarwarTexts {
     public static final String REFRESH_ROOMS_FAILED = "刷新房间列表失败!";
     public static final String SERVER_NO_RESPONSE = "服务器无响应,请退出游戏稍后再试!";
     public static final String CONNECT_TIMEOUT = "连接超时,请退出重试!";
+    /**
+     * 原文里这几个是**分段存储**的（「游戏结束」在 0x14ee2，「等待服务器发送排名结果」在 0x14eec），
+     * 拼接符由代码决定。这里保留两种常见拼法，客户端按场景选。
+     */
+    public static final String GAMEOVER_SEGMENT = "游戏结束";
+    public static final String WAITING_RANK_SEGMENT = "等待服务器发送排名结果";
+    public static final String WAITING_RESULT_SEGMENT = "正在等待服务器发送游戏结果";
+    /** 结算等待提示（半角逗号 + 省略号，与原版拼接一致） */
     public static final String WAITING_RANK = "游戏结束,等待服务器发送排名结果…";
     public static final String WAITING_RESULT = "游戏结束，正在等待服务器发送游戏结果…";
     public static final String COMING_SOON = "即将推出,敬请期待!";
@@ -79,7 +87,9 @@ public final class StarwarTexts {
     public static final String ROOM_PASSWORD_USE = "使用密码";
     public static final String ROOM_PASSWORD_HINT = "房间密码默认为空,如非特别需要,请不要设定密码。";
 
-    /** 对局进行中点返回时确认（原版只在房间内退出时提示） */
+    /** 对局进行中点返回时确认。原文分段：「正在游戏中」(0x14f10) + 「确定要退出吗」(0x14f1c) */
+    public static final String EXIT_IN_GAME_SEGMENT = "正在游戏中";
+    public static final String EXIT_CONFIRM_SEGMENT = "确定要退出吗";
     public static final String EXIT_IN_GAME_CONFIRM = "正在游戏中,确定要退出吗?";
 
     /** 帮助入口标题（大厅「游戏帮助」按钮） */

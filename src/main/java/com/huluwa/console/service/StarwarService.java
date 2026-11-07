@@ -288,6 +288,13 @@ public class StarwarService {
         out.put("surviveTargetMs", StarwarTexts.SURVIVE_TARGET_MS);
         out.put("helpEntry", StarwarTexts.HELP_ENTRY);
         out.put("exitInGameConfirm", StarwarTexts.EXIT_IN_GAME_CONFIRM);
+        // 原文里这几个短语是分段存储的，一并下发便于客户端按屏宽自由拼接
+        out.put("segments", Map.of(
+                "gameOver", StarwarTexts.GAMEOVER_SEGMENT,
+                "waitingRank", StarwarTexts.WAITING_RANK_SEGMENT,
+                "waitingResult", StarwarTexts.WAITING_RESULT_SEGMENT,
+                "exitInGame", StarwarTexts.EXIT_IN_GAME_SEGMENT,
+                "exitConfirm", StarwarTexts.EXIT_CONFIRM_SEGMENT));
         return out;
     }
 
