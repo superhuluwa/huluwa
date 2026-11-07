@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -169,11 +170,50 @@ private val HongguoPlayerSurface = Color(0xFF303633)
 
     HongguoPlayerBars(fullscreen)
     BackHandler(enabled = fullscreen) { fullscreen = false }
-    DisposableEffect(activity, fullscreen) {
-        val orientation = activity?.requestedOrientation
-        if (fullscreen) activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    // 进入全屏前记录宿主方向，退出时恢复。不能原样还原 UNSPECIFIED：
+    // 系统方向锁或关闭自动旋转的设备会沿用当前的横屏，需要主动锁回进入前的方向。
+    val hostOrientation = remember(activity) { activity?.requestedOrientation }
+    var restoreOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
+    var enteredFullscreen by remember { mutableStateOf(false) }
+    LaunchedEffect(activity, fullscreen) {
+        val target = activity ?: return@LaunchedEffect
+        if (fullscreen) {
+            if (!enteredFullscreen) {
+                enteredFullscreen = true
+                // 跟随传感器的方向按进入前的实际画面方向换算成固定方向。
+                val current = target.requestedOrientation
+                restoreOrientation = if (current == ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED ||
+                    current == ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR ||
+                    current == ActivityInfo.SCREEN_ORIENTATION_SENSOR
+                ) {
+                    if (target.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                } else current
+                target.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+        } else if (enteredFullscreen) {
+            enteredFullscreen = false
+            target.requestedOrientation = restoreOrientation
+        }
+    }
+    // 离开播放页时把方向交还宿主原来的设置。若在横屏状态下离开，先锁回进入前的方向，
+    // 等转屏结束后再交还宿主，避免宿主停在横屏。
+    DisposableEffect(activity) {
         onDispose {
-            if (fullscreen && orientation != null) activity?.requestedOrientation = orientation
+            val target = activity ?: return@onDispose
+            val host = hostOrientation ?: return@onDispose
+            val inLandscape = target.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            if (inLandscape && restoreOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED &&
+                restoreOrientation != ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            ) {
+                target.requestedOrientation = restoreOrientation
+                target.window?.decorView?.postDelayed({
+                    if (!target.isFinishing && !target.isDestroyed) target.requestedOrientation = host
+                }, 500)
+            } else {
+                target.requestedOrientation = host
+            }
         }
     }
 
