@@ -873,24 +873,62 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
     return bmp.asImageBitmap()
 }
 
+/**
+ * 原版软键盘（操作说明逐条对应）：
+ * 2/4/6/8 方向、5 选择/确定、* 使用道具、# 切换聊天。
+ *
+ * <p>方向键做成**按住持续移动**：按下立即发一次，之后每 120ms 重发，
+ * 松开停止并补一次归零，贴合当年按键长按的操控手感。</p>
+ */
 @Composable private fun StarwarKeypad(ui: StarwarState, vm: StarwarViewModel) {
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Spacer(Modifier.weight(1f))
-            KeyButton("▲\n2") { vm.input(0, -1) }
+            HoldKey("▲\n2") { vm.input(0, -1) }
             Spacer(Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyButton("◀\n4", Modifier.weight(1f)) { vm.input(-1, 0) }
-            KeyButton("5", Modifier.weight(1f)) { vm.input(0, 0) }
-            KeyButton("▶\n6", Modifier.weight(1f)) { vm.input(1, 0) }
+            HoldKey("◀\n4", Modifier.weight(1f)) { vm.input(-1, 0) }
+            // 5 键：选择/确定（对局中等于停止移动）
+            KeyButton("5\n确定", Modifier.weight(1f)) { vm.input(0, 0) }
+            HoldKey("▶\n6", Modifier.weight(1f)) { vm.input(1, 0) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             KeyButton("*\n道具", Modifier.weight(1f)) { vm.useItem() }
-            KeyButton("▼\n8", Modifier.weight(1f)) { vm.input(0, 1) }
+            HoldKey("▼\n8", Modifier.weight(1f)) { vm.input(0, 1) }
             KeyButton("#\n聊天", Modifier.weight(1f)) { vm.openChat() }
         }
+    }
+}
+
+/** 按住持续触发：按下立刻发一次，之后每 120ms 重发，松开发归零 */
+@Composable private fun HoldKey(label: String, modifier: Modifier = Modifier, tick: () -> Unit) {
+    var holding by remember { mutableStateOf(false) }
+    LaunchedEffect(holding) {
+        if (holding) {
+            tick()
+            while (true) {
+                delay(120)
+                tick()
+            }
+        }
+    }
+    Box(
+        modifier.height(48.dp).background(
+            if (holding) Color(0xFF2F4A6B) else Color(0xFF1E293B), RoundedCornerShape(8.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        holding = true
+                        tryAwaitRelease()
+                        holding = false
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
     }
 }
 
