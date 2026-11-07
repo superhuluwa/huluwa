@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cast
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,6 +34,7 @@ import coil3.compose.AsyncImage
 @Composable internal fun InlineVideoBubble(
     url: String, poster: String, active: Boolean, onPlay: () -> Unit, onStop: () -> Unit,
     modifier: Modifier = Modifier.width(240.dp).aspectRatio(4f / 3f),
+    onCast: (() -> Unit)? = null,
 ) {
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
         if (active) {
@@ -45,6 +47,15 @@ import coil3.compose.AsyncImage
                     Icon(Icons.Outlined.PlayCircleOutline, null, Modifier.size(42.dp), tint = Color.White)
                     Text("点击播放", color = Color.White, style = MaterialTheme.typography.labelMedium)
                 }
+            }
+        }
+        onCast?.let { cast ->
+            TextButton(cast, Modifier.align(Alignment.TopEnd).padding(6.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.textButtonColors(containerColor = Color.Black.copy(alpha = 0.65f), contentColor = Color.White)) {
+                Icon(Icons.Outlined.Cast, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("投屏", style = MaterialTheme.typography.labelMedium)
             }
         }
     }

@@ -25,6 +25,7 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.URI
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** 不依赖 Google Play 服务的局域网 UPnP AVTransport 投屏。 */
@@ -117,12 +118,21 @@ class DlnaCastClient(context: Context) {
     }
 
     suspend fun cast(device: CastDevice, media: BrowserVideo) = withContext(Dispatchers.IO) {
-        require(MovieWebVideo.isM3u8(media.url)) { "请先选择可播放的 m3u8 视频" }
+        require(validHttp(media.url)) { "视频地址无效，请重新解析后投屏" }
+        // 短视频直链经常没有扩展名，默认以 MP4 声明；电影的 HLS 地址沿用原格式。
+        val mimeType = when (URI(media.url).path.substringAfterLast('.').lowercase(Locale.ROOT)) {
+            "m3u8" -> "application/vnd.apple.mpegurl"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "ts" -> "video/mp2t"
+            "mov" -> "video/quicktime"
+            else -> "video/mp4"
+        }
         val metadata = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" " +
             "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">" +
             "<item id=\"0\" parentID=\"-1\" restricted=\"1\"><dc:title>${escape(media.title)}</dc:title>" +
             "<upnp:class>object.item.videoItem.movie</upnp:class>" +
-            "<res protocolInfo=\"http-get:*:application/vnd.apple.mpegurl:*\">${escape(media.url)}</res></item></DIDL-Lite>"
+            "<res protocolInfo=\"http-get:*:$mimeType:*\">${escape(media.url)}</res></item></DIDL-Lite>"
         // 部分电视要求先退出原播放状态，空闲设备拒绝 Stop 时仍可继续设置新资源。
         try { soap(device, "Stop", "<InstanceID>0</InstanceID>") } catch (_: Exception) { }
         currentCoroutineContext().ensureActive()

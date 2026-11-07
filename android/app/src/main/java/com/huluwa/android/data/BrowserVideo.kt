@@ -3,7 +3,7 @@ package com.huluwa.android.data
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-/** 网页识别出的播放资源；请求头仅用于当前原生播放，不写入浏览记录。 */
+/** 解析结果或网页识别出的播放资源；请求头仅用于当前原生播放，不写入浏览记录。 */
 data class BrowserVideo(
     val url: String, val title: String, val referer: String, val userAgent: String,
     val cookie: String = "", val positionMs: Long = 0,

@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** 投屏会话独立于网页生命周期；网页返回后仍能重新打开控制面板。 */
+/** 解析视频与网页视频共用投屏会话；离开播放页面后仍能重新打开控制面板。 */
 data class VideoCastState(
     val devices: List<CastDevice> = emptyList(), val scanning: Boolean = false, val working: Boolean = false,
     val selected: CastDevice? = null, val media: BrowserVideo? = null, val playing: Boolean = false, val error: String? = null,

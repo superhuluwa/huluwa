@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 /** 同一作品的图片与实况照片共用一个分页区域，切页立即停止视频播放。 */
 @Composable internal fun VideoImageGallery(
     images: List<ParsedImage>, playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit,
-    savingImageUrls: Set<String>, onSaveImage: (String) -> Unit, onOpenImage: (String) -> Unit,
+    savingImageUrls: Set<String>, onSaveImage: (String) -> Unit, onVideoCast: (String) -> Unit, onOpenImage: (String) -> Unit,
 ) {
     val pager = rememberPagerState(pageCount = { images.size })
     val scope = rememberCoroutineScope()
@@ -42,7 +42,8 @@ import kotlinx.coroutines.launch
             if (image.livePhotoUrl.isNotBlank()) {
                 InlineVideoBubble(image.livePhotoUrl, image.url,
                     playingVideo && page == pager.currentPage && !pager.isScrollInProgress,
-                    onVideoPlay, onVideoStop, modifier = Modifier.fillMaxSize())
+                    onVideoPlay, onVideoStop, modifier = Modifier.fillMaxSize(),
+                    onCast = { onVideoCast(image.livePhotoUrl) })
             } else {
                 var failed by remember(image.url) { mutableStateOf(false) }
                 Box(Modifier.fillMaxSize().clickable(role = Role.Button, onClickLabel = "查看第 ${page + 1} 张大图") { onOpenImage(image.url) }, contentAlignment = Alignment.Center) {

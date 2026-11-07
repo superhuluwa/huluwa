@@ -28,7 +28,7 @@ import com.huluwa.android.data.BrowserVideo
             Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * .6f)) {
                 HuluwaDialogList(contentPadding = PaddingValues(0.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item(key = "description") {
-                        Text("手机与电视连接同一 Wi-Fi，电视需开启 DLNA 投屏并支持 HLS 视频。", style = MaterialTheme.typography.bodySmall)
+                        Text("手机与电视连接同一 Wi-Fi，电视需开启 DLNA 投屏，并支持当前视频格式（如 MP4、HLS）。", style = MaterialTheme.typography.bodySmall)
                     }
                     state.selected?.let { device ->
                         item(key = "playback") {

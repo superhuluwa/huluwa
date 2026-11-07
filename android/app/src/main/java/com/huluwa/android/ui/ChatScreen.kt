@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.huluwa.android.*
 import com.huluwa.android.data.*
@@ -72,6 +73,16 @@ import kotlinx.coroutines.flow.first
     var menu by remember { mutableStateOf(false) }
     var media by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var activeVideoId by remember(session.id) { mutableStateOf<Long?>(null) }
+    val castVm: VideoCastViewModel = viewModel()
+    val cast by castVm.state.collectAsStateWithLifecycle()
+    var castMedia by remember(session.id) { mutableStateOf<BrowserVideo?>(null) }
+    var showCast by remember(session.id) { mutableStateOf(false) }
+    DisposableEffect(castVm, session.id) { onDispose { castVm.cancelScan() } }
+    fun openCast(video: BrowserVideo?) {
+        castMedia = video
+        showCast = true
+        castVm.scan()
+    }
     var initialized by rememberSaveable(session.id) { mutableStateOf(false) }
     val latestMessage = chat.messages.lastOrNull()
     // 返回阅读页或书架前的会话时，以当前快照开始观察，避免把页面重建当成新消息。
@@ -107,6 +118,9 @@ import kotlinx.coroutines.flow.first
                             TitleReconnectBadge(reconnecting)
                         }
                         Text(if (ui.realtime) "实时消息已连接" else "消息自动轮询同步", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                    }
+                    if (session.kind == "video" && cast.selected != null) IconButton({ openCast(cast.media) }) {
+                        Icon(Icons.Outlined.CastConnected, "控制电视投屏")
                     }
                     if (session.kind == "fanqie") IconButton(vm::showFanqieShelf) {
                         Icon(Icons.Outlined.MenuBook, "书架管理")
@@ -147,6 +161,7 @@ import kotlinx.coroutines.flow.first
                     onVideoPlay = { activeVideoId = message.id },
                     onVideoStop = { if (activeVideoId == message.id) activeVideoId = null },
                     onSaveImage = ::saveOriginalImage,
+                    onVideoCast = { url, title -> openCast(BrowserVideo(url, title, referer = "", userAgent = "")) },
                     onMedia = { url, video -> activeVideoId = null; media = url to video })
             }
             item("history") {
@@ -163,6 +178,8 @@ import kotlinx.coroutines.flow.first
         }
     }
     media?.let { (url, video) -> MediaViewer(url, video) { media = null } }
+    if (showCast) VideoCastDialog(castMedia, cast, castVm, onStarted = { activeVideoId = null },
+        dismiss = { showCast = false; castVm.cancelScan() })
 }
 
 /** 保存消息锚点与卡片内偏移，离开期间有新消息插入时也恢复到原来的内容。 */
@@ -197,7 +214,7 @@ import kotlinx.coroutines.flow.first
 @Composable private fun MessageBubble(
     message: ChatMessage, kind: String, ui: AppState, vm: HuluwaViewModel,
     playingVideo: Boolean, onVideoPlay: () -> Unit, onVideoStop: () -> Unit,
-    onSaveImage: (String) -> Unit, onMedia: (String, Boolean) -> Unit,
+    onSaveImage: (String) -> Unit, onVideoCast: (String, String) -> Unit, onMedia: (String, Boolean) -> Unit,
 ) {
     val notify = message.notify
     val film = message.film
@@ -208,6 +225,7 @@ import kotlinx.coroutines.flow.first
     val fanqieReader = message.fanqieReader
     val card = film != null || dpd != null || btbtla != null || fanqie != null || fanqieReader != null
     val galleryImages = remember(message.payload) { message.videoImages }
+    val castTitle = plainText(message.payload.text("title").ifBlank { message.contentText }).ifBlank { "解析视频" }
     if (notify != null) { NotifyMessageCard(notify, kind, timeLabel(message.createdAt)); return }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.mine) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
         if (!message.mine) { SessionIcon(kind, Modifier.size(32.dp)); Spacer(Modifier.width(9.dp)) }
@@ -227,7 +245,8 @@ import kotlinx.coroutines.flow.first
                         dpd != null -> DpdResultCard(dpd, ui, vm)
                         film != null -> FilmResultCard(film, ui, vm)
                         message.type == "image" && galleryImages.size > 1 -> {
-                            VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage) { onMedia(it, false) }
+                            VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage,
+                                onVideoCast = { onVideoCast(it, castTitle) }) { onMedia(it, false) }
                             val caption = plainText(message.contentText)
                             if (caption.isNotBlank()) SelectionContainer { Text(caption, color = HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
                         }
@@ -237,7 +256,8 @@ import kotlinx.coroutines.flow.first
                             if (kind == "video" && !message.mine) SaveOriginalImageButton(message.content in ui.savingImageUrls, { onSaveImage(message.content) })
                         }
                         message.type == "video" && message.content.isNotBlank() -> {
-                            InlineVideoBubble(message.content, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
+                            InlineVideoBubble(message.content, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop,
+                                onCast = { onVideoCast(message.content, castTitle) })
                             // 单张实况照片以视频消息下发，保存对应的静态原图。
                             val originalImage = message.payload.text("poster", "cover")
                             if (kind == "video" && !message.mine && message.payload.text("video").isBlank() &&
@@ -252,9 +272,11 @@ import kotlinx.coroutines.flow.first
                             if (text.isNotBlank()) SelectionContainer { Text(text, color = if (message.type == "error") HuluwaColors.Danger else HuluwaColors.Ink, style = MaterialTheme.typography.bodyMedium) }
                             val video = message.payload.text("videoUrl", "video", "url")
                             if (message.payload.text("kind") == "video" && video.startsWith("http")) {
-                                InlineVideoBubble(video, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop)
+                                InlineVideoBubble(video, message.payload.text("poster", "cover"), playingVideo, onVideoPlay, onVideoStop,
+                                    onCast = { onVideoCast(video, castTitle) })
                             }
-                            if (galleryImages.isNotEmpty()) VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage) { onMedia(it, false) }
+                            if (galleryImages.isNotEmpty()) VideoImageGallery(galleryImages, playingVideo, onVideoPlay, onVideoStop, ui.savingImageUrls, onSaveImage,
+                                onVideoCast = { onVideoCast(it, castTitle) }) { onMedia(it, false) }
                             if (text.isBlank() && video.isBlank() && galleryImages.isEmpty()) Text("收到一条服务消息", style = MaterialTheme.typography.bodySmall)
                         }
                     }
