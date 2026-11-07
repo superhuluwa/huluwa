@@ -140,6 +140,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     if (ui.rankingOpen) StarwarRankingDialog(ui, vm)
     if (ui.opponent != null) StarwarOpponentDialog(ui, vm)
     if (ui.statusOpen) StarwarStatusDialog(ui, vm)
+    if (ui.settingsOpen) StarwarSettingsDialog(ui, vm)
     if (ui.chatOpen) StarwarChatDialog(ui, vm)
     if (ui.phraseSheetOpen) StarwarPhraseDialog(ui, vm)
 }
@@ -410,6 +411,13 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                             if (room.passwordHint.isNotBlank()) {
                                 Text(room.passwordHint, style = MaterialTheme.typography.labelSmall,
                                     color = HuluwaColors.Muted)
+                            }
+                        }
+                        if (ui.isOwner) {
+                            // 房主可改：地X图 / 选X项 / 费X用 / 密X码
+                            IconButton({ vm.openSettings() }, Modifier.size(36.dp)) {
+                                Icon(Icons.Outlined.Settings, "房间设置", Modifier.size(20.dp),
+                                    tint = HuluwaColors.Pine)
                             }
                         }
                         if (room.countdownEnd > 0 && room.status == "countdown") {
@@ -1096,6 +1104,61 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton({ vm.closeRanking() }) { Text("返回") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun StarwarSettingsDialog(ui: StarwarState, vm: StarwarViewModel) {
+    val room = ui.room ?: return
+    var password by remember { mutableStateOf("") }
+    Dialog(onDismissRequest = { vm.closeSettings() }) {
+        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+            Column(Modifier.padding(20.dp).heightIn(max = 560.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Settings, null, tint = HuluwaColors.Pine)
+                    Spacer(Modifier.width(8.dp))
+                    Text("房间设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+                Text("地1图", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ui.planets.forEach { planet ->
+                        FilterChip(selected = room.mapId == planet.id, enabled = !planet.locked,
+                            onClick = { vm.updateSettings(mapId = planet.id) },
+                            label = { Text(planet.name, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+                Text("选2项", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = room.itemMode == 1, onClick = { vm.updateSettings(items = true) },
+                        label = { Text("开启道具", style = MaterialTheme.typography.labelSmall) })
+                    FilterChip(selected = room.itemMode == 0, onClick = { vm.updateSettings(items = false) },
+                        label = { Text("关闭道具", style = MaterialTheme.typography.labelSmall) })
+                }
+                Text("费3用", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0 to "免费", 1 to "K币", 2 to "水晶").forEach { (mode, label) ->
+                        FilterChip(selected = room.costMode == mode,
+                            onClick = { vm.updateSettings(costMode = mode) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) })
+                    }
+                }
+                Text("密4码", style = MaterialTheme.typography.labelMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(password, { password = it.take(8) },
+                        label = { Text("房间密码（留空即清除）", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(8.dp))
+                    Button({ vm.updateSettings(password = password); password = "" }) { Text("应用") }
+                }
+                Text("房间密码默认为空,如非特别需要,请不要设定密码。",
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton({ vm.closeSettings() }) { Text("返回") }
                 }
             }
         }

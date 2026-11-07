@@ -67,6 +67,7 @@ data class StarwarState(
     val ranking: List<StarwarRankItem> = emptyList(),
     val opponent: Map<String, String>? = null,
     val statusOpen: Boolean = false,
+    val settingsOpen: Boolean = false,
 ) {
     val roomId: String get() = room?.id.orEmpty()
     val isOwner: Boolean get() = room?.owner == profile.user
@@ -562,6 +563,24 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
     /** 「我的状态」：等级 / 胜率 / 飞机（原文三行标签） */
     fun openStatus() = mutable.update { it.copy(statusOpen = true) }
     fun closeStatus() = mutable.update { it.copy(statusOpen = false) }
+
+    /** 房主房间设置面板 */
+    fun openSettings() = mutable.update { it.copy(settingsOpen = true) }
+    fun closeSettings() = mutable.update { it.copy(settingsOpen = false) }
+
+    /** 修改房间设置（房主专用）：只传变化的字段 */
+    fun updateSettings(mapId: Int? = null, items: Boolean? = null,
+                       costMode: Int? = null, password: String? = null) {
+        val roomId = mutable.value.roomId
+        if (roomId.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val raw = repository.updateSettings(roomId, mapId, items, costMode, password)
+                mutable.update { it.copy(room = parseStarwarRoom(raw)) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutable.update { it.copy(error = error.userMessage()) } }
+        }
+    }
 
     fun addFriend(name: String) {
         viewModelScope.launch {

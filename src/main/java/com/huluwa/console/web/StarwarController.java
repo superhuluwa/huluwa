@@ -127,6 +127,19 @@ public class StarwarController {
         return ApiResult.ok(room);
     }
 
+    /** 房主修改房间设置：地图 / 道具 / 费用 / 密码（对应原文地%s图、选%s项、费%s用、密%s码） */
+    @PostMapping("/rooms/{id}/settings")
+    public ApiResult<Map<String, Object>> updateSettings(HttpServletRequest request, @PathVariable String id,
+                                                         @RequestBody Map<String, Object> body) {
+        Integer mapId = body.get("mapId") instanceof Number n ? n.intValue() : null;
+        Boolean items = body.get("items") instanceof Boolean b ? b : null;
+        Integer costMode = body.get("costMode") instanceof Number n ? n.intValue() : null;
+        String password = body.get("password") instanceof String s ? s : null;
+        Map<String, Object> room = service.updateSettings(user(request), id, mapId, items, costMode, password);
+        push.broadcastRoom(id, room);
+        return ApiResult.ok(room);
+    }
+
     /** 快速开始（仅房主）：3 秒倒计时 */
     @PostMapping("/rooms/{id}/quick-start")
     public ApiResult<Map<String, Object>> quickStart(HttpServletRequest request, @PathVariable String id) {

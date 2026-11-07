@@ -523,6 +523,47 @@ public class StarwarService {
         return Map.of("ok", true, "dissolved", owner);
     }
 
+    /**
+     * 房主修改房间设置：地图 / 道具开关 / 费用模式 / 密码。
+     *
+     * <p>对应原版房间界面里「地%s图」「选%s项」「费%s用」「密%s码」四个可切换项，
+     * 只有房主能改，且只能在 waiting 状态改（已开局不可改）。</p>
+     */
+    public Map<String, Object> updateSettings(String username, String roomId, Integer mapId,
+                                              Boolean items, Integer costMode, String password) {
+        Map<String, Object> room = roomRow(roomId);
+        if (!username.equals(String.valueOf(room.get("owner")))) {
+            throw new BusinessException(403, "只有房主可以修改房间设置");
+        }
+        if (!"waiting".equals(room.get("status"))) {
+            throw new BusinessException(400, StarwarTexts.ROOM_STARTED);
+        }
+        Map<String, Object> profile = profile(username);
+        String now = LocalDateTime.now().format(TIME_FORMAT);
+        if (mapId != null) {
+            int need = StarwarTexts.unlockLevelOf(mapId);
+            if (need > 0 && intOf(profile.get("level")) < need) {
+                throw new BusinessException(400, "等级不足：" + StarwarTexts.unlockOf(mapId));
+            }
+            jdbc.update("UPDATE starwar_room SET map_id = ?, updated_at = ? WHERE id = ?", mapId, now, roomId);
+        }
+        if (items != null) {
+            jdbc.update("UPDATE starwar_room SET item_mode = ?, updated_at = ? WHERE id = ?",
+                    items ? 1 : 0, now, roomId);
+        }
+        if (costMode != null) {
+            int coin = costMode == 1 ? DEFAULT_COIN_COST.getOrDefault(String.valueOf(room.get("zone")), 10) : 0;
+            int crystal = costMode == 2 ? DEFAULT_CRYSTAL_COST.getOrDefault(String.valueOf(room.get("zone")), 1) : 0;
+            jdbc.update("UPDATE starwar_room SET cost_mode = ?, cost_amount = ?, updated_at = ? WHERE id = ?",
+                    costMode, costMode == 1 ? coin : crystal, now, roomId);
+        }
+        if (password != null) {
+            jdbc.update("UPDATE starwar_room SET password = ?, updated_at = ? WHERE id = ?",
+                    password.trim(), now, roomId);
+        }
+        return roomDetail(roomId, username);
+    }
+
     /** 踢人：只有房主可踢 */
     public Map<String, Object> kick(String username, String roomId, String target) {
         Map<String, Object> room = roomRow(roomId);

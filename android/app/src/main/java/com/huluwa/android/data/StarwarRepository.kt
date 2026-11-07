@@ -237,6 +237,15 @@ class StarwarRepository(private val api: ApiClient) {
     suspend fun ready(id: String, ready: Boolean) =
         api.post("starwar", "rooms", id, "ready", body = jsonBody { put("ready", ready) }).asObject()
     suspend fun quickStart(id: String) = api.post("starwar", "rooms", id, "quick-start").asObject()
+
+    /** 房主修改房间设置：mapId / items / costMode / password 任选其一 */
+    suspend fun updateSettings(id: String, mapId: Int?, items: Boolean?, costMode: Int?, password: String?): JsonObject =
+        api.post("starwar", "rooms", id, "settings", body = jsonBody {
+            mapId?.let { put("mapId", it) }
+            items?.let { put("items", it) }
+            costMode?.let { put("costMode", it) }
+            password?.let { put("password", it) }
+        }).asObject()
     suspend fun startMatch(id: String) = api.post("starwar", "rooms", id, "start").asObject()
     suspend fun world(id: String) = api.get("starwar", "rooms", id, "world").asObject()
 
