@@ -19,11 +19,11 @@ import com.huluwa.android.R
  * 原始文件名的语义见 [StarwarArt] 的常量。</p>
  */
 object StarwarArt {
-    /** 竞技图标（AI 机器人头像） */
+    /** AI 机器人头像 */
     const val AI = R.drawable.starwar_ai
     /** 冠军王冠 */
     const val CROWN = R.drawable.starwar_crown
-    /** 自机（三种涂装拼成 40×80 竖条） */
+    /** 玩家形象（20×20 卡通小人，原版 plane.bmp 实际画的不是飞机） */
     const val PLANE = R.drawable.starwar_plane
     /** 太阳 / 恒星 */
     const val SUN = R.drawable.starwar_sun
@@ -42,7 +42,10 @@ object StarwarArt {
     /** 陨石障碍 */
     const val STONE1 = R.drawable.starwar_stone1
     const val STONE2 = R.drawable.starwar_stone2
-    /** 金币 / 命数 / 水晶 */
+    /**
+     * 文字标签图：live「存活者:」gold「金钱:」crystal「水晶:」rank「排名:」
+     * scores「本方积分」operate「按OK或*键使用道具」
+     */
     const val GOLD = R.drawable.starwar_gold
     const val LIVE = R.drawable.starwar_live
     const val CRYSTAL = R.drawable.starwar_crystal
@@ -59,7 +62,11 @@ object StarwarArt {
     /** 排行榜与得分 */
     const val RANK = R.drawable.starwar_rank
     const val SCORES = R.drawable.starwar_scores
-    /** 队伍与「你正在使用」 */
+    /**
+     * 以下四张是**文字标签图**而非图标，原版用它们当状态提示：
+     * selfs「本方分数:」oppos「对方分数:」team「队友使用了」
+     * oppoself「敌人使用了」oppouse「敌人对你使用了」youuse「你使用了」
+     */
     const val TEAM = R.drawable.starwar_team
     const val YOU_USE = R.drawable.starwar_youuse
     const val OPPO_SELF = R.drawable.starwar_oppoself
@@ -124,6 +131,24 @@ fun StarwarImage(resId: Int, size: Dp, modifier: Modifier = Modifier) {
         ),
         contentDescription = null,
         modifier = modifier.size(size),
+        contentScale = ContentScale.Fit,
+    )
+}
+
+/**
+ * 渲染一张**文字标签图**（selfs/oppos/live/rank/gold 这类）。
+ *
+ * <p>这些资源是原版把中文标语直接烤进位图的结果，长宽比很扁（如 53×13、104×13）。
+ * 用固定 size 会严重变形，所以这里只约束高度、宽度按原始比例自适应。</p>
+ */
+@Composable
+fun StarwarLabel(resId: Int, height: Dp, modifier: Modifier = Modifier) {
+    Image(
+        painter = rememberAsyncImagePainter(
+            ImageRequest.Builder(LocalContext.current).data(resId).build()
+        ),
+        contentDescription = null,
+        modifier = modifier.height(height).wrapContentWidth(),
         contentScale = ContentScale.Fit,
     )
 }

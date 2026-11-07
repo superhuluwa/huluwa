@@ -367,7 +367,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StarwarImage(StarwarArt.RANK, 16.dp)
+                    StarwarLabel(StarwarArt.RANK, 10.dp)
                     Spacer(Modifier.width(6.dp))
                     Text(room.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -569,7 +569,7 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             }
             if (member.user != ui.profile.user) {
                 // 对方标：原版 oppos.bmp（组队战用 oppouse.bmp 表示「对面使用中」）
-                StarwarImage(if (member.team == 0) StarwarArt.OPPOS else StarwarArt.OPPO_USE, 20.dp)
+                StarwarLabel(if (member.team == 0) StarwarArt.OPPOS else StarwarArt.OPPO_USE, 11.dp)
                 IconButton({ vm.openOpponent(member.user) }, Modifier.size(32.dp)) {
                     Icon(Icons.Outlined.Info, "对手资料", Modifier.size(18.dp), tint = HuluwaColors.Muted)
                 }
@@ -760,7 +760,7 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             }
             // 生命条：原始 health 贴图做底
             Row(Modifier.align(Alignment.TopStart).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                StarwarImage(StarwarArt.HEALTH, 16.dp)
+                StarwarLabel(StarwarArt.LIVE, 12.dp)
                 Spacer(Modifier.width(4.dp))
                 Text("${world.players.firstOrNull { it.user == ui.profile.user }?.hp ?: 0}",
                     color = Color(0xFF9FE8B0), style = MaterialTheme.typography.labelLarge)
@@ -791,7 +791,7 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
             if ("team" == ui.room?.zone) {
                 Row(Modifier.align(Alignment.CenterStart).padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    StarwarImage(StarwarArt.TEAM, 22.dp)
+                    StarwarLabel(StarwarArt.TEAM, 12.dp)
                     Spacer(Modifier.width(4.dp))
                     Text("组队战", color = Color(0xFFCCD6E8),
                         style = MaterialTheme.typography.labelSmall)
@@ -815,18 +815,16 @@ internal fun StarwarChatBubble(message: StarwarChatMessage) {
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 world.players.forEach { player ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 己方用 selfs，对方用 oppoself（原版「对面的己方」标记）
+                        // 原版用 selfs「本方分数:」/ oppos「对方分数:」标签图打头
                         val mineTag = player.user == ui.profile.user
                         StarwarImage(
-                            if (mineTag) StarwarArt.SELFS else StarwarArt.OPPO_SELF, 14.dp)
-                        Spacer(Modifier.width(3.dp))
+                            if (mineTag) StarwarArt.SELFS else StarwarArt.OPPOS, 12.dp)
+                        Spacer(Modifier.width(4.dp))
                         StarwarImage(StarwarArt.AI, 14.dp)
                         Spacer(Modifier.width(3.dp))
                         Text(player.nick, color = if (player.alive) Color.White else Color.Gray,
                             style = MaterialTheme.typography.labelSmall)
                         Spacer(Modifier.width(4.dp))
-                        StarwarImage(StarwarArt.NUMBER, 10.dp)
-                        Spacer(Modifier.width(2.dp))
                         Text("${player.score}", color = Color(0xFF8FE3C0),
                             style = MaterialTheme.typography.labelSmall)
                     }
@@ -884,7 +882,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically) {
-            StarwarImage(StarwarArt.SCORES, 26.dp)
+            StarwarLabel(StarwarArt.SCORES, 14.dp)
             Spacer(Modifier.width(8.dp))
             Text("游戏排名结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
@@ -1003,7 +1001,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        StarwarImage(StarwarArt.OPERATE, 22.dp)
+                        StarwarLabel(StarwarArt.OPERATE, 12.dp)
                         Spacer(Modifier.width(8.dp))
                         Text("游戏帮助", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
@@ -1126,10 +1124,10 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 Text(shop.title.ifBlank { "飞机商店" }, style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StarwarImage(StarwarArt.GOLD, 16.dp)
+                    StarwarLabel(StarwarArt.GOLD, 11.dp)
                     Text(" ${shop.gold}", style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.width(12.dp))
-                    StarwarImage(StarwarArt.CRYSTAL, 16.dp)
+                    StarwarLabel(StarwarArt.CRYSTAL, 11.dp)
                     Text(" ${shop.crystal}", style = MaterialTheme.typography.labelMedium)
                 }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1146,11 +1144,11 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                                     color = HuluwaColors.Muted)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (item.gold > 0) {
-                                        StarwarImage(StarwarArt.GOLD, 14.dp)
+                                        StarwarLabel(StarwarArt.GOLD, 10.dp)
                                         Text(" ${item.gold}", style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFFD9A300))
                                     } else {
-                                        StarwarImage(StarwarArt.CRYSTAL, 14.dp)
+                                        StarwarLabel(StarwarArt.CRYSTAL, 10.dp)
                                         Text(" ${item.crystal}", style = MaterialTheme.typography.labelSmall,
                                             color = Color(0xFF4E8BD9))
                                     }
@@ -1194,11 +1192,8 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                             val equipped = (isPlane && item["id"] == ui.profile.plane) ||
                                     (!isPlane && item["id"] == ui.profile.engine)
                             if (equipped) {
-                                // 原版 youuse.bmp：表示「你正在使用」
-                                StarwarImage(StarwarArt.YOU_USE, 18.dp)
-                                Spacer(Modifier.width(4.dp))
-                                Text("使用中", style = MaterialTheme.typography.labelSmall,
-                                    color = HuluwaColors.Pine)
+                                // 原版 youuse.bmp 是「你使用了」标签图
+                                StarwarLabel(StarwarArt.YOU_USE, 12.dp)
                             } else {
                                 TextButton({ vm.equip(item["type"].orEmpty(), item["id"].orEmpty()) }) {
                                     Text("装备")
@@ -1220,7 +1215,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
         Surface(RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 520.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    StarwarImage(StarwarArt.SCORES, 22.dp)
+                    StarwarLabel(StarwarArt.SCORES, 12.dp)
                     Spacer(Modifier.width(8.dp))
                     Text("游戏排行榜", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
@@ -1319,12 +1314,12 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
                 HorizontalDivider()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        StarwarImage(StarwarArt.GOLD, 28.dp)
+                        StarwarLabel(StarwarArt.GOLD, 13.dp)
                         Text("${ui.profile.gold}", style = MaterialTheme.typography.labelMedium)
                         Text("K币", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        StarwarImage(StarwarArt.CRYSTAL, 28.dp)
+                        StarwarLabel(StarwarArt.CRYSTAL, 13.dp)
                         Text("${ui.profile.crystal}", style = MaterialTheme.typography.labelMedium)
                         Text("水晶", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                     }
