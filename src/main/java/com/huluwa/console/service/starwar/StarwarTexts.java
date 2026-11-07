@@ -74,6 +74,12 @@ public final class StarwarTexts {
     public static final String ROOM_PASSWORD_USE = "使用密码";
     public static final String ROOM_PASSWORD_HINT = "房间密码默认为空,如非特别需要,请不要设定密码。";
 
+    /** 对局进行中点返回时确认（原版只在房间内退出时提示） */
+    public static final String EXIT_IN_GAME_CONFIRM = "正在游戏中,确定要退出吗?";
+
+    /** 帮助入口标题（大厅「游戏帮助」按钮） */
+    public static final String HELP_ENTRY = "游戏帮助";
+
     public static final String ROOM_CREATE_COST_COIN = "创建房间需要%dK币,您确定需要创建?";
     public static final String ROOM_CREATE_COST_CRYSTAL = "创建房间需要%d水晶,您确定需要创建?";
 
@@ -178,6 +184,9 @@ public final class StarwarTexts {
         map.put("activity", ZONE_ACTIVITY);
         return java.util.Collections.unmodifiableMap(map);
     }
+
+    /** 原版「是男人就撑20秒」的目标时长：撑住 20 秒即达成名字所承诺的成就 */
+    public static final int SURVIVE_TARGET_MS = 20_000;
 
     /** 各专区的房间容量：多人战最多 6 人，双人战 2 人，组队战 4 人（2v2），活动区 6 人 */
     public static int capacity(String zone) {

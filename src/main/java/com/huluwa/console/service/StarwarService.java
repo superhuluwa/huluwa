@@ -279,6 +279,9 @@ public class StarwarService {
                 "from", StarwarTexts.FROM_STARWAR));
         out.put("phrases", StarwarTexts.DEFAULT_PHRASES);
         out.put("keys", StarwarTexts.KEYS);
+        out.put("surviveTargetMs", StarwarTexts.SURVIVE_TARGET_MS);
+        out.put("helpEntry", StarwarTexts.HELP_ENTRY);
+        out.put("exitInGameConfirm", StarwarTexts.EXIT_IN_GAME_CONFIRM);
         return out;
     }
 

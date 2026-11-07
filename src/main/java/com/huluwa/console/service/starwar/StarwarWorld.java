@@ -27,7 +27,7 @@ public final class StarwarWorld {
     public static final int TICK_MS = 50;
 
     /** 撑过 20 秒即为「撑住」；超过后继续累积分数（原版名字的由来） */
-    public static final int SURVIVE_TARGET_MS = 20_000;
+    public static final int SURVIVE_TARGET_MS = StarwarTexts.SURVIVE_TARGET_MS;
 
     /** 每局最长时长（避免房间永远不结束）：60 秒 */
     public static final int MAX_MATCH_MS = 60_000;
