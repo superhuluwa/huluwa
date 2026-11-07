@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+// contentOrNull / booleanOrNull 是 JsonPrimitive 的扩展属性，必须显式导入才能使用
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 
 /** 星球大战的页面阶段，对应原版的「大厅 → 房间 → 等待聊天室 → 对战 → 结算」 */
@@ -119,7 +122,7 @@ class StarwarViewModel(application: Application) : AndroidViewModel(application)
                                 costCoin = it.int("costCoin"), costCrystal = it.int("costCrystal"))
                         } ?: emptyList(),
                         planets = raw["planets"]?.jsonArray?.mapNotNull { it as? kotlinx.serialization.json.JsonObject }?.map {
-                            StarwarPlanet(it.str("id"), it.str("name"), it.str("icon"),
+                            StarwarPlanet(it.int("id", 2), it.str("name"), it.str("icon"),
                                 it.str("unlockText"), it.int("unlockLevel"), it.boolean("locked"))
                         } ?: emptyList(),
                         ranks = raw["ranks"]?.jsonArray?.mapNotNull { it as? kotlinx.serialization.json.JsonObject }?.map {

@@ -114,7 +114,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            StarwarTopBar(ui, back)
+            StarwarTopBar(ui, vm, back)
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
@@ -151,7 +151,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     if (ui.phraseSheetOpen) StarwarPhraseDialog(ui, vm)
 }
 
-@Composable private fun StarwarTopBar(ui: StarwarState, back: () -> Unit) {
+@Composable private fun StarwarTopBar(ui: StarwarState, vm: StarwarViewModel, back: () -> Unit) {
     Surface(color = Color.White, shadowElevation = 2.dp) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -206,10 +206,11 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StarwarMenuButton(Icons.Outlined.ShoppingCart, texts.group("menu")["planeShop"]?.toString()?.trim('"') ?: "飞机商店") { vm.openShop() }
-                StarwarMenuButton(Icons.Outlined.FlightTakeoff, "我的机库") { vm.openHangar() }
-                StarwarMenuButton(Icons.Outlined.Storefront, "交易市场") { vm.showToast("即将推出,敬请期待!") }
-                StarwarMenuButton(Icons.Outlined.EmojiEvents, "排行榜") { vm.openRanking() }
+                // weight 必须由 Row 作用域内的调用点传入
+                StarwarMenuButton(Icons.Outlined.ShoppingCart, texts.group("menu")["planeShop"]?.toString()?.trim('"') ?: "飞机商店", Modifier.weight(1f)) { vm.openShop() }
+                StarwarMenuButton(Icons.Outlined.FlightTakeoff, "我的机库", Modifier.weight(1f)) { vm.openHangar() }
+                StarwarMenuButton(Icons.Outlined.Storefront, "交易市场", Modifier.weight(1f)) { vm.showToast("即将推出,敬请期待!") }
+                StarwarMenuButton(Icons.Outlined.EmojiEvents, "排行榜", Modifier.weight(1f)) { vm.openRanking() }
             }
         }
         if (ui.activityNotice.isNotBlank()) item {
@@ -235,7 +236,8 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 
 
 @Composable private fun StarwarProfileCard(ui: StarwarState, vm: StarwarViewModel) {
-    Panel(onClick = { vm.openStatus() }) {
+    // Panel 没有 onClick 参数（见 Components.kt），点击整块的交互用 clickable 挂在 Modifier 上
+    Panel(Modifier.clickable { vm.openStatus() }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp).background(HuluwaColors.SoftGreen, RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center) {
@@ -261,7 +263,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 }
 
 @Composable private fun StarwarZoneCard(zone: StarwarZone, onClick: () -> Unit) {
-    Panel(onClick = onClick) {
+    Panel(Modifier.clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).background(HuluwaColors.SoftGreen, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center) {
@@ -273,14 +275,16 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                 Text("最多 ${zone.capacity} 人 · 创建房间 ${zone.costCoin} K币 / ${zone.costCrystal} 水晶",
                     style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
             }
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = HuluwaColors.Muted)
+            // 箭头图标：OptIn 版本位于 Icons.AutoMirrored.Outlined，普通版本位于 Icons.Outlined
+            Icon(Icons.Outlined.KeyboardArrowRight, null, tint = HuluwaColors.Muted)
         }
     }
 }
 
 @Composable private fun StarwarMenuButton(icon: androidx.compose.ui.graphics.vector.ImageVector,
-                                          label: String, onClick: () -> Unit) {
-    Column(Modifier.weight(1f).clickable(onClick = onClick)
+                                          label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    // weight 是 RowScope 的扩展，只能在 Row 的调用点传入，所以这里收 modifier 参数
+    Column(modifier.clickable(onClick = onClick)
         .background(Color.White, RoundedCornerShape(12.dp)).padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, Modifier.size(22.dp), tint = HuluwaColors.Pine)
@@ -318,7 +322,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 }
 
 @Composable private fun StarwarHelpCard(ui: StarwarState, vm: StarwarViewModel) {
-    Panel(onClick = { vm.showHelp() }) {
+    Panel(Modifier.clickable { vm.showHelp() }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Info, null, tint = HuluwaColors.Pine)
             Spacer(Modifier.width(8.dp))
@@ -328,7 +332,8 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
                     style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = HuluwaColors.Muted)
+            // 箭头图标：OptIn 版本位于 Icons.AutoMirrored.Outlined，普通版本位于 Icons.Outlined
+            Icon(Icons.Outlined.KeyboardArrowRight, null, tint = HuluwaColors.Muted)
         }
     }
 }
@@ -371,7 +376,7 @@ private fun subtitleOf(ui: StarwarState): String = when (ui.stage) {
 }
 
 @Composable private fun StarwarRoomRow(room: StarwarRoom, onClick: () -> Unit) {
-    Panel(onClick = onClick) {
+    Panel(Modifier.clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1005,7 +1010,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
     var costMode by remember { mutableIntStateOf(0) }
     var password by remember { mutableStateOf("") }
     Dialog(onDismissRequest = { vm.hideCreateRoom() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("创建房间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 OutlinedTextField(name, { name = it.take(16) }, label = { Text("房间名") },
@@ -1044,7 +1049,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 @Composable private fun StarwarPasswordDialog(ui: StarwarState, vm: StarwarViewModel) {
     var password by remember { mutableStateOf("") }
     Dialog(onDismissRequest = { vm.dismissPasswordPrompt() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("请输入房间密码", style = MaterialTheme.typography.titleMedium)
                 OutlinedTextField(password, { password = it.take(8) }, label = { Text("密 码") },
@@ -1060,7 +1065,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarHelpDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.hideHelp() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             LazyColumn(Modifier.padding(20.dp).heightIn(max = 520.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
@@ -1094,7 +1099,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
         if (ui.chat.messages.isNotEmpty()) listState.animateScrollToItem(ui.chat.messages.size - 1)
     }
     Dialog(onDismissRequest = { vm.closeChat() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 520.dp).padding(16.dp)) {
                 Text("聊天室", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 if (ui.chat.notice.isNotBlank()) {
@@ -1136,7 +1141,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarPhraseDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.togglePhraseSheet() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("短语", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 ui.chat.phrases.forEach { phrase ->
@@ -1159,7 +1164,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
  */
 @Composable private fun StarwarSystemMenuDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.closeSystemMenu() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("菜单", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("音量调节", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
@@ -1211,7 +1216,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarPhraseEditDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.closePhraseEdit() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 560.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("短语设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -1239,7 +1244,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 @Composable private fun StarwarShopDialog(ui: StarwarState, vm: StarwarViewModel) {
     val shop = ui.shop ?: return
     Dialog(onDismissRequest = { vm.closeShop() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 520.dp)) {
                 Text(shop.title.ifBlank { "飞机商店" }, style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold)
@@ -1293,7 +1298,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarHangarDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.closeHangar() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 480.dp)) {
                 Text("我的机库", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1332,7 +1337,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarRankingDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.closeRanking() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 520.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StarwarLabel(StarwarArt.SCORES, 12.dp)
@@ -1364,7 +1369,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
     val room = ui.room ?: return
     var password by remember { mutableStateOf("") }
     Dialog(onDismissRequest = { vm.closeSettings() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp).heightIn(max = 560.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1416,7 +1421,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 
 @Composable private fun StarwarStatusDialog(ui: StarwarState, vm: StarwarViewModel) {
     Dialog(onDismissRequest = { vm.closeStatus() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("我的状态", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1469,7 +1474,7 @@ private fun painterOf(context: android.content.Context, resId: Int): androidx.co
 @Composable private fun StarwarOpponentDialog(ui: StarwarState, vm: StarwarViewModel) {
     val data = ui.opponent ?: return
     Dialog(onDismissRequest = { vm.closeOpponent() }) {
-        Surface(RoundedCornerShape(16.dp), color = Color.White) {
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("对手资料", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(data["nick"].orEmpty().ifBlank { data["user"].orEmpty() },

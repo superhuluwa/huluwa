@@ -60,6 +60,8 @@ data class StarwarRoomMember(
 data class StarwarRoom(
     val id: String = "", val zone: String = "", val name: String = "", val owner: String = "",
     val mapId: Int = 2, val mapName: String = "", val itemMode: Int = 0,
+    // 收费方式：0 免费 / 1 K币 / 2 水晶，由服务端 roomView 的 costMode 下发
+    val costMode: Int = 0,
     val hasPassword: Boolean = false, val status: String = "waiting",
     val members: Int = 0, val capacity: Int = 6, val round: Int = 1,
     val memberList: List<StarwarRoomMember> = emptyList(),
@@ -187,6 +189,7 @@ private fun parseStarwarRoomMember(raw: JsonObject) = StarwarRoomMember(
 fun parseStarwarRoom(raw: JsonObject): StarwarRoom = StarwarRoom(
     id = raw.str("id"), zone = raw.str("zone"), name = raw.str("name"), owner = raw.str("owner"),
     mapId = raw.int("mapId", 2), mapName = raw.str("mapName"), itemMode = raw.int("itemMode"),
+    costMode = raw.int("costMode"),
     hasPassword = raw.bool("hasPassword"), status = raw.str("status", "waiting"),
     members = raw.int("members"), capacity = raw.int("capacity", 6), round = raw.int("round", 1),
     memberList = raw["memberList"]?.jsonArray?.mapNotNull { it as? JsonObject }
