@@ -31,7 +31,9 @@ import com.huluwa.android.data.*
 
 @Composable fun MineScreen(ui: AppState, vm: HuluwaViewModel, onSkinSelected: (AppSkin) -> Unit) {
     var showSkinPicker by rememberSaveable { mutableStateOf(false) }
+    var showLogs by rememberSaveable { mutableStateOf(false) }
     if (showSkinPicker) SkinPickerSheet(onDismiss = { showSkinPicker = false }, onSkinSelected = onSkinSelected)
+    if (showLogs) AppLogDialog(onDismiss = { showLogs = false })
     val reconnecting = rememberReconnecting(vm)
     val mine = ui.mine
     val largeFont = LocalDensity.current.fontScale >= 1.5f
@@ -75,6 +77,12 @@ import com.huluwa.android.data.*
                 MineEntry(Icons.Outlined.Logout, "退出登录 / 切换服务器", "退出后服务器任务继续运行") {
                     vm.confirm("退出登录", "退出后可以切换服务器或账号，服务器任务会继续运行。", "退出") { vm.logout() }
                 }
+            }
+        }
+        item {
+            SectionTitle("诊断")
+            Panel(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
+                MineEntry(Icons.Outlined.BugReport, "运行日志", "查看并复制上次崩溃记录") { showLogs = true }
             }
         }
         item { Text("葫芦娃 · 家里的服务，随身就好。", Modifier.fillMaxWidth().padding(top = 4.dp),
