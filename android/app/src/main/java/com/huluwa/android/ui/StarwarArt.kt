@@ -58,6 +58,8 @@ object StarwarArt {
     val TIMEBAR: Int get() = R.drawable.starwar_timebar
     /** 抽奖券 */
     val LOTTERY: Int get() = R.drawable.starwar_lottery
+    /** 对局倒计时表盘（原版 clock.bmp，20×20） */
+    val CLOCK: Int get() = R.drawable.starwar_clock
     /** 未解锁 */
     val LOCK: Int get() = R.drawable.starwar_lock
     /** 道具与道具栏 */
