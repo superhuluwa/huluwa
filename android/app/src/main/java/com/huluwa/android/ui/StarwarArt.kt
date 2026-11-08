@@ -18,79 +18,81 @@ import com.huluwa.android.R
  *
  * <p>全部图片逐像素解自 2009 年冒泡社区 {@code starwar.mrp} 内的 54 张 16bpp RGB565 位图，
  * 按原尺寸导出为 PNG 放在 {@code drawable-nodpi/starwar_*.png}。
- * 原始文件名的语义见 [StarwarArt] 的常量。</p>
+ * 原始文件名的语义见 [StarwarArt] 的资源属性。</p>
  */
 object StarwarArt {
+    // 资源 ID 由当前 AGP 在运行时赋值，使用普通属性 getter 读取。
+    // const 属性没有 getter，会与 Compose 生成的 getSUN() 等调用不匹配并闪退。
     /** AI 机器人头像 */
-    const val AI = R.drawable.starwar_ai
+    val AI: Int get() = R.drawable.starwar_ai
     /** 冠军王冠 */
-    const val CROWN = R.drawable.starwar_crown
+    val CROWN: Int get() = R.drawable.starwar_crown
     /** 玩家形象（20×20 卡通小人，原版 plane.bmp 实际画的不是飞机） */
-    const val PLANE = R.drawable.starwar_plane
+    val PLANE: Int get() = R.drawable.starwar_plane
     /** 太阳 / 恒星 */
-    const val SUN = R.drawable.starwar_sun
+    val SUN: Int get() = R.drawable.starwar_sun
     /** 三种子弹 */
-    const val BULLET = R.drawable.starwar_bullet
-    const val BULLET1 = R.drawable.starwar_bullet1
-    const val BULLET2 = R.drawable.starwar_bullet2
+    val BULLET: Int get() = R.drawable.starwar_bullet
+    val BULLET1: Int get() = R.drawable.starwar_bullet1
+    val BULLET2: Int get() = R.drawable.starwar_bullet2
     /** 三种爆炸 */
-    const val EXPLODE1 = R.drawable.starwar_exploid1
-    const val EXPLODE2 = R.drawable.starwar_exploid2
-    const val EXPLODE3 = R.drawable.starwar_exploid3
+    val EXPLODE1: Int get() = R.drawable.starwar_exploid1
+    val EXPLODE2: Int get() = R.drawable.starwar_exploid2
+    val EXPLODE3: Int get() = R.drawable.starwar_exploid3
     /** 三种受损 */
-    const val DAMAGE1 = R.drawable.starwar_damage1
-    const val DAMAGE2 = R.drawable.starwar_damage2
-    const val DAMAGE3 = R.drawable.starwar_damage3
+    val DAMAGE1: Int get() = R.drawable.starwar_damage1
+    val DAMAGE2: Int get() = R.drawable.starwar_damage2
+    val DAMAGE3: Int get() = R.drawable.starwar_damage3
     /** 陨石障碍 */
-    const val STONE1 = R.drawable.starwar_stone1
-    const val STONE2 = R.drawable.starwar_stone2
+    val STONE1: Int get() = R.drawable.starwar_stone1
+    val STONE2: Int get() = R.drawable.starwar_stone2
     /**
      * 文字标签图：live「存活者:」gold「金钱:」crystal「水晶:」rank「排名:」
      * scores「本方积分」operate「按OK或*键使用道具」
      */
-    const val GOLD = R.drawable.starwar_gold
-    const val LIVE = R.drawable.starwar_live
-    const val CRYSTAL = R.drawable.starwar_crystal
+    val GOLD: Int get() = R.drawable.starwar_gold
+    val LIVE: Int get() = R.drawable.starwar_live
+    val CRYSTAL: Int get() = R.drawable.starwar_crystal
     /** 血条 / 时间条 */
-    const val HEALTH = R.drawable.starwar_health
-    const val TIMEBAR = R.drawable.starwar_timebar
+    val HEALTH: Int get() = R.drawable.starwar_health
+    val TIMEBAR: Int get() = R.drawable.starwar_timebar
     /** 抽奖券 */
-    const val LOTTERY = R.drawable.starwar_lottery
+    val LOTTERY: Int get() = R.drawable.starwar_lottery
     /** 未解锁 */
-    const val LOCK = R.drawable.starwar_lock
+    val LOCK: Int get() = R.drawable.starwar_lock
     /** 道具与道具栏 */
-    const val PROP = R.drawable.starwar_prop
-    const val PSLOT = R.drawable.starwar_pslot
+    val PROP: Int get() = R.drawable.starwar_prop
+    val PSLOT: Int get() = R.drawable.starwar_pslot
     /** 排行榜与得分 */
-    const val RANK = R.drawable.starwar_rank
-    const val SCORES = R.drawable.starwar_scores
+    val RANK: Int get() = R.drawable.starwar_rank
+    val SCORES: Int get() = R.drawable.starwar_scores
     /**
      * 以下四张是**文字标签图**而非图标，原版用它们当状态提示：
      * selfs「本方分数:」oppos「对方分数:」team「队友使用了」
      * oppoself「敌人使用了」oppouse「敌人对你使用了」youuse「你使用了」
      */
-    const val TEAM = R.drawable.starwar_team
-    const val YOU_USE = R.drawable.starwar_youuse
-    const val OPPO_SELF = R.drawable.starwar_oppoself
-    const val OPPO_USE = R.drawable.starwar_oppouse
+    val TEAM: Int get() = R.drawable.starwar_team
+    val YOU_USE: Int get() = R.drawable.starwar_youuse
+    val OPPO_SELF: Int get() = R.drawable.starwar_oppoself
+    val OPPO_USE: Int get() = R.drawable.starwar_oppouse
     /** 弹壳 / 引擎 */
-    const val SHELL = R.drawable.starwar_shell
-    const val ENGINE = R.drawable.starwar_engine
+    val SHELL: Int get() = R.drawable.starwar_shell
+    val ENGINE: Int get() = R.drawable.starwar_engine
     /** 发射特效 / 环绕 / 风暴 / 闪光 */
-    const val LAUNCH = R.drawable.starwar_lauch
-    const val SURROUND = R.drawable.starwar_surround
-    const val FLASH = R.drawable.starwar_flash
+    val LAUNCH: Int get() = R.drawable.starwar_lauch
+    val SURROUND: Int get() = R.drawable.starwar_surround
+    val FLASH: Int get() = R.drawable.starwar_flash
     /** 进度条三态 */
-    const val PRGS1 = R.drawable.starwar_prgs1
-    const val PRGS2 = R.drawable.starwar_prgs2
-    const val PRGS3 = R.drawable.starwar_prgs3
+    val PRGS1: Int get() = R.drawable.starwar_prgs1
+    val PRGS2: Int get() = R.drawable.starwar_prgs2
+    val PRGS3: Int get() = R.drawable.starwar_prgs3
     /** 数字贴图 / 操作说明 / 列表图标 */
-    const val NUMBER = R.drawable.starwar_number
-    const val OPERATE = R.drawable.starwar_operate
-    const val LIST_ICON = R.drawable.starwar_listicon
+    val NUMBER: Int get() = R.drawable.starwar_number
+    val OPERATE: Int get() = R.drawable.starwar_operate
+    val LIST_ICON: Int get() = R.drawable.starwar_listicon
     /** 己方 / 对方标记（原版 8 位索引色，32×43） */
-    const val SELFS = R.drawable.starwar_selfs
-    const val OPPOS = R.drawable.starwar_oppos
+    val SELFS: Int get() = R.drawable.starwar_selfs
+    val OPPOS: Int get() = R.drawable.starwar_oppos
 
     /** 九大星球贴图（maps.inf 的 icon 字段直接对应） */
     fun planet(icon: String): Int = when (icon) {
