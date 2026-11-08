@@ -48,7 +48,9 @@ fun StarwarPixelFrame(content: @Composable BoxScope.() -> Unit) {
 fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val font = remember { StarwarFont.of(LocalContext.current) }
+    // remember 的 lambda 不是 @Composable 上下文，LocalContext.current 必须先取到局部变量
+    val context = LocalContext.current
+    val font = remember(context) { StarwarFont.of(context) }
 
     // 本地 UI 态：退出确认、菜单/弹窗、列表光标
     var exitConfirm by remember { mutableStateOf(false) }
@@ -192,7 +194,7 @@ fun StarwarScreen(vm: StarwarViewModel, onClose: () -> Unit) {
 }
 
 /** 本地弹窗类型（对应 ViewModel 里的一组 boolean 字段） */
-internal enum class StarwarLocal {
+enum class StarwarLocal {
     None, CreateRoom, Password, Help, Shop, Hangar, Ranking, Status,
     Settings, Chat, Phrase, PhraseEdit, SystemMenu, Opponent,
 }

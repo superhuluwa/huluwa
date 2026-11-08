@@ -87,6 +87,9 @@ class StarwarFont private constructor(
             }.getOrElse { ByteArray(0) }
             return StarwarFont(gb, ascii)
         }
+
+        /** Android 的 Charsets 里没有 GBK，必须显式按名取；只取一次 */
+        private val GBK: java.nio.charset.Charset = java.nio.charset.Charset.forName("GBK")
     }
 
     /** 字符 → 字模偏移缓存（GBK 编码转换有开销，逐像素绘制时不能反复做） */
@@ -100,7 +103,7 @@ class StarwarFont private constructor(
      * 拿不到 GB2312 的双字节区位。这里把字符还原成 GBK 字节序列再判断。</p>
      */
     private fun gbOffset(ch: Char): Int = offsetCache.getOrPut(ch) {
-        val bytes = ch.toString().toByteArray(Charsets.GBK)
+        val bytes = ch.toString().toByteArray(GBK)
         if (bytes.size != 2) return@getOrPut -1
         val hi = bytes[0].toInt() and 0xFF
         val lo = bytes[1].toInt() and 0xFF

@@ -47,11 +47,11 @@ fun StarwarRoomsPixel(
         val actionTop = listBottom + 2f
         val pagerTop = actionTop + 24f
         when {
-            ty in listTop until listBottom -> {
+            ty >= listTop && ty < listBottom -> {
                 val index = ((ty - listTop) / rowH).toInt()
                 rooms.getOrNull(index)?.let { setCursor(index); vm.tapRoom(it) }
             }
-            ty in actionTop until actionTop + 22f -> {
+            ty >= actionTop && ty < actionTop + 22f -> {
                 if (tx < StarwarPx.WIDTH / 2f) vm.showCreateRoom() else vm.refreshRooms()
             }
             ty >= pagerTop -> {

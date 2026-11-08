@@ -47,6 +47,8 @@ fun StarwarCreateRoomPixel(
     var items by remember { mutableStateOf(true) }
     var costMode by remember { mutableIntStateOf(0) }
     var password by remember { mutableStateOf("") }
+    // Canvas 的 DrawScope 里不能调 LocalContext.current，必须在 Composable 作用域先取
+    val context = LocalContext.current
 
     // 内容区各行 y（相对内容区顶部），点击按行命中
     val planetRowY = 40f
@@ -78,8 +80,7 @@ fun StarwarCreateRoomPixel(
         ui.planets.forEachIndexed { index, planet ->
             val x = 8f + index * 24f
             if (planet.id == mapId) fill(x - 2f, y - 1f, 24f, 24f, StarwarPx.Selected)
-            pixelSprite(starwarBitmap(LocalContext.current, StarwarArt.planet(planet.icon)),
-                x, y, 18f, 18f)
+            pixelSprite(starwarBitmap(context, StarwarArt.planet(planet.icon)), x, y, 18f, 18f)
         }
         y += 26f
         val itemsShown = if (items) "开启" else "关闭"
@@ -275,6 +276,7 @@ fun StarwarSettingsPixel(
 ) {
     val room = ui.room ?: return
     var password by remember { mutableStateOf("") }
+    val context = LocalContext.current
     // 内容区各行 y（相对内容区顶部）：星球 24、选X项 50、费X用 68
     StarwarPixelDialog("房间设置", onClose, okText = "应用", onOk = {
         vm.updateSettings(password = password)
@@ -295,7 +297,7 @@ fun StarwarSettingsPixel(
         ui.planets.take(9).forEachIndexed { index, planet ->
             val x = 8f + index * 24f
             if (planet.id == room.mapId) fill(x - 2f, y - 1f, 24f, 24f, StarwarPx.Selected)
-            pixelSprite(starwarBitmap(LocalContext.current, StarwarArt.planet(planet.icon)), x, y, 18f, 18f)
+            pixelSprite(starwarBitmap(context, StarwarArt.planet(planet.icon)), x, y, 18f, 18f)
         }
         y += 26f
         val itemShown = if (room.itemMode == 1) "开启道具" else "关闭道具"

@@ -50,7 +50,7 @@ fun StarwarRoomPixel(
         val actionTop = StarwarLayout.BODY_BOTTOM - 28f
         when {
             // 玩家列表：点别人看资料，房主可踢
-            ty in memberTop until chatTop - 4f -> {
+            ty >= memberTop && ty < chatTop - 4f -> {
                 val index = ((ty - memberTop) / 20f).toInt()
                 room.memberList.getOrNull(index)?.let { member ->
                     if (member.user != ui.profile.user) vm.openOpponent(member.user)
@@ -58,7 +58,7 @@ fun StarwarRoomPixel(
                 }
             }
             // 聊天区 → 打开聊天窗口
-            ty in chatTop until chatBottom -> openDialog(StarwarLocal.Chat)
+            ty >= chatTop && ty < chatBottom -> openDialog(StarwarLocal.Chat)
             // 标题栏点右下角 → 房主的房间设置
             ty < StarwarLayout.BODY_TOP && tx > StarwarPx.WIDTH - 24f -> {
                 if (ui.isOwner) openDialog(StarwarLocal.Settings)
