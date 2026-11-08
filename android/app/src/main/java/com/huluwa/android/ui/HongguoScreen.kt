@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -315,6 +316,13 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
 @Composable private fun HongguoEpisodeSheet(
     detail: HongguoDetail, current: HongguoEpisode?, onDismiss: () -> Unit, onSelect: (HongguoEpisode) -> Unit,
 ) {
+    // 每行 5 个数字按钮；弹框打开时定位到当前播放集所在行。
+    val rows = remember(detail.episodes) { detail.episodes.chunked(5) }
+    val currentRow = remember(rows, current?.id) {
+        rows.indexOfFirst { row -> row.any { it.id == current?.id } }.coerceAtLeast(0)
+    }
+    // 留出上方两行作上下文，当前行大致落在可见区域中部；首行附近自然贴顶。
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (currentRow - 2).coerceAtLeast(0))
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .78f)).clickable(onClick = onDismiss),
             contentAlignment = Alignment.BottomCenter) {
@@ -337,10 +345,11 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                     }
                     LazyColumn(
                         Modifier.fillMaxWidth().heightIn(max = 380.dp),
+                        state = listState,
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(detail.episodes.chunked(5), key = { it.first().id }) { row ->
+                        items(rows, key = { it.first().id }) { row ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 row.forEach { item ->
                                     val selected = item.id == current?.id
