@@ -22,6 +22,7 @@ class HuluwaApplication : Application() {
     internal val hongguoOffline by lazy { HongguoOfflineDownloader(this, HongguoRepository(repository.api)) }
     val appUpdates by lazy { AppUpdateManager(this, repository.api) }
     val terminalBuddyBuildDownloads by lazy { AndroidBuildDownloader(this, repository.api, AndroidBuildProject.TerminalBuddy) }
+    val hongguoTvBuildDownloads by lazy { AndroidBuildDownloader(this, repository.api, AndroidBuildProject.HongguoTv) }
     val buildDownloads by lazy { AndroidBuildDownloader(this, repository.api) }
     private val logReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val logReporter by lazy { AppLogReporter(repository.api) }

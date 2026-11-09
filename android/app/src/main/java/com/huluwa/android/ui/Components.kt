@@ -81,6 +81,7 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "docker" -> Icons.Outlined.DirectionsBoat
     "android-build" -> Icons.Outlined.Android
     "terminalbuddy-build" -> Icons.Outlined.Terminal
+    "hongguotv-build" -> Icons.Outlined.PlayCircleOutline
     "check-logs" -> Icons.AutoMirrored.Outlined.ListAlt
     "library" -> Icons.Outlined.VideoLibrary
     "subscriptions" -> Icons.Outlined.BookmarkBorder

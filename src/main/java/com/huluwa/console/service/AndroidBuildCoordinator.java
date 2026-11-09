@@ -7,13 +7,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Serialize both apps on the shared Debian host, including updates. */
+/** 三款 App 共用 Debian 打包机，编译与更新任务统一串行执行。 */
 @Service
 public class AndroidBuildCoordinator {
     private final List<AndroidBuildService> projects;
 
-    public AndroidBuildCoordinator(AndroidBuildService huluwa, TerminalBuddyBuildService terminalBuddy) {
-        projects = List.of(huluwa, terminalBuddy.builds());
+    public AndroidBuildCoordinator(AndroidBuildService huluwa, TerminalBuddyBuildService terminalBuddy,
+                                   HongguoTvBuildService hongguoTv) {
+        projects = List.of(huluwa, terminalBuddy.builds(), hongguoTv.builds());
     }
 
     public synchronized Map<String, Object> submit(AndroidBuildService project, String type, String username, String serverId) {
