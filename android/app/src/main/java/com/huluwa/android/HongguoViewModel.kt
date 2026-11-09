@@ -404,13 +404,13 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 确认选择：已落盘的由下载器自动跳过，等价于增量提交。 */
+    /** 确认选择：已落盘的由下载器自动跳过，等价于增量提交；确认后直达离线管理页看进度。 */
     fun confirmOfflinePicker() {
         val picker = mutable.value.offlinePicker ?: return
         val selection = picker.episodes.filter { it.id in picker.checked }
             .map { it.id to it.number }
         offlineDownloader.start(picker.seriesId, picker.title, picker.cover, selection)
-        mutable.update { it.copy(offlinePicker = null) }
+        mutable.update { it.copy(offlinePicker = null, offlineManagerVisible = true) }
     }
 
     fun dismissOfflinePicker() {
