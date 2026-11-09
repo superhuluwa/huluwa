@@ -48,7 +48,9 @@ HULUWA_ANDROID_BUILDER_IMAGE=hongguotv-android-builder:latest bash android-build
 
 ## Docker 部署
 
-部署目录：`/opt/hongguotv-android-builder`。先准备 `huluwa-android-builder:debian` 基础镜像，再构建 `android-builder/Dockerfile.hongguotv`；后者在基础镜像上补装 JDK 17，供红果TV 的 `core` 模块工具链使用。
+部署目录：`/opt/hongguotv-android-builder`（位于 Debian 打包机 192.168.3.83）。先准备 `huluwa-android-builder:debian` 基础镜像，再构建 `android-builder/Dockerfile.hongguotv`；后者在基础镜像上补装 JDK 17，供红果TV 的 `core` 模块工具链使用。
+
+节点配置中的 `serverUrl` 填 `http://192.168.3.77:8000`（主服务在飞牛 NAS，打包机通过局域网访问），与 TerminalBuddy 节点保持一致。不要填 `host.docker.internal`，那是主服务本机容器内的地址。
 
 ```bash
 cd /opt/hongguotv-android-builder
