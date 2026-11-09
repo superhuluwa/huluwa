@@ -70,7 +70,7 @@ import com.huluwa.android.hongguo.HongguoOfflineStatus
     }
     ui.offlinePicker?.let { picker ->
         HongguoOfflinePickerSheet(picker, recorded = ui.offlineEpisodes[picker.seriesId].orEmpty(),
-            onToggle = { vm.toggleOfflineEpisode(it.id) }, onToggleAll = vm::toggleOfflineAll,
+            onToggle = { vm.toggleOfflineEpisode(it) }, onToggleAll = vm::toggleOfflineAll,
             onConfirm = vm::confirmOfflinePicker, onDismiss = vm::dismissOfflinePicker,
             onRetry = { vm.openOfflinePicker(picker.seriesId) })
     }
@@ -283,7 +283,7 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                     color = HuluwaColors.Ink, maxLines = 1)
             } else if (done > 0 && failed > 0) {
                 Icon(Icons.Outlined.ErrorOutline, "部分集离线失败", Modifier.size(20.dp), tint = Color(0xFFB3543C))
-                Text("离线$done集", style = MaterialTheme.typography.labelSmall,
+                Text("离线${done}集", style = MaterialTheme.typography.labelSmall,
                     color = HuluwaColors.Ink, maxLines = 1)
             } else if (done > 0) {
                 Icon(Icons.Outlined.DownloadDone, "已离线", Modifier.size(20.dp), tint = Color(0xFF3D8B4F))
