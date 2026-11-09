@@ -164,11 +164,6 @@ CREATE TABLE IF NOT EXISTS fanqie_read_progress (
     updated_at    INTEGER NOT NULL
 );
 
--- 内置会话：星球大战（是男人就撑20秒 网络对战版）。kind=starwar 走安卓原生界面，
--- 不进聊天消息接口；大厅 / 房间 / 等待聊天室 / 对战 / 结算全部由 /api/starwar 提供。
-INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
-VALUES ('starwar', '星球大战', 'starwar', datetime('now', 'localtime'), datetime('now', 'localtime'));
-
 -- 内置会话：qBittorrent 下载（把磁力链接提交给 qBittorrent；连接配置存 sys_config，幂等）
 INSERT OR IGNORE INTO chat_session (id, title, kind, created_at, updated_at)
 VALUES ('magnet', 'qBittorrent 下载', 'magnet', datetime('now', 'localtime'), datetime('now', 'localtime'));
@@ -485,132 +480,18 @@ CREATE TABLE IF NOT EXISTS video_resource_cache (
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (11, datetime('now', 'localtime'));
 
-
--- v12：星球大战（是男人就撑20秒 网络对战版）。
--- 完全复刻 2009 年冒泡社区 starwar.mrp 的大厅 / 房间 / 等待聊天室 / 对战 / 结算流程。
--- 玩家档案：等级、胜率、金币(K币)、水晶、当前飞机、机库、战绩。
-CREATE TABLE IF NOT EXISTS starwar_player (
-    username       TEXT PRIMARY KEY,                  -- 与 sys_user.username 对齐
-    nickname       TEXT NOT NULL DEFAULT '',
-    level          INTEGER NOT NULL DEFAULT 1,        -- 飞行等级，决定段位与可进星球
-    exp            INTEGER NOT NULL DEFAULT 0,
-    wins           INTEGER NOT NULL DEFAULT 0,
-    losses         INTEGER NOT NULL DEFAULT 0,
-    gold           INTEGER NOT NULL DEFAULT 0,        -- K币（创建房间消耗）
-    crystal        INTEGER NOT NULL DEFAULT 0,        -- 水晶（创建房间消耗、结算奖励）
-    plane          TEXT NOT NULL DEFAULT 'plane',     -- 当前出战飞机资源名
-    equip_engine   TEXT NOT NULL DEFAULT 'engine',    -- 当前引擎
-    silent_until   INTEGER NOT NULL DEFAULT 0,        -- 聊天禁言截止（epoch 秒，48 小时处罚）
-    banned_until   INTEGER NOT NULL DEFAULT 0,        -- 封禁截止
-    created_at     TEXT NOT NULL,
-    updated_at     TEXT NOT NULL
-);
-
--- 机库：玩家拥有的飞机与引擎（初始自带的由代码保证，不重复插入）
-CREATE TABLE IF NOT EXISTS starwar_hangar (
-    username   TEXT NOT NULL,
-    item_type  TEXT NOT NULL,                         -- plane | engine
-    item_id    TEXT NOT NULL,
-    source     TEXT NOT NULL DEFAULT 'shop',          -- initial | shop | trade
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (username, item_type, item_id)
-);
-
--- 好友关系（「加为好友」）
-CREATE TABLE IF NOT EXISTS starwar_friend (
-    username   TEXT NOT NULL,
-    friend     TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (username, friend)
-);
-
--- 聊天室短语（「短语设置」的 6 条快捷短语，默认见代码常量）
-CREATE TABLE IF NOT EXISTS starwar_phrase (
-    username   TEXT NOT NULL,
-    slot       INTEGER NOT NULL,                      -- 1..6
-    content    TEXT NOT NULL,
-    PRIMARY KEY (username, slot)
-);
-
--- 房间（大厅四专区：multi 多人战 / duo 双人战 / team 组队战 / activity 活动区）
-CREATE TABLE IF NOT EXISTS starwar_room (
-    id            TEXT PRIMARY KEY,                   -- 8 位数字房间号
-    zone          TEXT NOT NULL,                      -- multi | duo | team | activity
-    name          TEXT NOT NULL,
-    owner         TEXT NOT NULL,                      -- 房主 username
-    map_id        INTEGER NOT NULL DEFAULT 2,         -- 星级地图 2..10（字母/数字键盘对应）
-    item_mode     INTEGER NOT NULL DEFAULT 0,         -- 选%s项：0 关闭道具 1 开启道具
-    cost_mode     INTEGER NOT NULL DEFAULT 0,         -- 费%s用：0 免费 1 K币 2 水晶
-    cost_amount   INTEGER NOT NULL DEFAULT 0,
-    password      TEXT NOT NULL DEFAULT '',           -- 房间密码默认为空
-    status        TEXT NOT NULL DEFAULT 'waiting',    -- waiting | countdown | playing | settled | closed
-    countdown_end INTEGER NOT NULL DEFAULT 0,         -- 开局倒计时结束（epoch 秒）
-    round_no      INTEGER NOT NULL DEFAULT 1,
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_starwar_room_zone ON starwar_room (zone, status);
-
--- 房间成员
-CREATE TABLE IF NOT EXISTS starwar_room_member (
-    room_id      TEXT NOT NULL,
-    username     TEXT NOT NULL,
-    seat         INTEGER NOT NULL,                    -- 0=房主位，其余按加入顺序
-    team         INTEGER NOT NULL DEFAULT 0,          -- 组队战：0/1
-    ready        INTEGER NOT NULL DEFAULT 0,          -- 「准备」
-    alive        INTEGER NOT NULL DEFAULT 1,
-    hp           INTEGER NOT NULL DEFAULT 100,        -- 生命值，归零则本局结束
-    score        INTEGER NOT NULL DEFAULT 0,
-    survive_ms   INTEGER NOT NULL DEFAULT 0,          -- 撑住的毫秒数
-    plane        TEXT NOT NULL DEFAULT 'plane',
-    joined_at    TEXT NOT NULL,
-    PRIMARY KEY (room_id, username)
-);
-
--- 房间聊天（等待聊天室）：聊天室公告 + 玩家发言 + 快捷短语
-CREATE TABLE IF NOT EXISTS starwar_chat (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    room_id    TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    nickname   TEXT NOT NULL DEFAULT '',
-    content    TEXT NOT NULL,
-    kind       TEXT NOT NULL DEFAULT 'text',          -- text | phrase | system | notice
-    created_at INTEGER NOT NULL                       -- epoch 毫秒，便于客户端算 10 秒间隔
-);
-CREATE INDEX IF NOT EXISTS idx_starwar_chat_room ON starwar_chat (room_id, id);
-
--- 对局：一局从开始到结算
-CREATE TABLE IF NOT EXISTS starwar_match (
-    id            TEXT PRIMARY KEY,
-    room_id       TEXT NOT NULL,
-    zone          TEXT NOT NULL,
-    map_id        INTEGER NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'playing',    -- playing | settled
-    started_at    INTEGER NOT NULL,                   -- epoch 毫秒
-    settled_at    INTEGER NOT NULL DEFAULT 0,
-    result_json   TEXT                                -- 结算快照：名次 / 奖励
-);
-
--- 对局成绩（每位玩家一行，结算后发奖）
-CREATE TABLE IF NOT EXISTS starwar_match_result (
-    match_id   TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    ranking    INTEGER NOT NULL,                      -- 1 = 冠军
-    score      INTEGER NOT NULL,
-    survive_ms INTEGER NOT NULL,
-    hp_left    INTEGER NOT NULL,
-    reward_coin INTEGER NOT NULL DEFAULT 0,
-    reward_crystal INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (match_id, username)
-);
-
--- 排行榜（游戏排行榜 / 单人榜 / 多人榜，按累计分数）
-CREATE TABLE IF NOT EXISTS starwar_rank (
-    username   TEXT PRIMARY KEY,
-    nickname   TEXT NOT NULL DEFAULT '',
-    total_score INTEGER NOT NULL DEFAULT 0,
-    best_score  INTEGER NOT NULL DEFAULT 0,
-    matches     INTEGER NOT NULL DEFAULT 0,
-    wins        INTEGER NOT NULL DEFAULT 0,
-    updated_at  TEXT NOT NULL
-);
+-- v12：移除「星球大战」功能（原 v12 建表段已删除）。
+-- 旧库残留的会话入口与 10 张对战表在此清理，语句幂等，新库执行无副作用。
+DELETE FROM chat_session WHERE id = 'starwar' OR kind = 'starwar';
+DROP TABLE IF EXISTS starwar_match_result;
+DROP TABLE IF EXISTS starwar_match;
+DROP TABLE IF EXISTS starwar_chat;
+DROP TABLE IF EXISTS starwar_room_member;
+DROP TABLE IF EXISTS starwar_room;
+DROP TABLE IF EXISTS starwar_phrase;
+DROP TABLE IF EXISTS starwar_friend;
+DROP TABLE IF EXISTS starwar_hangar;
+DROP TABLE IF EXISTS starwar_player;
+DROP TABLE IF EXISTS starwar_rank;
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (12, datetime('now', 'localtime'));

@@ -159,11 +159,6 @@ private enum class RootPage { Home, Chat, ServerStatus }
                             val hongguoVm: HongguoViewModel = viewModel(key = "hongguo:${pageUi.auth.server}:${pageUi.auth.username}")
                             HongguoScreen(hongguoVm, vm::closeChat)
                         }
-                    pageUi.chat.session?.kind == STARWAR_SESSION_KIND ->
-                        holder.SaveableStateProvider("starwar:${pageUi.auth.server}:${pageUi.auth.username}") {
-                            val starwarVm: StarwarViewModel = viewModel(key = "starwar:${pageUi.auth.server}:${pageUi.auth.username}")
-                            StarwarScreen(starwarVm, vm::closeChat)
-                        }
                     pageUi.chat.session?.managementService != null ->
                         holder.SaveableStateProvider("session:${pageUi.chat.session.id}") { ManagementSessionScreen(pageUi, vm, snackbar) }
                     else -> holder.SaveableStateProvider("session:${pageUi.chat.session?.id}") { ChatScreen(pageUi, vm, snackbar) }

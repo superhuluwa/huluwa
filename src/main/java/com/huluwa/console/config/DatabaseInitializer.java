@@ -23,10 +23,7 @@ public class DatabaseInitializer implements ApplicationRunner {
             "chat_session", "chat_message", "chat_request", "movie_search_watch",
             "hls_subscription", "hls_download_task", "subscription_check_log", "xunlei_win_download_task",
             "dpd_episode_link", "btbtla_detail_cache", "btbtla_magnet_cache",
-            "fanqie_read_progress", "video_resource_cache",
-            "starwar_player", "starwar_hangar", "starwar_friend", "starwar_phrase",
-            "starwar_room", "starwar_room_member", "starwar_chat", "starwar_match",
-            "starwar_match_result", "starwar_rank"
+            "fanqie_read_progress", "video_resource_cache"
     };
 
     private final JdbcTemplate jdbcTemplate;

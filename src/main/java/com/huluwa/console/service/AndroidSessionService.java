@@ -18,7 +18,7 @@ import java.util.Set;
 public class AndroidSessionService {
 
     private static final String CONFIG_KEY = "chat.android.sessions";
-    private static final Set<String> SUPPORTED_KINDS = Set.of("dengta", "hongguo", "starwar");
+    private static final Set<String> SUPPORTED_KINDS = Set.of("dengta", "hongguo");
 
     private final ConfigService configService;
     private final ObjectMapper objectMapper;
@@ -50,12 +50,12 @@ public class AndroidSessionService {
             hongguo.put("kind", "hongguo"); hongguo.put("preview", "搜索短剧 · 选集播放 · 自动连播");
             entries.add(hongguo);
         }
-        // 星球大战走原生对战界面（大厅 / 房间 / 等待聊天室 / 对战 / 结算），不进聊天消息接口。
-        // 由 schema v12 的 chat_session 行 + 安卓端 kind 分流共同提供，这里不再重复注入。
         for (JsonNode entry : entries) {
             if (!entry.isObject()) {
                 throw new BusinessException(500, "安卓会话配置条目必须为对象");
             }
+            // 星球大战功能已移除：历史配置里残留的 starwar 条目直接跳过，避免整张会话列表报错。
+            if ("starwar".equals(entry.path("kind").asText("").trim())) continue;
             if (!entry.path("enabled").asBoolean(true)) continue;
             String id = entry.path("id").asText("").trim();
             String title = entry.path("title").asText("").trim();

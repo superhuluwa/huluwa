@@ -19,23 +19,16 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     private final ChatWebSocketHandler chatWebSocketHandler;
     private final WsAuthHandshakeInterceptor wsAuthHandshakeInterceptor;
-    private final com.huluwa.console.ws.StarwarWebSocketHandler starwarWebSocketHandler;
 
     public WebSocketConfig(ChatWebSocketHandler chatWebSocketHandler,
-                           WsAuthHandshakeInterceptor wsAuthHandshakeInterceptor,
-                           com.huluwa.console.ws.StarwarWebSocketHandler starwarWebSocketHandler) {
+                           WsAuthHandshakeInterceptor wsAuthHandshakeInterceptor) {
         this.chatWebSocketHandler = chatWebSocketHandler;
         this.wsAuthHandshakeInterceptor = wsAuthHandshakeInterceptor;
-        this.starwarWebSocketHandler = starwarWebSocketHandler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(chatWebSocketHandler, "/ws/chat")
-                .addInterceptors(wsAuthHandshakeInterceptor)
-                .setAllowedOrigins("*");
-        // 星球大战对战独立通道：20Hz 世界快照不应挤占聊天连接的发送缓冲
-        registry.addHandler(starwarWebSocketHandler, "/ws/starwar")
                 .addInterceptors(wsAuthHandshakeInterceptor)
                 .setAllowedOrigins("*");
     }
