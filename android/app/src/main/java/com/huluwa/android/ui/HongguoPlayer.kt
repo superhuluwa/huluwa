@@ -405,8 +405,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     IconButton({ showMore = true }) { Icon(Icons.Outlined.MoreVert, "更多播放操作", tint = Color.White) }
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }, containerColor = HongguoPlayerSurface) {
                         DropdownMenuItem(text = { Text("选集", color = Color.White) }, onClick = { showMore = false; onShowEpisodes() })
-                        DropdownMenuItem(text = { Text(if (offlineRunning) "离线下载中…" else "离线下载全剧", color = Color.White) },
-                            enabled = !offlineRunning, onClick = { showMore = false; onOfflineDownload() })
+                        DropdownMenuItem(text = { Text(if (offlineRunning) "继续选择分集离线…" else "选择分集离线", color = Color.White) },
+                            onClick = { showMore = false; onOfflineDownload() })
                         DropdownMenuItem(text = { Text("重新加载", color = Color.White) }, onClick = { showMore = false; onRetry() })
                     }
                 }

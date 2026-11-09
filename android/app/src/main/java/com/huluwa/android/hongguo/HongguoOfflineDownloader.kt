@@ -5,7 +5,6 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
-import com.huluwa.android.data.HongguoEpisode
 import com.huluwa.android.data.HongguoOfflineEpisode
 import com.huluwa.android.data.HongguoOfflineSeries
 import com.huluwa.android.data.HongguoOfflineStore
@@ -27,106 +26,141 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** 收藏剧的离线状态；episodeIds 是已落盘的分集，供播放命中与界面标记使用。 */
+/** 收藏剧的离线状态；episodeIds 是已落盘分集，selectedIds 是已选目标（已落盘 + 待下载）。 */
 data class HongguoOfflineStatus(
     val seriesId: String, val title: String, val cover: String,
-    val total: Int, val done: Int, val failed: Int, val running: Boolean,
-    val bytes: Long, val totalBytes: Long, val size: Long, val message: String,
-    val episodeIds: Set<String>,
+    val done: Int, val failed: Int, val running: Boolean,
+    val bytes: Long, val totalBytes: Long, val currentNumber: Int,
+    val size: Long, val message: String,
+    val episodeIds: Set<String>, val selectedIds: Set<String>,
 )
 
 /**
  * 整剧离线下载器，挂在应用级生命周期上，退出红果页继续下载。
- * 按分集顺序断点续传密文文件（.part 长度即进度），下满后在本地解密为可直连播放的 MP4；
- * spade 与内容密钥只在下载实例内使用，不写入离线索引或状态。
+ * 由分集选择驱动：start 提交选中的分集（episodeId to 集号），已落盘的自动跳过，
+ * 重复提交即增量补下。每集断点续传密文文件（.part 长度即进度），
+ * 下满后在本地解密为可直连播放的 MP4；spade 与内容密钥不写入离线索引或状态。
  */
 internal class HongguoOfflineDownloader(context: Context, private val repository: HongguoRepository) {
+    /** 单剧下载账本：recorded 已落盘、pending 待下载、numbers 为集号。 */
+    private class Ledger(
+        var title: String, var cover: String,
+        val recorded: LinkedHashMap<String, HongguoOfflineEpisode> = LinkedHashMap(),
+        val pending: LinkedHashSet<String> = LinkedHashSet(),
+        val numbers: MutableMap<String, Int> = mutableMapOf(),
+    ) {
+        fun poll(): Pair<String, Int>? {
+            val id = pending.firstOrNull() ?: return null
+            pending.remove(id)
+            return id to (numbers[id] ?: 0)
+        }
+    }
+
     private val store = HongguoOfflineStore(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = mutableMapOf<String, Job>()
-    private val statuses = MutableStateFlow(restore())
+    private val ledgers: MutableMap<String, Ledger> = mutableMapOf<String, Ledger>().also { map ->
+        store.readAll().forEach { (id, saved) ->
+            val ledger = Ledger(saved.title, saved.cover)
+            saved.episodes.forEach { entry ->
+                ledger.recorded[entry.episodeId] = entry
+                ledger.numbers[entry.episodeId] = entry.number
+            }
+            map[id] = ledger
+        }
+    }
+    private val statuses = MutableStateFlow(buildStatuses())
     val observable = statuses.asStateFlow()
 
     /** 已离线分集的文件与清晰度，播放时优先命中本地。 */
-    fun lookup(seriesId: String, episodeId: String): Pair<File, String>? {
-        val entry = store.readAll()[seriesId]?.episodes?.firstOrNull { it.episodeId == episodeId }
-            ?: return null
+    @Synchronized fun lookup(seriesId: String, episodeId: String): Pair<File, String>? {
+        val entry = ledgers[seriesId]?.recorded[episodeId] ?: return null
         val file = store.episodeFile(seriesId, entry.number, episodeId)
         return if (file.exists()) file to entry.definition else null
     }
 
-    /** start 幂等且可增量：已落盘的分集直接跳过，因此重试即可补齐失败或新上线的分集。 */
-    fun start(seriesId: String, title: String, cover: String) {
-        if (jobs[seriesId]?.isActive == true) return
-        jobs[seriesId] = scope.launch { run(seriesId, title, cover) }
+    /** 提交一次分集选择：已落盘的自动跳过，追加到待下载队列；下载中重复提交同样有效。 */
+    fun start(seriesId: String, title: String, cover: String, selection: List<Pair<String, Int>>) {
+        val launch = synchronized(this) {
+            val ledger = ledgers.getOrPut(seriesId) { Ledger(title, cover) }
+            ledger.title = title
+            ledger.cover = cover
+            for ((episodeId, number) in selection) {
+                ledger.numbers[episodeId] = number
+                if (!ledger.recorded.containsKey(episodeId)) ledger.pending.add(episodeId)
+            }
+            publishLocked(seriesId)
+            // 只有该剧没有注册中的任务才启动新任务；任务跑空时会在锁内注销自己。
+            ledger.pending.isNotEmpty() && !jobs.containsKey(seriesId)
+        }
+        if (launch) jobs[seriesId] = scope.launch { run(seriesId) }
     }
 
-    /** 取消保留断点；remove 连同文件一起清除。 */
+    /** 取消下载：保留已落盘分集与断点，清空待下载队列。 */
     fun cancel(seriesId: String) {
         jobs.remove(seriesId)?.cancel()
-        publish(seriesId) { it.copy(running = false, bytes = 0, totalBytes = 0) }
-    }
-
-    fun remove(seriesId: String) {
-        jobs.remove(seriesId)?.cancel()
-        store.remove(seriesId)
-        statuses.update { it - seriesId }
-    }
-
-    private suspend fun run(seriesId: String, title: String, cover: String) {
-        val job = checkNotNull(kotlin.coroutines.coroutineContext[Job])
-        try {
-            if (store.root.usableSpace < 200L * 1024 * 1024) throw IOException("存储空间不足，无法离线下载")
-            val detail = repository.detail(seriesId)
-            val episodes = detail.episodes.filterNot { it.locked }
-            check(episodes.isNotEmpty()) { "该剧暂无可下载的分集" }
-            var series = store.readAll()[seriesId]?.copy(title = title, cover = cover)
-                ?: HongguoOfflineSeries(title, cover)
-            series = series.copy(total = maxOf(series.total, episodes.size))
-            publish(seriesId) {
-                HongguoOfflineStatus(seriesId, title, cover, episodes.size, series.episodes.size, 0,
-                    true, 0, 0, series.episodes.sumOf { it.size }, "",
-                    series.episodes.mapTo(mutableSetOf()) { it.episodeId })
-            }
-            var failed = 0
-            for (episode in episodes) {
-                if (series.episodes.any { it.episodeId == episode.id }) continue
-                val downloaded = downloadEpisode(seriesId, series, episodes.size, episode, job)
-                if (downloaded != null) series = downloaded else failed += 1
-                publish(seriesId) {
-                    it.copy(done = series.episodes.size, failed = failed, running = true,
-                        bytes = 0, totalBytes = 0, size = series.episodes.sumOf { e -> e.size },
-                        episodeIds = series.episodes.mapTo(mutableSetOf()) { e -> e.episodeId })
-                }
-            }
-            publish(seriesId) {
-                it.copy(running = false, message = if (failed > 0) "${failed} 集下载失败，可点击重试补齐" else "")
-            }
-        } catch (error: CancellationException) {
-            publish(seriesId) { it.copy(running = false, bytes = 0, totalBytes = 0) }
-            throw error
-        } catch (error: Exception) {
-            publish(seriesId) { it.copy(running = false, message = error.message ?: "离线下载失败，请重试") }
+        synchronized(this) {
+            ledgers[seriesId]?.pending?.clear()
+            publishLocked(seriesId)
         }
     }
 
-    /** 下载并解密一集；单集失败自动重试三次（重取播放地址，绕开直链过期），仍失败返回 null。 */
+    /** 删除一部剧的全部离线内容（含未完成的临时文件）。 */
+    fun remove(seriesId: String) {
+        jobs.remove(seriesId)?.cancel()
+        synchronized(this) {
+            ledgers.remove(seriesId)
+            store.remove(seriesId)
+        }
+        statuses.update { it - seriesId }
+    }
+
+    private suspend fun run(seriesId: String) {
+        val job = checkNotNull(kotlin.coroutines.coroutineContext[Job])
+        var failed = 0
+        try {
+            if (store.root.usableSpace < 200L * 1024 * 1024) {
+                publish(seriesId) { it.copy(message = "存储空间不足，无法离线下载") }
+                return
+            }
+            while (true) {
+                // 取集与注销在同一把锁里完成：队列跑空前 start 追加的新集不会被落下。
+                val next = synchronized(this) {
+                    val pair = ledgers[seriesId]?.poll()
+                    if (pair == null && jobs[seriesId] === job) jobs.remove(seriesId)
+                    pair
+                } ?: break
+                val (episodeId, number) = next
+                if (!downloadEpisode(seriesId, episodeId, number, job)) failed += 1
+                publish(seriesId)
+            }
+            publish(seriesId) { it.copy(message = if (failed > 0) "${failed} 集下载失败，可重新选择补齐" else "") }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            publish(seriesId) { it.copy(message = error.message ?: "离线下载失败，请重试") }
+        } finally {
+            synchronized(this) { if (jobs[seriesId] === job) jobs.remove(seriesId) }
+            publish(seriesId) { it.copy(running = false, bytes = 0, totalBytes = 0, currentNumber = 0) }
+        }
+    }
+
+    /** 下载并解密一集；单集失败自动重试三次（重取播放地址，绕开直链过期），仍失败返回 false。 */
     private suspend fun downloadEpisode(
-        seriesId: String, series: HongguoOfflineSeries, total: Int, episode: HongguoEpisode, job: Job,
-    ): HongguoOfflineSeries? {
+        seriesId: String, episodeId: String, number: Int, job: Job,
+    ): Boolean {
         var attempt = 0
         while (true) {
             try {
-                val playback = repository.playback(episode.id)
+                val playback = repository.playback(episodeId)
                 val stream = playback.streams.filter { it.supported }.maxByOrNull { it.height }
                     ?: throw IOException("该集暂未提供可离线的清晰度")
-                val target = store.episodeFile(seriesId, episode.number, episode.id)
+                val target = store.episodeFile(seriesId, number, episodeId)
                 target.parentFile?.mkdirs()
                 val part = store.partFile(target)
                 download(stream, playback.userAgent, part, job) { bytes, totalBytes ->
                     publish(seriesId) {
-                        it.copy(total = total, running = true, bytes = bytes, totalBytes = totalBytes,
-                            message = "", episodeIds = series.episodes.mapTo(mutableSetOf()) { e -> e.episodeId })
+                        it.copy(bytes = bytes, totalBytes = totalBytes, currentNumber = number, message = "")
                     }
                 }
                 if (stream.encrypted) decrypt(part, target, stream, job)
@@ -134,15 +168,13 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                     if (target.exists()) target.delete()
                     check(part.renameTo(target)) { "离线文件保存失败" }
                 }
-                val episodes = (series.episodes.filterNot { it.episodeId == episode.id } +
-                    HongguoOfflineEpisode(episode.id, episode.number, stream.definition, target.length()))
-                    .sortedBy { it.number }
-                return series.copy(total = maxOf(series.total, total), episodes = episodes)
-                    .also { store.write(seriesId, it) }
+                record(seriesId, episodeId, number, stream, target)
+                publish(seriesId)
+                return true
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (++attempt >= 3) return null
+                if (++attempt >= 3) return false
                 delay(1500L * attempt)
             }
         }
@@ -260,17 +292,41 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
         }
     }
 
-    private fun publish(seriesId: String, build: (HongguoOfflineStatus) -> HongguoOfflineStatus) {
-        statuses.update { current ->
-            val base = current[seriesId]
-                ?: HongguoOfflineStatus(seriesId, "", "", 0, 0, 0, false, 0, 0, 0, "", emptySet())
-            current + (seriesId to build(base))
+    private fun record(seriesId: String, episodeId: String, number: Int, stream: HongguoStream, target: File) {
+        val entry = HongguoOfflineEpisode(episodeId, number, stream.definition, target.length())
+        synchronized(this) {
+            val ledger = ledgers.getOrPut(seriesId) { Ledger("", "") }
+            ledger.recorded[episodeId] = entry
+            ledger.numbers[episodeId] = number
+            val total = ledger.recorded.size + ledger.pending.size
+            store.write(seriesId, HongguoOfflineSeries(ledger.title, ledger.cover, total,
+                ledger.recorded.values.sortedBy { it.number }))
         }
     }
 
-    private fun restore(): Map<String, HongguoOfflineStatus> = store.readAll().mapValues { (id, series) ->
-        HongguoOfflineStatus(id, series.title, series.cover, series.total, series.episodes.size, 0, false,
-            0, 0, series.episodes.sumOf { it.size }, "", series.episodes.mapTo(mutableSetOf()) { it.episodeId })
+    /** 持锁发布状态：帐本与任务存活状态合成 running、done、selected。 */
+    private fun publishLocked(seriesId: String, mutate: (HongguoOfflineStatus) -> HongguoOfflineStatus = { it }) {
+        val ledger = ledgers[seriesId] ?: return
+        val done = ledger.recorded.keys.toSet()
+        val running = ledger.pending.isNotEmpty() || jobs[seriesId]?.isActive == true
+        val base = statuses.value[seriesId]
+            ?: HongguoOfflineStatus(seriesId, ledger.title, ledger.cover, 0, 0, false, 0, 0, 0, 0, "", emptySet(), emptySet())
+        statuses.update { map ->
+            map + (seriesId to mutate(base.copy(
+                title = ledger.title, cover = ledger.cover, done = done.size, running = running,
+                size = ledger.recorded.values.sumOf { it.size },
+                episodeIds = done, selectedIds = done + ledger.pending,
+            )))
+        }
+    }
+
+    private fun publish(seriesId: String, mutate: (HongguoOfflineStatus) -> HongguoOfflineStatus = { it }) =
+        synchronized(this) { publishLocked(seriesId, mutate) }
+
+    private fun buildStatuses(): Map<String, HongguoOfflineStatus> = ledgers.mapValues { (id, ledger) ->
+        val done = ledger.recorded.keys.toSet()
+        HongguoOfflineStatus(id, ledger.title, ledger.cover, done.size, 0, false, 0, 0, 0,
+            ledger.recorded.values.sumOf { it.size }, "", done, done)
     }
 }
 

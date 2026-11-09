@@ -19,6 +19,14 @@ import java.io.File
 
 enum class HongguoFeedTab { Recommend, Ranking, Search, Favorites }
 
+/** 离线分集选择弹框：episodes 为详情集列表，checked 为勾选集（已离线集默认勾选）。 */
+data class HongguoOfflinePicker(
+    val seriesId: String, val title: String, val cover: String,
+    val episodes: List<HongguoEpisode> = emptyList(),
+    val checked: Set<String> = emptySet(),
+    val loading: Boolean = false, val error: String? = null,
+)
+
 data class HongguoState(
     val tab: HongguoFeedTab = HongguoFeedTab.Recommend,
     val query: String = "", val submittedQuery: String = "", val results: List<HongguoSeries> = emptyList(),
@@ -40,6 +48,8 @@ data class HongguoState(
     val favorites: List<HongguoFavorite> = emptyList(),
     val offline: Map<String, HongguoOfflineStatus> = emptyMap(),
     val offlineEpisodes: Map<String, Set<String>> = emptyMap(),
+    val offlinePicker: HongguoOfflinePicker? = null,
+    val offlineManagerVisible: Boolean = false,
     val playingOffline: Boolean = false,
 ) {
     val stream get() = playback?.streams?.getOrNull(streamIndex)
@@ -333,14 +343,82 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         mutable.update { it.copy(favorites = favoriteStore.toggle(series)) }
     }
 
-    /** 开始（或补齐）整剧离线；标题与封面取当前详情或收藏里的最新展示信息。 */
-    fun startOfflineDownload(seriesId: String) {
-        val series = mutable.value.detail?.series?.takeIf { it.id == seriesId }
-            ?: mutable.value.selectedSeries?.takeIf { it.id == seriesId }
-            ?: mutable.value.favorites.firstOrNull { it.id == seriesId }?.series()
-            ?: return
-        offlineDownloader.start(seriesId, series.title, series.cover)
+    /** 打开离线分集选择弹框：当前剧用现成详情，其他剧先展示加载再拉详情。 */
+    fun openOfflinePicker(seriesId: String) {
+        val current = mutable.value
+        val detail = current.detail?.takeIf { it.series.id == seriesId }
+        val favorite = current.favorites.firstOrNull { it.id == seriesId }
+        val known = current.offline[seriesId]
+        val picker = HongguoOfflinePicker(
+            seriesId = seriesId,
+            title = detail?.series?.title ?: favorite?.title ?: known?.title.orEmpty(),
+            cover = detail?.series?.cover ?: favorite?.cover ?: known?.cover.orEmpty(),
+            episodes = detail?.episodes.orEmpty(),
+            checked = (current.offlineEpisodes[seriesId] ?: emptySet())
+                .filter { id -> detail?.episodes?.any { it.id == id } ?: true }.toSet(),
+            loading = detail == null,
+        )
+        mutable.update { it.copy(offlinePicker = picker) }
+        if (detail != null) return
+        viewModelScope.launch {
+            try {
+                val loaded = repository.detail(seriesId)
+                mutable.update { state ->
+                    val open = state.offlinePicker?.takeIf { it.seriesId == seriesId } ?: return@update state
+                    state.copy(offlinePicker = open.copy(
+                        title = loaded.series.title, cover = loaded.series.cover,
+                        episodes = loaded.episodes, loading = false, error = null,
+                        checked = (state.offlineEpisodes[seriesId] ?: emptySet())
+                            .filter { id -> loaded.episodes.any { it.id == id } }.toSet(),
+                    ))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                mutable.update { state ->
+                    state.offlinePicker?.takeIf { it.seriesId == seriesId }
+                        ?.let { state.copy(offlinePicker = it.copy(loading = false, error = error.userMessage())) }
+                        ?: state
+                }
+            }
+        }
     }
+
+    fun toggleOfflineEpisode(episodeId: String) {
+        mutable.update { state ->
+            state.offlinePicker?.let { picker ->
+                state.copy(offlinePicker = picker.copy(
+                    checked = if (episodeId in picker.checked) picker.checked - episodeId else picker.checked + episodeId))
+            } ?: state
+        }
+    }
+
+    /** 全选/清空可下载分集（锁定集不可选）。 */
+    fun toggleOfflineAll() {
+        mutable.update { state ->
+            state.offlinePicker?.let { picker ->
+                val selectable = picker.episodes.filterNot { it.locked }
+                val all = selectable.isNotEmpty() && selectable.all { it.id in picker.checked }
+                state.copy(offlinePicker = picker.copy(
+                    checked = if (all) emptySet() else selectable.mapTo(mutableSetOf()) { it.id }))
+            } ?: state
+        }
+    }
+
+    /** 确认选择：已落盘的由下载器自动跳过，等价于增量提交。 */
+    fun confirmOfflinePicker() {
+        val picker = mutable.value.offlinePicker ?: return
+        val selection = picker.episodes.filter { it.id in picker.checked }
+            .map { it.id to it.number }
+        offlineDownloader.start(picker.seriesId, picker.title, picker.cover, selection)
+        mutable.update { it.copy(offlinePicker = null) }
+    }
+
+    fun dismissOfflinePicker() {
+        mutable.update { it.copy(offlinePicker = null) }
+    }
+
+    fun showOfflineManager() { mutable.update { it.copy(offlineManagerVisible = true) } }
+    fun hideOfflineManager() { mutable.update { it.copy(offlineManagerVisible = false) } }
     fun cancelOfflineDownload(seriesId: String) = offlineDownloader.cancel(seriesId)
     fun removeOffline(seriesId: String) = offlineDownloader.remove(seriesId)
     fun selectStream(index: Int) {
@@ -386,6 +464,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     }
     fun back(): Boolean {
         if (mutable.value.settingsVisible) { hideSettings(); return true }
+        if (mutable.value.offlineManagerVisible) { hideOfflineManager(); return true }
         if (mutable.value.selectedSeries == null && mutable.value.tab != HongguoFeedTab.Recommend) {
             mutable.update { it.copy(tab = HongguoFeedTab.Recommend) }; return true
         }

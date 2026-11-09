@@ -34,6 +34,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.huluwa.android.HongguoFeedTab
+import com.huluwa.android.HongguoOfflinePicker
 import com.huluwa.android.HongguoState
 import com.huluwa.android.HongguoViewModel
 import com.huluwa.android.data.*
@@ -45,10 +46,10 @@ import com.huluwa.android.hongguo.HongguoOfflineStatus
     BackHandler(onBack = back)
     LaunchedEffect(Unit) { vm.loadDiscover() }
     LaunchedEffect(ui.tab) { if (ui.tab == HongguoFeedTab.Ranking) vm.loadRanking() }
-    if (ui.selectedSeries != null) {
-        HongguoDetailContent(ui, vm, back)
-    } else {
-        Scaffold(
+    when {
+        ui.offlineManagerVisible -> HongguoOfflineManagerScreen(ui, vm, back)
+        ui.selectedSeries != null -> HongguoDetailContent(ui, vm, back)
+        else -> Scaffold(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
@@ -66,6 +67,12 @@ import com.huluwa.android.hongguo.HongguoOfflineStatus
         ) { padding ->
             Box(Modifier.padding(padding).navigationBarsPadding().fillMaxSize()) { HongguoHome(ui, vm) }
         }
+    }
+    ui.offlinePicker?.let { picker ->
+        HongguoOfflinePickerSheet(picker, recorded = ui.offlineEpisodes[picker.seriesId].orEmpty(),
+            onToggle = { vm.toggleOfflineEpisode(it.id) }, onToggleAll = vm::toggleOfflineAll,
+            onConfirm = vm::confirmOfflinePicker, onDismiss = vm::dismissOfflinePicker,
+            onRetry = { vm.openOfflinePicker(picker.seriesId) })
     }
     if (ui.settingsVisible) HongguoSettingsDialog(ui, vm)
 }
@@ -222,12 +229,17 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
 }
 
 @Composable private fun HongguoFavorites(ui: HongguoState, vm: HongguoViewModel) {
-    var pendingManage by remember { mutableStateOf<String?>(null) }
-    var pendingRemove by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text("我的收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("收藏保存在当前账号下，点右侧「离线」按集序下载最高清晰度到本机", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("我的收藏", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("点右侧「离线」选择分集下载到本机", style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
+                }
+                TextButton(vm::showOfflineManager, contentPadding = PaddingValues(start = 8.dp)) {
+                    Text("离线管理"); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp))
+                }
+            }
         }
         if (ui.favorites.isEmpty()) item {
             Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
@@ -237,20 +249,193 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
         items(ui.favorites, key = { "favorite-" + it.id }) { favorite ->
             val status = ui.offline[favorite.id]
             HongguoSeriesCard(favorite.series(), { vm.openSeries(favorite.series()) }) {
+                // 下载中徽标点击进管理页看进度，其余状态打开分集选择。
                 HongguoOfflineBadge(status,
-                    onStart = { vm.startOfflineDownload(favorite.id) },
-                    onCancel = { vm.cancelOfflineDownload(favorite.id) },
-                    onManage = { pendingManage = favorite.id })
+                    onClick = { if (status?.running == true) vm.showOfflineManager() else vm.openOfflinePicker(favorite.id) })
             }
         }
     }
-    if (pendingManage != null) {
-        val manageId = pendingManage!!
-        val status = ui.offline[manageId]
-        if (status != null) HongguoOfflineManageDialog(status,
-            onComplete = { pendingManage = null },
-            onRetry = { vm.startOfflineDownload(manageId); pendingManage = null },
-            onRemove = { pendingManage = null; pendingRemove = manageId })
+}
+
+/** 收藏卡右侧的离线状态徽标：未离线可发起、下载中显示进度、完成后可继续补选。 */
+@Composable private fun HongguoOfflineBadge(status: HongguoOfflineStatus?, onClick: () -> Unit) {
+    val running = status?.running == true
+    val done = status?.done ?: 0
+    val failed = status?.failed ?: 0
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = when {
+            running -> Color(0xFFFFF3E0)
+            done > 0 && failed > 0 -> Color(0xFFFFEDEA)
+            done > 0 -> Color(0xFFE9F5EC)
+            else -> Color(0xFFFFEAE6)
+        },
+    ) {
+        Column(Modifier.widthIn(min = 58.dp).padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            if (running) {
+                val progress = status?.takeIf { it.totalBytes > 0 }
+                    ?.let { (it.bytes.toDouble() / it.totalBytes).toFloat().coerceIn(0f, 1f) }
+                if (progress != null) CircularProgressIndicator({ progress }, Modifier.size(20.dp), strokeWidth = 2.dp)
+                else CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text("${status?.done ?: 0}/${status?.selectedIds?.size ?: 0}", style = MaterialTheme.typography.labelSmall,
+                    color = HuluwaColors.Ink, maxLines = 1)
+            } else if (done > 0 && failed > 0) {
+                Icon(Icons.Outlined.ErrorOutline, "部分集离线失败", Modifier.size(20.dp), tint = Color(0xFFB3543C))
+                Text("离线$done集", style = MaterialTheme.typography.labelSmall,
+                    color = HuluwaColors.Ink, maxLines = 1)
+            } else if (done > 0) {
+                Icon(Icons.Outlined.DownloadDone, "已离线", Modifier.size(20.dp), tint = Color(0xFF3D8B4F))
+                Text("已离线${done}集", style = MaterialTheme.typography.labelSmall,
+                    color = HuluwaColors.Ink, maxLines = 1)
+            } else {
+                Icon(Icons.Outlined.Download, "选择分集离线", Modifier.size(20.dp), tint = Color(0xFFCA3D32))
+                Text("离线", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Ink, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** 离线分集选择弹框：数字网格多选（已离线集默认勾选并带标记），支持全选，确认后增量提交。 */
+@Composable private fun HongguoOfflinePickerSheet(
+    picker: HongguoOfflinePicker, recorded: Set<String>,
+    onToggle: (String) -> Unit, onToggleAll: () -> Unit,
+    onConfirm: () -> Unit, onDismiss: () -> Unit, onRetry: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .78f)).clickable(onClick = onDismiss),
+            contentAlignment = Alignment.BottomCenter) {
+            Surface(
+                Modifier.fillMaxWidth().navigationBarsPadding()
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                color = Color(0xFF171717), contentColor = Color.White,
+                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    val selectable = picker.episodes.filterNot { it.locked }
+                    val allChecked = selectable.isNotEmpty() && selectable.all { it.id in picker.checked }
+                    val fresh = picker.checked.count { it !in recorded }
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(picker.title.ifBlank { "选择分集" }, style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("共${picker.episodes.size}集 · 已离线${recorded.size}集 · 已选${picker.checked.size}集",
+                                color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelMedium)
+                        }
+                        FilterChip(allChecked, onToggleAll,
+                            label = { Text(if (allChecked) "全不选" else "全选") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Color(0xFF292929), labelColor = Color.White,
+                                selectedContainerColor = Color(0xFFE44B40), selectedLabelColor = Color.White))
+                        IconButton(onDismiss) { Icon(Icons.Outlined.Close, "关闭", tint = Color.White) }
+                    }
+                    Box(Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 380.dp)) {
+                        when {
+                            picker.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                HongguoLoading("正在加载分集…", dark = true)
+                            }
+                            picker.error != null -> Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                                HongguoError(picker.error, onRetry)
+                            }
+                            else -> {
+                                val rows = remember(picker.episodes) { picker.episodes.chunked(5) }
+                                LazyColumn(
+                                    Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    items(rows, key = { it.first().id }) { row ->
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            row.forEach { item ->
+                                                val checked = item.id in picker.checked
+                                                Surface(
+                                                    Modifier.weight(1f).height(52.dp)
+                                                        .clickable(enabled = !item.locked) { onToggle(item.id) },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (checked) Color(0xFFE44B40) else Color(0xFF292929),
+                                                    contentColor = if (checked) Color.White else Color.White.copy(alpha = if (item.locked) .38f else .88f),
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        if (item.locked) Icon(Icons.Outlined.Lock, "需解锁", Modifier.size(18.dp))
+                                                        else Text("${item.number}", style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = if (checked) FontWeight.Bold else FontWeight.Medium)
+                                                        if (recorded.contains(item.id)) Icon(Icons.Outlined.DownloadDone,
+                                                            "已离线", Modifier.align(Alignment.TopEnd).size(12.dp).padding(1.dp),
+                                                            tint = if (checked) Color.White else Color(0xFF8CD4A0))
+                                                    }
+                                                }
+                                            }
+                                            repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onDismiss) { Text("取消", color = Color.White.copy(alpha = .8f)) }
+                        Button(onConfirm, enabled = fresh > 0 && !picker.loading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE44B40))) {
+                            Text(if (fresh > 0) "离线新增${fresh}集" else "没有新选择的分集")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 离线下载管理页：正在下载（进度、可取消）与已下载（增量补选、可删除）按剧分区展示。 */
+@Composable private fun HongguoOfflineManagerScreen(ui: HongguoState, vm: HongguoViewModel, onBack: () -> Unit) {
+    var pendingRemove by remember { mutableStateOf<String?>(null) }
+    val downloading = ui.offline.values.filter { it.running }.sortedBy { it.title }
+    val downloaded = ui.offline.values.filter { !it.running && it.done > 0 }.sortedBy { it.title }
+    Scaffold(
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            Surface(color = Color.White) {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
+                    Column(Modifier.weight(1f)) {
+                        Text("离线下载", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        Text("离线的短剧在本机播放，不消耗流量", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (downloading.isEmpty() && downloaded.isEmpty()) item {
+                Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                    Text("还没有离线内容，去收藏页点「离线」选择分集", color = HuluwaColors.Muted)
+                }
+            }
+            if (downloading.isNotEmpty()) {
+                item {
+                    Text("正在下载", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                        color = HuluwaColors.Muted)
+                }
+                items(downloading, key = { "downloading-" + it.seriesId }) { status ->
+                    HongguoOfflineDownloadingRow(status) { vm.cancelOfflineDownload(status.seriesId) }
+                }
+            }
+            if (downloaded.isNotEmpty()) {
+                item {
+                    Text("已下载", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                        color = HuluwaColors.Muted)
+                }
+                items(downloaded, key = { "downloaded-" + it.seriesId }) { status ->
+                    HongguoOfflineDownloadedRow(status,
+                        onPick = { vm.openOfflinePicker(status.seriesId) },
+                        onRemove = { pendingRemove = status.seriesId })
+                }
+            }
+        }
     }
     if (pendingRemove != null) {
         val removeId = pendingRemove!!
@@ -267,68 +452,48 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     }
 }
 
-/** 收藏卡右侧的离线状态徽标：未离线可发起、下载中显示进度、完成后进入管理。 */
-@Composable private fun HongguoOfflineBadge(
-    status: HongguoOfflineStatus?,
-    onStart: () -> Unit, onCancel: () -> Unit, onManage: () -> Unit,
-) {
-    val running = status?.running == true
-    val done = status?.done ?: 0
-    val failed = status?.failed ?: 0
-    Surface(
-        onClick = when { running -> onCancel; done > 0 -> onManage; else -> onStart },
-        shape = RoundedCornerShape(10.dp),
-        color = when {
-            running -> Color(0xFFFFF3E0)
-            done > 0 && failed > 0 -> Color(0xFFFFEDEA)
-            done > 0 -> Color(0xFFE9F5EC)
-            else -> Color(0xFFFFEAE6)
-        },
-    ) {
-        Column(Modifier.widthIn(min = 58.dp).padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (running) {
-                val progress = status?.takeIf { it.totalBytes > 0 }
-                    ?.let { (it.bytes.toDouble() / it.totalBytes).toFloat().coerceIn(0f, 1f) }
-                if (progress != null) CircularProgressIndicator({ progress }, Modifier.size(20.dp), strokeWidth = 2.dp)
-                else CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Text("${status?.done ?: 0}/${status?.total ?: 0}", style = MaterialTheme.typography.labelSmall,
-                    color = HuluwaColors.Ink, maxLines = 1)
-            } else if (done > 0 && failed > 0) {
-                Icon(Icons.Outlined.ErrorOutline, "部分集离线失败", Modifier.size(20.dp), tint = Color(0xFFB3543C))
-                Text("离线$done/${status?.total ?: 0}", style = MaterialTheme.typography.labelSmall,
-                    color = HuluwaColors.Ink, maxLines = 1)
-            } else if (done > 0) {
-                Icon(Icons.Outlined.DownloadDone, "已离线", Modifier.size(20.dp), tint = Color(0xFF3D8B4F))
-                Text("已离线${done}集", style = MaterialTheme.typography.labelSmall,
-                    color = HuluwaColors.Ink, maxLines = 1)
-            } else {
-                Icon(Icons.Outlined.Download, "离线下载全剧", Modifier.size(20.dp), tint = Color(0xFFCA3D32))
-                Text("离线", style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Ink, maxLines = 1)
+@Composable private fun HongguoOfflineDownloadingRow(status: HongguoOfflineStatus, onCancel: () -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = Color.White) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(status.cover, status.title, Modifier.width(56.dp).height(76.dp).clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(status.title.ifBlank { "短剧" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val fraction = if (status.totalBytes > 0) (status.bytes.toDouble() / status.totalBytes).toFloat().coerceIn(0f, 1f) else null
+                Text(if (status.currentNumber > 0 && fraction != null) "第${status.currentNumber}集 · ${(fraction * 100).toInt()}%" else "准备中…",
+                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                if (fraction != null) LinearProgressIndicator({ fraction }, Modifier.fillMaxWidth())
+                else LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("已完成 ${status.done}/${status.selectedIds.size} 集" +
+                    (if (status.failed > 0) " · ${status.failed} 集失败" else ""),
+                    style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
+                if (status.message.isNotBlank()) Text(status.message, style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFB3543C), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            TextButton(onCancel) { Text("取消") }
         }
     }
 }
 
-@Composable private fun HongguoOfflineManageDialog(
-    status: HongguoOfflineStatus,
-    onComplete: () -> Unit, onRetry: () -> Unit, onRemove: () -> Unit,
+@Composable private fun HongguoOfflineDownloadedRow(
+    status: HongguoOfflineStatus, onPick: () -> Unit, onRemove: () -> Unit,
 ) {
-    AlertDialog(onDismissRequest = onComplete, title = { Text("离线管理") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(status.title.ifBlank { "该短剧" }, fontWeight = FontWeight.SemiBold)
-                Text("已离线 ${status.done}/${status.total} 集" +
-                    (if (status.size > 0) " · 占用 ${hongguoOfflineSizeText(status.size)}" else "") +
-                    (if (status.failed > 0) " · ${status.failed} 集失败" else ""),
-                    style = MaterialTheme.typography.bodySmall, color = HuluwaColors.Muted)
-                if (status.message.isNotBlank()) Text(status.message, style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB3543C))
-                if (status.done < status.total || status.failed > 0) TextButton(onRetry) { Text("补齐缺失分集") }
-                TextButton(onRemove) { Text("删除离线文件", color = MaterialTheme.colorScheme.error) }
+    Surface(Modifier.fillMaxWidth().clickable(onClick = onPick), shape = RoundedCornerShape(14.dp), color = Color.White) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(status.cover, status.title, Modifier.width(56.dp).height(76.dp).clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(status.title.ifBlank { "短剧" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("已离线${status.done}集" +
+                    (if (status.size > 0) " · ${hongguoOfflineSizeText(status.size)}" else ""),
+                    style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                if (status.failed > 0 || status.message.isNotBlank()) Text(status.message.ifBlank { "${status.failed} 集下载失败，点击补选重试" },
+                    style = MaterialTheme.typography.labelSmall, color = Color(0xFFB3543C), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("点击补选分集", color = Color(0xFFE44B40), style = MaterialTheme.typography.labelSmall)
             }
-        },
-        confirmButton = { TextButton(onComplete) { Text("完成") } })
+            IconButton(onRemove) { Icon(Icons.Outlined.DeleteOutline, "删除离线", tint = HuluwaColors.Muted) }
+        }
+    }
 }
 
 private fun hongguoOfflineSizeText(bytes: Long): String = when {
@@ -400,7 +565,7 @@ private fun hongguoOfflineSizeText(bytes: Long): String = when {
             loading = ui.playLoading, error = ui.playError, favorite = ui.favoriteSelected,
             offlineRunning = ui.offline[detail.series.id]?.running == true,
             playingOffline = ui.playingOffline,
-            onOfflineDownload = { vm.startOfflineDownload(detail.series.id) },
+            onOfflineDownload = { vm.openOfflinePicker(detail.series.id) },
             onBack = onBack, onShowEpisodes = { showEpisodes = true },
             onToggleFavorite = vm::toggleFavorite,
             onSelectEpisode = vm::playEpisode, onFirstFrame = { vm.prefetchNextEpisode(ui.playRequest) },
