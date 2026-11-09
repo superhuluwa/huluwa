@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 enum class HongguoFeedTab { Recommend, Ranking, Search, Favorites }
+enum class HongguoOfflineTab { Downloading, Downloaded }
 
 /** 离线分集选择弹框：episodes 为详情集列表，checked 为勾选集（已离线集默认勾选）。 */
 data class HongguoOfflinePicker(
@@ -50,6 +51,8 @@ data class HongguoState(
     val offlineEpisodes: Map<String, Set<String>> = emptyMap(),
     val offlinePicker: HongguoOfflinePicker? = null,
     val offlineManagerVisible: Boolean = false,
+    val offlineTab: HongguoOfflineTab = HongguoOfflineTab.Downloading,
+    val offlineOnly: Boolean = false,
     val playingOffline: Boolean = false,
 ) {
     val stream get() = playback?.streams?.getOrNull(streamIndex)
@@ -94,7 +97,14 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         // 离线下载器在应用级存活，ViewModel 只观察状态流并按剧集归档分集标记。
         viewModelScope.launch {
             offlineDownloader.observable.collect { statuses ->
-                mutable.update { it.copy(offline = statuses, offlineEpisodes = statuses.mapValues { s -> s.value.episodeIds }) }
+                mutable.update { state ->
+                    // 边下载边观看时，将新落盘的分集同步加入离线选集和连播列表。
+                    val detail = if (state.offlineOnly) {
+                        statuses[state.selectedSeries?.id]?.let(::offlineDetail) ?: state.detail
+                    } else state.detail
+                    state.copy(offline = statuses, offlineEpisodes = statuses.mapValues { it.value.episodeIds },
+                        detail = detail)
+                }
             }
         }
         loadSettings()
@@ -231,21 +241,41 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         playbackCache.clear()
         mutable.update { it.copy(selectedSeries = series, detail = null, detailLoading = true, detailError = null,
             episode = null, playback = null, episodePreloads = emptyList(), playLoading = false, playError = null,
-            playingOffline = false) }
+            offlineOnly = false, playingOffline = false) }
         detailJob = viewModelScope.launch {
             try {
                 val detail = repository.detail(series.id)
                 mutable.update { it.copy(detail = detail, detailLoading = false) }
-                val progress = history.read(series.id)
-                val index = detail.episodes.indexOfFirst { it.id == progress?.episodeId }
-                val next = if (index >= 0 && progress?.completed == true) detail.episodes.getOrNull(index + 1) else null
-                val episode = next?.takeUnless { it.locked } ?: detail.episodes.getOrNull(index)?.takeUnless { it.locked }
-                    ?: detail.episodes.firstOrNull { !it.locked }
-                if (episode != null) playEpisode(episode)
+                initialEpisode(detail)?.let(::playEpisode)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutable.update { it.copy(detailLoading = false, detailError = error.userMessage()) } }
         }
     }
+    /** 直接从离线档案构造详情和播放源，选集、续播及连播均只使用本地分集。 */
+    fun openOfflineSeries(seriesId: String) {
+        val status = offlineDownloader.observable.value[seriesId]?.takeIf { it.episodes.isNotEmpty() } ?: return
+        val detail = offlineDetail(status)
+        detailJob?.cancel(); playbackJob?.cancel(); prefetchJob?.cancel()
+        playbackCache.clear()
+        mutable.update { it.copy(selectedSeries = detail.series, detail = detail, detailLoading = false, detailError = null,
+            episode = null, playback = null, episodePreloads = emptyList(), playLoading = false, playError = null,
+            offlineManagerVisible = false, offlineOnly = true, playingOffline = true) }
+        initialEpisode(detail)?.let(::playEpisode)
+    }
+
+    private fun offlineDetail(status: HongguoOfflineStatus): HongguoDetail = HongguoDetail(
+        HongguoSeries(status.seriesId, status.title, status.cover, "", status.episodes.size),
+        status.episodes.map { HongguoEpisode(it.episodeId, it.number, "第${it.number}集", false) },
+    )
+
+    private fun initialEpisode(detail: HongguoDetail): HongguoEpisode? {
+        val progress = history.read(detail.series.id)
+        val index = detail.episodes.indexOfFirst { it.id == progress?.episodeId }
+        val next = if (index >= 0 && progress?.completed == true) detail.episodes.getOrNull(index + 1) else null
+        return next?.takeUnless { it.locked } ?: detail.episodes.getOrNull(index)?.takeUnless { it.locked }
+            ?: detail.episodes.firstOrNull { !it.locked }
+    }
+
     fun playEpisode(episode: HongguoEpisode) {
         if (episode.locked) return
         val detail = mutable.value.detail ?: return
@@ -257,12 +287,16 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
             .mapTo(mutableSetOf()) { it.id })
         val resume = resumePosition(detail.series.id, episode.id)
         val local = offlinePlayback(detail.series.id, episode.id)
-        val cached = local ?: playbackCache.peek(episode.id)
+        val offlineOnly = mutable.value.offlineOnly
+        val cached = local ?: if (offlineOnly) null else playbackCache.peek(episode.id)
+        val missingOffline = offlineOnly && local == null
         val request = mutable.value.playRequest + 1
         mutable.update { it.copy(episode = episode, playback = cached,
             streamIndex = cached?.let(::preferredStreamIndex) ?: 0,
-            episodePreloads = cachedNeighbors(detail, episode), playLoading = cached == null, playError = null,
-            startPositionMs = resume, playRequest = request, playingOffline = local != null) }
+            episodePreloads = cachedNeighbors(detail, episode), playLoading = cached == null && !missingOffline,
+            playError = if (missingOffline) "该集离线文件已丢失，请返回离线管理重新下载" else null,
+            startPositionMs = resume, playRequest = request, playingOffline = offlineOnly || local != null) }
+        if (missingOffline) return
         playbackJob = viewModelScope.launch {
             try {
                 val playback = cached ?: playbackCache.get(episode.id)
@@ -330,7 +364,9 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
             for (neighbor in neighboringEpisodes(detail, episode)) {
                 try {
                     // 离线分集直接本地成源，只有在线分集才需要预取播放地址。
-                    if (offlinePlayback(detail.series.id, neighbor.id) == null) playbackCache.get(neighbor.id)
+                    if (!current.offlineOnly && offlinePlayback(detail.series.id, neighbor.id) == null) {
+                        playbackCache.get(neighbor.id)
+                    }
                     if (mutable.value.playRequest != current.playRequest) return@launch
                     mutable.update { it.copy(episodePreloads = cachedNeighbors(detail, episode)) }
                 } catch (error: CancellationException) { throw error }
@@ -346,7 +382,7 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
     /** 打开离线分集选择弹框：当前剧用现成详情，其他剧先展示加载再拉详情。 */
     fun openOfflinePicker(seriesId: String) {
         val current = mutable.value
-        val detail = current.detail?.takeIf { it.series.id == seriesId }
+        val detail = current.detail?.takeIf { it.series.id == seriesId && !current.offlineOnly }
         val favorite = current.favorites.firstOrNull { it.id == seriesId }
         val known = current.offline[seriesId]
         val picker = HongguoOfflinePicker(
@@ -410,14 +446,23 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         val selection = picker.episodes.filter { it.id in picker.checked }
             .map { it.id to it.number }
         offlineDownloader.start(picker.seriesId, picker.title, picker.cover, selection)
-        mutable.update { it.copy(offlinePicker = null, offlineManagerVisible = true) }
+        mutable.update { it.copy(offlinePicker = null, offlineManagerVisible = true,
+            offlineTab = HongguoOfflineTab.Downloading) }
     }
 
     fun dismissOfflinePicker() {
         mutable.update { it.copy(offlinePicker = null) }
     }
 
-    fun showOfflineManager() { mutable.update { it.copy(offlineManagerVisible = true) } }
+    fun showOfflineManager() {
+        mutable.update { state ->
+            val tab = if (state.offline.values.any { it.running } || state.offline.values.none { it.done > 0 }) {
+                HongguoOfflineTab.Downloading
+            } else HongguoOfflineTab.Downloaded
+            state.copy(offlineManagerVisible = true, offlineTab = tab)
+        }
+    }
+    fun selectOfflineTab(tab: HongguoOfflineTab) { mutable.update { it.copy(offlineTab = tab) } }
     fun hideOfflineManager() { mutable.update { it.copy(offlineManagerVisible = false) } }
     fun cancelOfflineDownload(seriesId: String) = offlineDownloader.cancel(seriesId)
     fun removeOffline(seriesId: String) = offlineDownloader.remove(seriesId)
@@ -473,7 +518,9 @@ class HongguoViewModel(application: Application) : AndroidViewModel(application)
         playbackCache.clear()
         mutable.update { it.copy(selectedSeries = null, detail = null, detailLoading = false, detailError = null,
             episode = null, playback = null, episodePreloads = emptyList(), playLoading = false, playError = null,
-            playingOffline = false) }
+            offlineManagerVisible = it.offlineOnly,
+            offlineTab = if (it.offlineOnly) HongguoOfflineTab.Downloaded else it.offlineTab,
+            offlineOnly = false, playingOffline = false) }
         return true
     }
     override fun onCleared() {

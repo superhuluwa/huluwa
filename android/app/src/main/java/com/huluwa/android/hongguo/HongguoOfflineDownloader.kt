@@ -34,6 +34,7 @@ data class HongguoOfflineStatus(
     val bytes: Long, val totalBytes: Long, val currentNumber: Int,
     val size: Long, val message: String,
     val episodeIds: Set<String>, val selectedIds: Set<String>,
+    val episodes: List<HongguoOfflineEpisode> = emptyList(),
 )
 
 /**
@@ -373,6 +374,7 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 title = ledger.title, cover = ledger.cover, done = done.size, running = running,
                 size = ledger.recorded.values.sumOf { it.size },
                 episodeIds = done, selectedIds = done + ledger.pending,
+                episodes = ledger.recorded.values.sortedBy { it.number },
             )))
         }
     }
@@ -383,7 +385,8 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
     private fun buildStatuses(): Map<String, HongguoOfflineStatus> = ledgers.mapValues { (id, ledger) ->
         val done = ledger.recorded.keys.toSet()
         HongguoOfflineStatus(id, ledger.title, ledger.cover, done.size, 0, false, 0, 0, 0,
-            ledger.recorded.values.sumOf { it.size }, "", done, done)
+            ledger.recorded.values.sumOf { it.size }, "", done, done,
+            episodes = ledger.recorded.values.sortedBy { it.number })
     }
 }
 
