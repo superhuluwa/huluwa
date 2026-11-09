@@ -195,7 +195,11 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
         }
     }
 
-    /** 断点续传下载到 .part；CDN 忽略续传范围时自动删除断点从零重下。 */
+    /**
+     * 分块断点续传下载到 .part。与播放数据源相同的有界 Range 模式（每块 4MB）：
+     * CDN 对短请求稳定，长连接整文件拉取会在接近完成时被切断；块失败只重试该块，
+     * 并在主/备 CDN 地址间轮换。文件长度即已完成位置，天然记录断点。
+     */
     @OptIn(UnstableApi::class)
     private fun download(
         stream: HongguoStream, userAgent: String, part: File, job: Job,
@@ -204,47 +208,83 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
         val factory = DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(30_000)
             .setDefaultRequestProperties(mapOf("Accept-Encoding" to "identity"))
             .apply { if (userAgent.isNotBlank()) setUserAgent(userAgent) }
-        var start = part.length()
-        while (true) {
-            val source = factory.createDataSource()
-            try {
-                val remaining = source.open(DataSpec.Builder().setUri(stream.url).setPosition(start).build())
-                val header = source.responseHeaders.entries.firstOrNull { it.key.equals("Content-Range", true) }
-                    ?.value?.firstOrNull().orEmpty()
-                val range = Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(header)
-                if (start > 0 && (range == null || range.groupValues[1].toLongOrNull() != start)) {
-                    check(part.delete()) { "离线缓存文件无法重置" }
-                    start = 0
-                    continue
-                }
-                val total = range?.groupValues?.get(3)?.toLongOrNull()
-                    ?: remaining.takeIf { it != C.LENGTH_UNSET.toLong() }?.let { start + it } ?: -1L
-                if (total > 2L * 1024 * 1024 * 1024) throw IOException("该集文件过大，暂不支持离线")
-                RandomAccessFile(part, "rw").use { output ->
-                    output.setLength(start)
-                    val buffer = ByteArray(512 * 1024)
-                    var received = start
-                    var publishedAt = 0L
-                    while (true) {
-                        if (!job.isActive) throw CancellationException("离线下载已取消")
-                        val read = source.read(buffer, 0, buffer.size)
-                        if (read == C.RESULT_END_OF_INPUT) break
-                        output.write(buffer, 0, read)
-                        received += read
-                        // 下载循环不感知协程，靠节流上报避免状态流高频重组。
-                        val now = System.currentTimeMillis()
-                        if (now - publishedAt >= 200) {
-                            publishedAt = now
-                            onProgress(received, if (total > 0) total else received)
+        val total = if (stream.size > 0) stream.size else probeTotal(factory, stream)
+        require(total > 0) { "该集缺少文件大小信息，无法离线" }
+        if (total > 2L * 1024 * 1024 * 1024) throw IOException("该集文件过大，暂不支持离线")
+        val urls = listOf(stream.url, stream.backupUrl).filter { it.isNotBlank() }.distinct()
+        val chunk = 4L * 1024 * 1024
+        // 断点异常（比文件还长，比如上次 size 变了）时从头重下。
+        var position = if (part.length() in 0..total) part.length() else 0L
+        if (part.exists() && part.length() > total) part.delete()
+        val buffer = ByteArray(512 * 1024)
+        while (position < total) {
+            if (!job.isActive) throw CancellationException("离线下载已取消")
+            val length = minOf(chunk, total - position)
+            var failure: Exception? = null
+            var done = false
+            // 单块最多 6 次尝试，主备地址轮换；任一次成功即继续下一块。
+            for (attempt in 0 until 6) {
+                if (!job.isActive) throw CancellationException("离线下载已取消")
+                val source = factory.createDataSource()
+                try {
+                    val candidate = urls[(attempt + position / chunk).toInt().mod(urls.size)]
+                    source.open(DataSpec.Builder().setUri(candidate)
+                        .setPosition(position).setLength(length).build())
+                    val header = source.responseHeaders.entries
+                        .firstOrNull { it.key.equals("Content-Range", true) }?.value?.firstOrNull().orEmpty()
+                    val range = Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(header)
+                    if (source.responseCode != 206 || range == null ||
+                        range.groupValues[1].toLongOrNull() != position ||
+                        range.groupValues[2].toLongOrNull() != position + length - 1 ||
+                        range.groupValues[3].toLongOrNull() != total
+                    ) throw IOException("CDN 分段响应不正确（${source.responseCode}）")
+                    RandomAccessFile(part, "rw").use { output ->
+                        output.seek(position)
+                        var received = 0L
+                        var publishedAt = 0L
+                        while (received < length) {
+                            val read = source.read(buffer, 0, minOf(buffer.size.toLong(), length - received).toInt())
+                            // 有界请求不应提前结束；提前 EOF 视为本块失败，重试。
+                            if (read == C.RESULT_END_OF_INPUT) throw IOException("本块提前结束（${received}/${length}）")
+                            output.write(buffer, 0, read)
+                            received += read
+                            val now = System.currentTimeMillis()
+                            if (now - publishedAt >= 200) {
+                                publishedAt = now
+                                onProgress(position + received, total)
+                            }
                         }
                     }
-                    if (total > 0 && received != total) throw IOException("该集下载不完整")
-                    onProgress(received, if (total > 0) total else received)
+                    done = true
+                    break
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    failure = error
+                } finally {
+                    runCatching { source.close() }
                 }
-                return
-            } finally {
-                runCatching { source.close() }
             }
+            if (!done) {
+                throw IOException("分块下载失败（$position-${position + length - 1}/$total）：${failure?.message ?: "未知错误"}")
+            }
+            position += length
+            onProgress(position, total)
+        }
+        onProgress(total, total)
+    }
+
+    /** 流信息缺少 size 时探测一次 16 字节，从 Content-Range 读总长。 */
+    @OptIn(UnstableApi::class)
+    private fun probeTotal(factory: DefaultHttpDataSource.Factory, stream: HongguoStream): Long {
+        val source = factory.createDataSource()
+        try {
+            source.open(DataSpec.Builder().setUri(stream.url).setPosition(0).setLength(15).build())
+            val header = source.responseHeaders.entries
+                .firstOrNull { it.key.equals("Content-Range", true) }?.value?.firstOrNull().orEmpty()
+            return Regex("bytes \\d+-\\d+/(\\d+)").matchEntire(header)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        } finally {
+            runCatching { source.close() }
         }
     }
 
