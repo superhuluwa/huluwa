@@ -95,6 +95,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     episodePreloads: List<HongguoEpisodePreload>,
     title: String, intro: String, seriesCover: String, episodes: List<HongguoEpisode>, currentEpisode: HongguoEpisode?,
     episodeCount: Int, loading: Boolean, error: String?, favorite: Boolean,
+    offlineRunning: Boolean, playingOffline: Boolean, onOfflineDownload: () -> Unit,
     onBack: () -> Unit, onShowEpisodes: () -> Unit, onSelectEpisode: (HongguoEpisode) -> Unit,
     onToggleFavorite: () -> Unit,
     onFirstFrame: () -> Unit, onProgress: (Long, Long, Boolean) -> Unit, onEnded: () -> Unit,
@@ -385,8 +386,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(leavePlayer) { Icon(Icons.Outlined.ChevronLeft, if (fullscreen) "退出全屏" else "返回", Modifier.size(28.dp), tint = Color.White) }
-                Text(episodeLabel, Modifier.weight(1f), color = Color.White, fontSize = 18.sp, lineHeight = 26.sp,
-                    fontWeight = FontWeight.Medium, maxLines = 1)
+                Text(if (playingOffline) "$episodeLabel · 离线" else episodeLabel, Modifier.weight(1f), color = Color.White,
+                    fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                 Box {
                     TextButton({ showSpeed = true }, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
                         Icon(Icons.Outlined.AvTimer, null, Modifier.size(22.dp))
@@ -404,6 +405,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                     IconButton({ showMore = true }) { Icon(Icons.Outlined.MoreVert, "更多播放操作", tint = Color.White) }
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }, containerColor = HongguoPlayerSurface) {
                         DropdownMenuItem(text = { Text("选集", color = Color.White) }, onClick = { showMore = false; onShowEpisodes() })
+                        DropdownMenuItem(text = { Text(if (offlineRunning) "离线下载中…" else "离线下载全剧", color = Color.White) },
+                            enabled = !offlineRunning, onClick = { showMore = false; onOfflineDownload() })
                         DropdownMenuItem(text = { Text("重新加载", color = Color.White) }, onClick = { showMore = false; onRetry() })
                     }
                 }

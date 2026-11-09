@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.preload.DefaultPreloadManager
+import androidx.media3.datasource.DefaultDataSource
 import com.huluwa.android.data.HongguoPlayback
 import com.huluwa.android.data.HongguoStream
 
@@ -18,7 +19,7 @@ import com.huluwa.android.data.HongguoStream
  * 切集直接将同一媒体源交给播放器，不重复下载，也不为后台分集占用解码器。
  */
 @UnstableApi
-internal class HongguoPlaybackSession(context: Context) {
+internal class HongguoPlaybackSession(private val context: Context) {
     private data class Source(
         val preload: HongguoEpisodePreload,
         val page: Int,
@@ -106,7 +107,10 @@ internal class HongguoPlaybackSession(context: Context) {
         remove(preload.episodeId)
         val item = MediaItem.Builder().setMediaId(preload.episodeId)
             .setUri(preload.stream.url).setMimeType(MimeTypes.VIDEO_MP4).build()
-        val factory = HongguoDataSourceFactory(preload.stream, preload.playback.userAgent)
+        // 离线分集是已解密的本地明文 MP4，直接读文件；在线分集仍走 CDN 解密数据源。
+        val factory = if (preload.stream.url.startsWith("file:"))
+            DefaultDataSource.Factory(context)
+        else HongguoDataSourceFactory(preload.stream, preload.playback.userAgent)
         val mediaSource = DefaultMediaSourceFactory(factory).createMediaSource(item)
         return Source(preload, page, item).also {
             sources[preload.episodeId] = it
