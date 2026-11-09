@@ -54,6 +54,16 @@ fun StarwarLobbyPixel(
     val planetTop = fnTop + 38f
 
     StarwarPixelCanvas(Modifier.fillMaxSize(), onTap = { tx, ty ->
+        // 底部软键条：加载失败时左软键变成「重试」
+        if (ty > StarwarLayout.BODY_BOTTOM) {
+            if (ui.error != null && tx < StarwarPx.WIDTH / 2f) vm.loadLobby()
+            return@StarwarPixelCanvas
+        }
+        // 常驻错误条：点任意位置重试
+        if (ui.error != null && ty >= StarwarLayout.BODY_BOTTOM - 34f) {
+            vm.loadLobby()
+            return@StarwarPixelCanvas
+        }
         if (ty < StarwarLayout.BODY_TOP || ty > StarwarLayout.BODY_BOTTOM) return@StarwarPixelCanvas
         when {
             // 个人信息块 → 我的状态
@@ -173,6 +183,25 @@ fun StarwarLobbyPixel(
                 if (ui.activityFree) StarwarPx.Gold else StarwarPx.Muted)
         }
 
-        pixelSoftKeys(font, left = "选择", right = "返回")
+        // ---------------------------------------------------------- 加载失败
+        // snackbar 几秒就消失，接口出问题时用户看不到原因，这里常驻一条错误条。
+        // 点它重试（坐标命中在 onTap 里处理）。
+        if (ui.error != null) {
+            val eY = StarwarLayout.BODY_BOTTOM - 34f
+            fill(4f, eY, 232f, 30f, Color(0xFFFFF3F0))
+            pixelBorder(4f, eY, 232f, 30f, Color(0xFFE5A79E))
+            pixelText(font, "加载失败", 8f, eY + 2f, StarwarPx.Danger)
+            // 错误信息按 14 点阵宽度截到一行
+            var w = 0; var i = 0
+            while (i < ui.error!!.length) {
+                val ch = ui.error!![i]
+                w += if (font.isWide(ch)) 14 else 7
+                if (w > 210) break
+                i++
+            }
+            pixelText(font, ui.error!!.take(i), 8f, eY + 16f, StarwarPx.Muted)
+        }
+
+        pixelSoftKeys(font, left = if (ui.error != null) "重试" else "选择", right = "返回")
     }
 }

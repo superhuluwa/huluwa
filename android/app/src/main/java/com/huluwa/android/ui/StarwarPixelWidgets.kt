@@ -232,15 +232,19 @@ fun StarwarPixelConfirm(
     }
 }
 
-/** 全屏加载提示 */
+/**
+ * 加载提示：原版只在标题栏下方压一条细提示带，不遮住已渲染的界面。
+ *
+ * <p>这里刻意不做全屏遮罩——大厅内容本来就能先画出来，用一层不透明蒙版盖住
+ * 会让接口慢的时候看着像「卡死」。改成顶部条 + 底部状态行，界面照常可操作。</p>
+ */
 @Composable
 fun StarwarLoadingPixel(font: StarwarFont, text: String) {
-    Box(Modifier.fillMaxSize()) {
-        StarwarPixelCanvas(Modifier.fillMaxSize()) {
-            drawRect(Color(0x66000000))
-            fill(20f, 140f, 200f, 36f, StarwarPx.Paper)
-            pixelBorder(20f, 140f, 200f, 36f, Color(0xFF5A6B73))
-            pixelText(font, text, 120f, 152f, StarwarPx.Text, align = 1)
-        }
+    StarwarPixelCanvas(Modifier.fillMaxSize()) {
+        // 标题栏下方的一条浅色提示带（不覆盖内容区）
+        val bandTop = StarwarLayout.BODY_TOP
+        fill(0f, bandTop, StarwarPx.WIDTH, 16f, Color(0xE6FFFFFF))
+        fill(0f, bandTop + 15f, StarwarPx.WIDTH, 1f, Color(0xFFBFC8CC))
+        pixelText(font, text, StarwarPx.WIDTH / 2f, bandTop + 1f, StarwarPx.Muted, align = 1)
     }
 }
