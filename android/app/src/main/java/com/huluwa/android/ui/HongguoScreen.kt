@@ -274,6 +274,7 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     ) {
         Column(Modifier.widthIn(min = 58.dp).padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            val failedVisible = !running && (failed > 0 || (done == 0 && !status?.message.isNullOrEmpty()))
             if (running) {
                 val progress = status?.takeIf { it.totalBytes > 0 }
                     ?.let { (it.bytes.toDouble() / it.totalBytes).toFloat().coerceIn(0f, 1f) }
@@ -281,9 +282,9 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                 else CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 Text("${status?.done ?: 0}/${status?.selectedIds?.size ?: 0}", style = MaterialTheme.typography.labelSmall,
                     color = HuluwaColors.Ink, maxLines = 1)
-            } else if (done > 0 && failed > 0) {
-                Icon(Icons.Outlined.ErrorOutline, "部分集离线失败", Modifier.size(20.dp), tint = Color(0xFFB3543C))
-                Text("离线${done}集", style = MaterialTheme.typography.labelSmall,
+            } else if (failedVisible) {
+                Icon(Icons.Outlined.ErrorOutline, "离线失败", Modifier.size(20.dp), tint = Color(0xFFB3543C))
+                Text(if (done > 0) "离线${done}集" else "离线失败", style = MaterialTheme.typography.labelSmall,
                     color = HuluwaColors.Ink, maxLines = 1)
             } else if (done > 0) {
                 Icon(Icons.Outlined.DownloadDone, "已离线", Modifier.size(20.dp), tint = Color(0xFF3D8B4F))
@@ -392,7 +393,10 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
 @Composable private fun HongguoOfflineManagerScreen(ui: HongguoState, vm: HongguoViewModel, onBack: () -> Unit) {
     var pendingRemove by remember { mutableStateOf<String?>(null) }
     val downloading = ui.offline.values.filter { it.running }.sortedBy { it.title }
-    val downloaded = ui.offline.values.filter { !it.running && it.done > 0 }.sortedBy { it.title }
+    // 有过下载行为但未在下载中的剧都进入「已下载」区：包括全部失败或空间不足等场景，让失败原因可见。
+    val downloaded = ui.offline.values
+        .filter { !it.running && (it.done > 0 || it.failed > 0 || it.message.isNotBlank()) }
+        .sortedBy { it.title }
     Scaffold(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         containerColor = HuluwaColors.Paper, contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -484,7 +488,7 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                 contentScale = ContentScale.Crop)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(status.title.ifBlank { "短剧" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("已离线${status.done}集" +
+                Text((if (status.done > 0) "已离线${status.done}集" else "尚未离线成功") +
                     (if (status.size > 0) " · ${hongguoOfflineSizeText(status.size)}" else ""),
                     style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
                 if (status.failed > 0 || status.message.isNotBlank()) Text(status.message.ifBlank { "${status.failed} 集下载失败，点击补选重试" },

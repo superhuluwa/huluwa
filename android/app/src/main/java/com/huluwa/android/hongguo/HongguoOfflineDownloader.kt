@@ -119,10 +119,6 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
         val job = checkNotNull(kotlin.coroutines.coroutineContext[Job])
         var failed = 0
         try {
-            if (store.root.usableSpace < 200L * 1024 * 1024) {
-                publish(seriesId) { it.copy(message = "存储空间不足，无法离线下载") }
-                return
-            }
             while (true) {
                 // 取集与注销在同一把锁里完成：队列跑空前 start 追加的新集不会被落下。
                 val next = synchronized(this) {
@@ -155,6 +151,10 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 val playback = repository.playback(episodeId)
                 val stream = playback.streams.filter { it.supported }.maxByOrNull { it.height }
                     ?: throw IOException("该集暂未提供可离线的清晰度")
+                // 按本集实际大小检查剩余空间，不再使用统一门槛，避免只下一集也被拦下。
+                if (stream.size > 0 && store.root.usableSpace < stream.size + 50L * 1024 * 1024) {
+                    throw IOException("存储空间不足，无法离线该集")
+                }
                 val target = store.episodeFile(seriesId, number, episodeId)
                 target.parentFile?.mkdirs()
                 val part = store.partFile(target)
