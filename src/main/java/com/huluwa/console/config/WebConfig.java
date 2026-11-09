@@ -2,7 +2,6 @@ package com.huluwa.console.config;
 
 import com.huluwa.console.security.AuthInterceptor;
 import com.huluwa.console.security.BookSourceAuthInterceptor;
-import com.huluwa.console.security.TvTokenAuthInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -12,13 +11,10 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
     private final BookSourceAuthInterceptor bookSourceAuthInterceptor;
-    private final TvTokenAuthInterceptor tvTokenAuthInterceptor;
 
-    public WebConfig(AuthInterceptor authInterceptor, BookSourceAuthInterceptor bookSourceAuthInterceptor,
-                     TvTokenAuthInterceptor tvTokenAuthInterceptor) {
+    public WebConfig(AuthInterceptor authInterceptor, BookSourceAuthInterceptor bookSourceAuthInterceptor) {
         this.authInterceptor = authInterceptor;
         this.bookSourceAuthInterceptor = bookSourceAuthInterceptor;
-        this.tvTokenAuthInterceptor = tvTokenAuthInterceptor;
     }
 
     @Override
@@ -27,8 +23,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/**")
                 // 书源接口改用独立的只读令牌鉴权，见下面的拦截器。
                 .excludePathPatterns("/api/sources/**")
-                // 红果电视接口改用内置访问密钥鉴权，见文末。
-                .excludePathPatterns("/api/tv/**")
                 // 鉴权本身、初始化探测、静态资源放行
                 .excludePathPatterns(
                         "/api/auth/login",
@@ -44,7 +38,5 @@ public class WebConfig implements WebMvcConfigurer {
                 );
         // 书源接口只接受长期只读令牌；令牌管理接口不在该路径下，仍走登录鉴权。
         registry.addInterceptor(bookSourceAuthInterceptor).addPathPatterns("/api/sources/**");
-        // 电视接口只接受内置访问密钥，不使用登录令牌。
-        registry.addInterceptor(tvTokenAuthInterceptor).addPathPatterns("/api/tv/**");
     }
 }

@@ -38,9 +38,6 @@ spring:
 
 huluwa:
   data-dir: ./data
-  # 红果 TV 私人自用客户端的只读访问密钥；需与 APK 内置值一致。
-  tv:
-    access-key: ${HULUWA_TV_ACCESS_KEY:hongguotv-private-2026}
   terminalbuddy-public:
     # 只开放 TerminalBuddy 构建、日志和下载，不签发后台登录令牌。
     enabled: ${TERMINALBUDDY_PUBLIC_ENABLED:true}
