@@ -30,6 +30,12 @@ class HongguoOfflineStore(context: Context) {
 
     fun partFile(target: File) = File(target.parentFile, target.name + ".part")
 
+    /** 分区可用空间：目录不存在时 statvfs 会失败返回 0，先确保目录存在再取值。 */
+    fun availableBytes(): Long {
+        if (!root.exists()) root.mkdirs()
+        return root.usableSpace
+    }
+
     /** 读取全部档案；文件已丢失的分集记录被过滤，避免出现播放失败的幽灵离线。 */
     @Synchronized fun readAll(): Map<String, HongguoOfflineSeries> {
         val saved = runCatching {

@@ -157,9 +157,12 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 val playback = repository.playback(episodeId)
                 val stream = playback.streams.filter { it.supported }.maxByOrNull { it.height }
                     ?: throw IOException("该集暂未提供可离线的清晰度")
-                // 按本集实际大小检查剩余空间，不再使用统一门槛，避免只下一集也被拦下。
-                if (stream.size > 0 && store.root.usableSpace < stream.size + 50L * 1024 * 1024) {
-                    throw IOException("存储空间不足，无法离线该集")
+                // 按本集落盘峰值检查剩余空间：加密集解密前 .part 与 .dec 并存，需要双倍空间；
+                // 目录首次下载前尚不存在，usableSpace 会误报 0，availableBytes 内部会先建目录。
+                val needed = stream.size * (if (stream.encrypted) 2L else 1L) + 50L * 1024 * 1024
+                val available = store.availableBytes()
+                if (stream.size > 0 && available < needed) {
+                    throw IOException("存储空间不足（可用${available / 1024 / 1024}MB，需${needed / 1024 / 1024}MB）")
                 }
                 val target = store.episodeFile(seriesId, number, episodeId)
                 target.parentFile?.mkdirs()
