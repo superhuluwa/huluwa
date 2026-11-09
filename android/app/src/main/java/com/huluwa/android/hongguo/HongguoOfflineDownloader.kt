@@ -322,6 +322,8 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
             if (moovLength > 16L * 1024 * 1024) throw IOException("视频媒体索引超出支持范围")
             val moov = ByteArray(moovLength.toInt()).also { input.seek(moovOffset); input.readFully(it) }
             val layout = CencMp4.parse(moov, moovOffset, total, stream.kid)
+            // 读取索引后游标停在 moov 末尾；解密按整份文件的绝对偏移处理，必须从头读取。
+            input.seek(0L)
             val clear = File(target.parentFile, target.name + ".dec")
             try {
                 RandomAccessFile(clear, "rw").use { output ->
