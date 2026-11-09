@@ -42,6 +42,7 @@ services:
       - debian-build-data:/build-data
       - debian-workspace:/workspace
       - android-signing:/signing:ro
+      - android-credentials:/credentials:ro
 
 secrets:
   android-builder-config:
@@ -55,3 +56,6 @@ volumes:
   android-signing:
     external: true
     name: hongguotv-android-signing
+  android-credentials:
+    external: true
+    name: huluwa-android-credentials

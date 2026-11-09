@@ -1,6 +1,6 @@
 # 红果TV App 打包服务
 
-红果TV 原生源码来自 `https://github.com/N3urda/hongguoTV.git` 的 `main` 分支，使用仓库中的 `kotlin-tv/` 工程，包名为 `com.hongguotv.nativeapp`。构建服务以独立 Docker 容器部署，与葫芦娃、TerminalBuddy 共用 Debian 打包机（192.168.3.83），并共用主服务的串行构建队列。
+红果TV 原生源码来自自己的 Gitee 仓库 `https://gitee.com/wangjing71/hongguoTV.git` 的 `main` 分支（上游 `N3urda/hongguoTV` 仅作二次开发基础，不再作为构建源），使用仓库中的 `kotlin-tv/` 工程，包名为 `com.hongguotv.nativeapp`。构建服务以独立 Docker 容器部署，与葫芦娃、TerminalBuddy 共用 Debian 打包机（192.168.3.83），并共用主服务的串行构建队列。
 
 ## 管理入口
 
@@ -71,7 +71,7 @@ docker compose -f android-builder/compose.hongguotv.yaml stop
 ```json
 {
   "apiPath": "/api/hongguotv/android",
-  "repository": "https://github.com/N3urda/hongguoTV.git",
+  "repository": "https://gitee.com/wangjing71/hongguoTV.git",
   "branch": "main",
   "packageName": "com.hongguotv.nativeapp",
   "artifactPrefix": "hongguotv",
@@ -83,13 +83,14 @@ docker compose -f android-builder/compose.hongguotv.yaml stop
 
 `gradleSha256` 是 Gradle 8.14.3 官方发行包的 SHA-256，用于校验下载和已有缓存；红果TV 源码未在 Wrapper 中固定该值。节点每次编译前会把 `distributionUrl` 改写为已验证的本地缓存，不再走网络下载器。
 
-红果TV 源码仓库为公开仓库，不需要 Gitee 凭据卷。路径设置与现有 Debian 远程节点一致：数据 `/build-data`、源码 `/workspace`、签名 `/signing`、JDK `/opt/java/openjdk`、SDK `/opt/android-sdk`。
+红果TV 源码仓库为**私有 Gitee 仓库**，因此容器必须挂载 Gitee 凭据卷 `huluwa-android-credentials` 到 `/credentials:ro`（与葫芦娃节点共用同一份 `git-credentials.json`），否则 `git fetch` 会因无法认证而失败。路径设置与现有 Debian 远程节点一致：数据 `/build-data`、源码 `/workspace`、签名 `/signing`、JDK `/opt/java/openjdk`、SDK `/opt/android-sdk`。
 
 | Docker 卷 | 用途 |
 | --- | --- |
 | `hongguotv-android-build-data` | 节点任务、日志和待回传 APK |
 | `hongguotv-android-workspace` | 红果TV Git 源码、Gradle 缓存与自动下载的 JDK 17 |
 | `hongguotv-android-signing` | 红果TV Release 密钥和配置，只读 |
+| `huluwa-android-credentials` | Gitee 账号凭据，只读（与葫芦娃节点共用） |
 
 默认资源上限为 16 CPU、12GB 容器内存、8 个 Gradle 工作线程、6GB JVM 堆。容器随 Docker 自动启动，主动连接主服务，不开放端口、不挂载 Docker socket。三款 App 的编译串行执行，避免内存争抢；重建容器保留卷，勿执行 `down -v`。
 
