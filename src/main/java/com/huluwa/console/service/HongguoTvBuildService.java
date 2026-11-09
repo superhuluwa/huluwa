@@ -34,7 +34,7 @@ public class HongguoTvBuildService {
         // 沿用 TerminalBuddy 的版本规则：从 1001 / 1.0.1 起独立递增。
         builds = new AndroidBuildService(new JdbcTemplate(source),
                 new TransactionTemplate(new DataSourceTransactionManager(source)), json, config,
-                "com.hongguotv.nativeapp", "hongguotv", 1000, false);
+                "com.huluwa.nativeapp", "hongguotv", 1000, false);
     }
 
     public AndroidBuildService builds() { return builds; }

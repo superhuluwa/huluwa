@@ -97,3 +97,18 @@ docker compose -f android-builder/compose.hongguotv.yaml stop
 ## 后端与 App 更新
 
 新增接口需要部署包含本次改动的葫芦娃后端，系统会话入口需要安装包含本次改动的葫芦娃安卓 App。后端专用 `Dockerfile.backend` 从当前运行镜像复制已归档网页资源，仅打包 Java 后端；不运行网页构建。编译和 APK 生成遵循项目的当次授权规则。
+
+## 免登录在线更新接口
+
+主服务新增 `HongguoTvPublicBuildController`（`/api/public/hongguotv/android`），供电视端免登录查询最新正式版与下载 APK：
+
+| 用途 | 请求 |
+|---|---|
+| 服务自述 | `GET /api/public/hongguotv/android` |
+| 最新正式版 | `GET /api/public/hongguotv/android/releases/latest` |
+| 下载票据（10 分钟） | `POST /api/public/hongguotv/android/tasks/{id}/download-ticket`，body `{"logFile": false}` |
+| 下载 APK | `GET /api/public/hongguotv/android/downloads/{ticket}` |
+
+只开放上述两条链路，不开放编译、任务列表、日志和节点管理。票据用 `resolve(ticket, builds)` 绑定到红果 TV 自己的项目，兑换不到其他 App 的产物。开关为环境变量 `HONGGUOTV_PUBLIC_ENABLED`（默认 `true`，改 `false` 并重启主服务即关闭）。
+
+电视端默认访问 `http://192.168.3.77:8000`。改动包名后，节点配置文件里的 `packageName`（`configure-hongguotv.py` 的默认值，部署后落盘在 `config.json`）必须与 `kotlin-tv/app/build.gradle.kts` 的 `applicationId` 一致，否则节点会因「APK 包名不符合构建参数」拒绝归档。`agent.py` 会用 `config.json` 覆盖镜像内的 `HULUWA_ANDROID_PACKAGE`，所以**改 Dockerfile 不足以生效**：已部署节点要同时修改 `config.json` 并重建容器，或者重新跑一次 `configure-hongguotv.py`。

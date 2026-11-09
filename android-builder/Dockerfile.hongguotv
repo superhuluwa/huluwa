@@ -7,7 +7,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY agent.py worker.py process_tree.py android.init.gradle hongguotv.init.gradle git-askpass.py /opt/builder/
 RUN sed -i 's/\r$//' /opt/builder/*.py && chmod 755 /opt/builder/git-askpass.py
-ENV HULUWA_ANDROID_PACKAGE=com.hongguotv.nativeapp \
+ENV HULUWA_ANDROID_PACKAGE=com.huluwa.nativeapp \
     HULUWA_ANDROID_ARTIFACT_PREFIX=hongguotv \
     HULUWA_ANDROID_APP_DIRECTORY=kotlin-tv \
     HULUWA_ANDROID_APP_NAME=hongguotv

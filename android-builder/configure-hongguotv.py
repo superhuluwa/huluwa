@@ -44,7 +44,7 @@ def main():
         'signingDirectory': '/signing',
         'javaHome': '/opt/java/openjdk', 'androidHome': '/opt/android-sdk',
         'repository': 'https://github.com/N3urda/hongguoTV.git', 'branch': 'main',
-        'packageName': 'com.hongguotv.nativeapp', 'artifactPrefix': 'hongguotv',
+        'packageName': 'com.huluwa.nativeapp', 'artifactPrefix': 'hongguotv',
         # 红果TV 原生工程位于仓库的 kotlin-tv 子目录，签名与版本使用 HONGGUOTV_* 变量。
         'appDirectory': 'kotlin-tv', 'appName': 'hongguotv',
         # 红果TV 源码的 Gradle Wrapper 未固定校验值，由节点补上官方发行包摘要。
