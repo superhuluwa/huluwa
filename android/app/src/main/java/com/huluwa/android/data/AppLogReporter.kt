@@ -1,6 +1,7 @@
 package com.huluwa.android.data
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.*
 
 /**
  * 把 AppLog 中 W/E 级别的待上报日志批量送到服务端 app_error_log 表，
