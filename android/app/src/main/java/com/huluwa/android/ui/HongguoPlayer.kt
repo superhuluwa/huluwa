@@ -121,7 +121,14 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     var showSpeed by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
     var introExpanded by remember(title) { mutableStateOf(false) }
-    var controlsVisible by remember(request) { mutableStateOf(true) }
+    // 记住用户是否把控制栏藏起来了。自动连播会递增 playRequest，若直接在 remember(request)
+    // 里初始化为 true，新一集一开播进度条就会重新冒出来；这里按上一集的隐藏偏好初始化。
+    var controlsHidByUser by remember { mutableStateOf(false) }
+    var controlsVisible by remember(request) { mutableStateOf(!controlsHidByUser) }
+    val setControlsVisible: (Boolean) -> Unit = { visible ->
+        controlsVisible = visible
+        controlsHidByUser = !visible
+    }
     var centerPlayVisible by remember(request) { mutableStateOf(false) }
     var interaction by remember(request) { mutableIntStateOf(0) }
     var playing by remember(request) { mutableStateOf(false) }
@@ -164,7 +171,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 if (syncing || latest == null) return@collectLatest
                 val episode = pages.getOrNull(page) ?: return@collectLatest
                 if (episode.id != latest) {
-                    controlsVisible = true
+                    setControlsVisible(true)
                     selectEpisode(episode)
                 }
             }
@@ -244,7 +251,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     val seek: (Float) -> Unit = {
         val fraction = it.coerceIn(0f, 1f)
         seekFraction = fraction
-        controlsVisible = true
+        setControlsVisible(true)
         interaction++
         if (duration > 0 && session.isActive(request)) {
             val now = SystemClock.uptimeMillis()
@@ -275,7 +282,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
             }
         }
         centerPlayVisible = pausedByUser
-        controlsVisible = true
+        setControlsVisible(true)
         interaction++
     }
     val leavePlayer: () -> Unit = { if (fullscreen) fullscreen = false else onBack() }
@@ -349,7 +356,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     LaunchedEffect(player, controlsVisible, playing, interaction, seekFraction, showSpeed, showMore) {
         if (controlsVisible && playing && seekFraction == null && !showSpeed && !showMore) {
             delay(3000)
-            controlsVisible = false
+            setControlsVisible(false)
         }
     }
 
@@ -374,14 +381,14 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 favorite = favorite,
                 onTap = {
                     if (fullscreen) {
-                        controlsVisible = !controlsVisible
+                        setControlsVisible(!controlsVisible)
                         interaction++
                     } else togglePlayback()
                 },
                 onTogglePlayback = togglePlayback, onSeek = seek, onSeekFinished = finishSeek,
                 onShowEpisodes = onShowEpisodes, onToggleIntro = { introExpanded = !introExpanded },
                 onToggleFavorite = onToggleFavorite,
-                onFullscreen = { fullscreen = true; controlsVisible = true; interaction++ }, onRetry = onRetry,
+                onFullscreen = { fullscreen = true; setControlsVisible(true); interaction++ }, onRetry = onRetry,
             )
         }
 
