@@ -476,18 +476,36 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(status.cover, status.title, Modifier.width(56.dp).height(76.dp).clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(status.title.ifBlank { "短剧" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (status.running) {
-                    val fraction = if (status.totalBytes > 0) (status.bytes.toDouble() / status.totalBytes).toFloat().coerceIn(0f, 1f) else null
-                    Text(if (status.currentNumber > 0 && fraction != null) "第${status.currentNumber}集 · ${(fraction * 100).toInt()}%" else "准备中…",
-                        style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
-                    if (fraction != null) LinearProgressIndicator({ fraction }, Modifier.fillMaxWidth())
-                    else LinearProgressIndicator(Modifier.fillMaxWidth())
-                } else {
-                    Text("下载未完成", style = MaterialTheme.typography.labelMedium, color = HuluwaColors.Muted)
+                // 总进度：已完成集数 / 任务总集数，始终以集为单位，与单集大小无关。
+                val target = maxOf(status.target, status.selectedIds.size, status.done)
+                val totalFraction = if (target > 0) (status.done.toFloat() / target).coerceIn(0f, 1f) else 0f
+                HongguoOfflineProgressRow(
+                    label = "总进度",
+                    detail = "已完成 ${status.done}/$target 集",
+                    fraction = totalFraction,
+                    accent = HuluwaColors.Pine,
+                )
+                // 当前集的字节进度：只在下载中展示，没有总字节时退化为不确定进度条。
+                val currentFraction = when {
+                    !status.running -> 0f
+                    status.totalBytes > 0 -> (status.bytes.toDouble() / status.totalBytes).toFloat().coerceIn(0f, 1f)
+                    else -> null
                 }
-                Text("已缓存 ${status.done} 集" +
+                HongguoOfflineProgressRow(
+                    label = "当前集",
+                    detail = when {
+                        !status.running -> "未在下载"
+                        status.currentNumber <= 0 -> "准备中…"
+                        status.totalBytes > 0 ->
+                            "第${status.currentNumber}集 · ${hongguoOfflineSizeText(status.bytes)}/${hongguoOfflineSizeText(status.totalBytes)}"
+                        else -> "第${status.currentNumber}集 · 下载中…"
+                    },
+                    fraction = currentFraction,
+                    accent = Color(0xFFE44B40),
+                )
+                Text("已缓存 ${status.done} 集" + (if (status.size > 0) " · ${hongguoOfflineSizeText(status.size)}" else "") +
                     (if (status.failed > 0) " · ${status.failed} 集失败" else ""),
                     style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted)
                 if (status.message.isNotBlank()) Text(status.message, style = MaterialTheme.typography.labelSmall,
@@ -498,6 +516,33 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                 TextButton(onPick) { Text("重试") }
                 IconButton(onRemove) { Icon(Icons.Outlined.DeleteOutline, "删除离线", tint = HuluwaColors.Muted) }
             }
+        }
+    }
+}
+
+/** 单条进度：标题与百分比同行，下方为圆角细进度条；fraction 为空时画不确定进度。 */
+@Composable private fun HongguoOfflineProgressRow(
+    label: String, detail: String, fraction: Float?, accent: Color,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium, color = HuluwaColors.Ink)
+            Spacer(Modifier.width(6.dp))
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = HuluwaColors.Muted,
+                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (fraction != null) {
+                Spacer(Modifier.width(6.dp))
+                Text("${(fraction * 100).toInt()}%", style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold, color = accent, maxLines = 1)
+            }
+        }
+        if (fraction != null) {
+            LinearProgressIndicator({ fraction }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = accent, trackColor = accent.copy(alpha = .15f))
+        } else {
+            LinearProgressIndicator(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = accent, trackColor = accent.copy(alpha = .15f))
         }
     }
 }

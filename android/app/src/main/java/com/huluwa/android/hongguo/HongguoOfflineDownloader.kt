@@ -27,7 +27,10 @@ import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** 收藏剧的离线状态；episodeIds 是已落盘分集，selectedIds 是已选目标（已落盘 + 待下载）。 */
+/**
+ * 收藏剧的离线状态；episodeIds 是已落盘分集，selectedIds 是已选目标（已落盘 + 待下载）。
+ * target 是本次下载任务期望的总集数（已落盘 ∪ 待下载 ∪ 本次选择），用来算「已完成/总集数」的总进度。
+ */
 data class HongguoOfflineStatus(
     val seriesId: String, val title: String, val cover: String,
     val done: Int, val failed: Int, val running: Boolean,
@@ -35,6 +38,7 @@ data class HongguoOfflineStatus(
     val size: Long, val message: String,
     val episodeIds: Set<String>, val selectedIds: Set<String>,
     val episodes: List<HongguoOfflineEpisode> = emptyList(),
+    val target: Int = 0,
 )
 
 /**
@@ -44,12 +48,13 @@ data class HongguoOfflineStatus(
  * 下满后在本地解密为可直连播放的 MP4；spade 与内容密钥不写入离线索引或状态。
  */
 internal class HongguoOfflineDownloader(context: Context, private val repository: HongguoRepository) {
-    /** 单剧下载账本：recorded 已落盘、pending 待下载、numbers 为集号。 */
+    /** 单剧下载账本：recorded 已落盘、pending 待下载、numbers 为集号；target 为任务承诺的总集数。 */
     private class Ledger(
         var title: String, var cover: String,
         val recorded: LinkedHashMap<String, HongguoOfflineEpisode> = LinkedHashMap(),
         val pending: LinkedHashSet<String> = LinkedHashSet(),
         val numbers: MutableMap<String, Int> = mutableMapOf(),
+        var target: Int = 0,
     ) {
         fun poll(): Pair<String, Int>? {
             val id = pending.firstOrNull() ?: return null
@@ -63,7 +68,7 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
     private val jobs = mutableMapOf<String, Job>()
     private val ledgers: MutableMap<String, Ledger> = mutableMapOf<String, Ledger>().also { map ->
         store.readAll().forEach { (id, saved) ->
-            val ledger = Ledger(saved.title, saved.cover)
+            val ledger = Ledger(saved.title, saved.cover, target = maxOf(saved.total, saved.episodes.size))
             saved.episodes.forEach { entry ->
                 ledger.recorded[entry.episodeId] = entry
                 ledger.numbers[entry.episodeId] = entry.number
@@ -91,6 +96,8 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 ledger.numbers[episodeId] = number
                 if (!ledger.recorded.containsKey(episodeId)) ledger.pending.add(episodeId)
             }
+            // 本次选择就是用户期望的完整目标，目标集数取「已落盘 + 新选择」，保证不小于已完成数。
+            ledger.target = ledger.recorded.keys.union(selection.map { it.first }).size
             publishLocked(seriesId)
             // 只有该剧没有注册中的任务才启动新任务；任务跑空时会在锁内注销自己。
             ledger.pending.isNotEmpty() && !jobs.containsKey(seriesId)
@@ -356,8 +363,9 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
             val ledger = ledgers.getOrPut(seriesId) { Ledger("", "") }
             ledger.recorded[episodeId] = entry
             ledger.numbers[episodeId] = number
-            val total = ledger.recorded.size + ledger.pending.size
-            store.write(seriesId, HongguoOfflineSeries(ledger.title, ledger.cover, total,
+            // 目标集数至少等于已完成集数，避免补选前重装等场景下总进度超过 100%。
+            ledger.target = maxOf(ledger.target, ledger.recorded.size)
+            store.write(seriesId, HongguoOfflineSeries(ledger.title, ledger.cover, ledger.target,
                 ledger.recorded.values.sortedBy { it.number }))
         }
     }
@@ -375,6 +383,7 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 size = ledger.recorded.values.sumOf { it.size },
                 episodeIds = done, selectedIds = done + ledger.pending,
                 episodes = ledger.recorded.values.sortedBy { it.number },
+                target = maxOf(ledger.target, done.size),
             )))
         }
     }
@@ -384,9 +393,11 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
 
     private fun buildStatuses(): Map<String, HongguoOfflineStatus> = ledgers.mapValues { (id, ledger) ->
         val done = ledger.recorded.keys.toSet()
+        // 重新启动应用后恢复的目标集数取档案里的 total，旧档案没有该字段时退化为已完成集数。
+        val target = maxOf(ledger.target, done.size)
         HongguoOfflineStatus(id, ledger.title, ledger.cover, done.size, 0, false, 0, 0, 0,
             ledger.recorded.values.sumOf { it.size }, "", done, done,
-            episodes = ledger.recorded.values.sortedBy { it.number })
+            episodes = ledger.recorded.values.sortedBy { it.number }, target = target)
     }
 }
 
