@@ -144,6 +144,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     val selectEpisode by rememberUpdatedState(onSelectEpisode)
     var syncingPage by remember { mutableStateOf(false) }
     val episodeLabel = currentEpisode?.number?.let { number -> "第${number}集" } ?: "选择分集"
+    val headerTitle = if (fullscreen) "$title · $episodeLabel" else episodeLabel
 
     LaunchedEffect(currentEpisodeId, pages) {
         val target = pages.indexOfFirst { it.id == currentEpisodeId }
@@ -358,7 +359,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
         VerticalPager(
             state = pager,
             modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = !fullscreen && seekFraction == null,
+            userScrollEnabled = seekFraction == null,
             beyondViewportPageCount = 1,
             key = { pages[it].id },
         ) { page ->
@@ -368,10 +369,15 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 seriesTitle = title, seriesIntro = intro, seriesCover = seriesCover, fullscreen = fullscreen,
                 player = player.takeIf { playback != null && stream != null }, loading = showBuffering,
                 firstFrameRendered = firstFrameSent, error = error, position = position, duration = duration,
-                progress = progress, centerPlayVisible = centerPlayVisible,
+                progress = progress, centerPlayVisible = centerPlayVisible && !fullscreen,
                 portraitVideo = portraitVideo, videoBackground = videoBackground, introExpanded = introExpanded,
                 favorite = favorite,
-                onTap = togglePlayback,
+                onTap = {
+                    if (fullscreen) {
+                        controlsVisible = !controlsVisible
+                        interaction++
+                    } else togglePlayback()
+                },
                 onTogglePlayback = togglePlayback, onSeek = seek, onSeekFinished = finishSeek,
                 onShowEpisodes = onShowEpisodes, onToggleIntro = { introExpanded = !introExpanded },
                 onToggleFavorite = onToggleFavorite,
@@ -386,8 +392,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(leavePlayer) { Icon(Icons.Outlined.ChevronLeft, if (fullscreen) "退出全屏" else "返回", Modifier.size(28.dp), tint = Color.White) }
-                Text(if (playingOffline) "$episodeLabel · 离线" else episodeLabel, Modifier.weight(1f), color = Color.White,
-                    fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Text(if (playingOffline) "$headerTitle · 离线" else headerTitle, Modifier.weight(1f), color = Color.White,
+                    fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Box {
                     TextButton({ showSpeed = true }, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) {
                         Icon(Icons.Outlined.AvTimer, null, Modifier.size(22.dp))
@@ -447,6 +453,8 @@ private val HongguoPlayerSurface = Color(0xFF303633)
     onFullscreen: () -> Unit, onRetry: () -> Unit,
 ) {
     val isCurrent = pageEpisode.id == currentEpisodeId
+    // 横竖屏切换和切集后更新点击行为，触摸协程继续使用最新的播放请求与控件状态。
+    val latestOnTap by rememberUpdatedState(onTap)
     val episodeLabel = "第${pageEpisode.number}集"
     Column(Modifier.fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
@@ -481,7 +489,7 @@ private val HongguoPlayerSurface = Color(0xFF303633)
                             HongguoEpisodePlaceholder(seriesCover, episodeLabel, seriesTitle, dimmed = true)
                         }
                         Box(Modifier.matchParentSize().pointerInput(player) {
-                            detectTapGestures { onTap() }
+                            detectTapGestures { latestOnTap() }
                         })
                         androidx.compose.animation.AnimatedVisibility(visible = centerPlayVisible && !loading && error == null,
                             enter = fadeIn(), exit = fadeOut()) {
