@@ -1,8 +1,15 @@
 package com.huluwa.android
 
 import android.app.Application
+import android.os.Build
 import android.os.Process
 import kotlin.system.exitProcess
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import com.huluwa.android.data.*
 import com.huluwa.android.hongguo.HongguoOfflineDownloader
 
@@ -16,6 +23,8 @@ class HuluwaApplication : Application() {
     val appUpdates by lazy { AppUpdateManager(this, repository.api) }
     val terminalBuddyBuildDownloads by lazy { AndroidBuildDownloader(this, repository.api, AndroidBuildProject.TerminalBuddy) }
     val buildDownloads by lazy { AndroidBuildDownloader(this, repository.api) }
+    private val logReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val logReporter by lazy { AppLogReporter(repository.api) }
 
     override fun onCreate() {
         super.onCreate()
@@ -30,5 +39,20 @@ class HuluwaApplication : Application() {
                 exitProcess(10)
             }
         }
+        // 手机上的 W/E 日志定期批量上报服务端，远程排查失败原因不再依赖连接电脑。
+        logReportScope.launch {
+            while (isActive) {
+                delay(30_000)
+                runCatching {
+                    if (session.loggedIn) {
+                        logReporter.flush(appVersion(), "${Build.MANUFACTURER} ${Build.MODEL}", session.username)
+                    }
+                }
+            }
+        }
     }
+
+    private fun appVersion(): String = runCatching {
+        packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+    }.getOrDefault("")
 }

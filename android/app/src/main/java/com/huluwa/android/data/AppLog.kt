@@ -60,6 +60,30 @@ object AppLog {
         while (entries.size > CAPACITY) {
             entries.removeAt(0)
         }
+        // W/E 进入待上报队列，由 AppLogReporter 定期批量上报到服务端
+        if (level == "E" || level == "W") {
+            synchronized(pending) {
+                pending.add(entries.last())
+                while (pending.size > PENDING_CAPACITY) pending.removeAt(0)
+            }
+        }
+    }
+
+    /** 待上报队列（W/E 级别）容量 */
+    private const val PENDING_CAPACITY = 300
+
+    private val pending = ArrayList<Entry>()
+
+    /** 取走全部待上报条目；上报失败时用 restorePending 放回 */
+    fun drainPending(): List<Entry> = synchronized(pending) {
+        val taken = pending.toList()
+        pending.clear()
+        taken
+    }
+
+    fun restorePending(failed: List<Entry>) = synchronized(pending) {
+        failed.forEach { pending.add(it) }
+        while (pending.size > PENDING_CAPACITY) pending.removeAt(0)
     }
 
     /** 异常转一行描述：类型 + 消息，不打印完整堆栈（内存里放不下） */

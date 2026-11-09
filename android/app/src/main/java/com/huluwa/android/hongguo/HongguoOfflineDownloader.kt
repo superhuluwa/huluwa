@@ -5,6 +5,7 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import com.huluwa.android.data.AppLog
 import com.huluwa.android.data.HongguoOfflineEpisode
 import com.huluwa.android.data.HongguoOfflineSeries
 import com.huluwa.android.data.HongguoOfflineStore
@@ -117,7 +118,7 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
 
     private suspend fun run(seriesId: String) {
         val job = checkNotNull(kotlin.coroutines.coroutineContext[Job])
-        var failed = 0
+        val failures = mutableListOf<String>()
         try {
             while (true) {
                 // 取集与注销在同一把锁里完成：队列跑空前 start 追加的新集不会被落下。
@@ -127,13 +128,17 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                     pair
                 } ?: break
                 val (episodeId, number) = next
-                if (!downloadEpisode(seriesId, episodeId, number, job)) failed += 1
+                downloadEpisode(seriesId, episodeId, number, job)?.let { failures.add(it) }
                 publish(seriesId)
             }
-            publish(seriesId) { it.copy(message = if (failed > 0) "${failed} 集下载失败，可重新选择补齐" else "") }
+            publish(seriesId) {
+                it.copy(message = if (failures.isEmpty()) ""
+                else "下载失败：${failures.joinToString("；").take(120)}")
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
+            AppLog.e("红果离线", "下载任务异常终止", error)
             publish(seriesId) { it.copy(message = error.message ?: "离线下载失败，请重试") }
         } finally {
             synchronized(this) { if (jobs[seriesId] === job) jobs.remove(seriesId) }
@@ -141,11 +146,12 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
         }
     }
 
-    /** 下载并解密一集；单集失败自动重试三次（重取播放地址，绕开直链过期），仍失败返回 false。 */
+    /** 下载并解密一集；单集失败自动重试三次（重取播放地址，绕开直链过期），仍失败返回错误描述。 */
     private suspend fun downloadEpisode(
         seriesId: String, episodeId: String, number: Int, job: Job,
-    ): Boolean {
+    ): String? {
         var attempt = 0
+        var lastError = "下载失败"
         while (true) {
             try {
                 val playback = repository.playback(episodeId)
@@ -158,23 +164,29 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                 val target = store.episodeFile(seriesId, number, episodeId)
                 target.parentFile?.mkdirs()
                 val part = store.partFile(target)
+                AppLog.d("红果离线", "第${number}集开始下载（${stream.definition}，${stream.size / 1024 / 1024}MB）")
                 download(stream, playback.userAgent, part, job) { bytes, totalBytes ->
                     publish(seriesId) {
                         it.copy(bytes = bytes, totalBytes = totalBytes, currentNumber = number, message = "")
                     }
                 }
-                if (stream.encrypted) decrypt(part, target, stream, job)
-                else {
+                if (stream.encrypted) {
+                    AppLog.d("红果离线", "第${number}集下载完成，正在解密")
+                    decrypt(part, target, stream, job)
+                } else {
                     if (target.exists()) target.delete()
                     check(part.renameTo(target)) { "离线文件保存失败" }
                 }
                 record(seriesId, episodeId, number, stream, target)
+                AppLog.d("红果离线", "第${number}集离线完成")
                 publish(seriesId)
-                return true
+                return null
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (++attempt >= 3) return false
+                lastError = error.message ?: error.javaClass.simpleName
+                AppLog.e("红果离线", "第${number}集第${attempt + 1}次尝试失败", error)
+                if (++attempt >= 3) return "第${number}集：$lastError"
                 delay(1500L * attempt)
             }
         }

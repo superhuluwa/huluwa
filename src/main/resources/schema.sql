@@ -495,3 +495,19 @@ DROP TABLE IF EXISTS starwar_player;
 DROP TABLE IF EXISTS starwar_rank;
 INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
 VALUES (12, datetime('now', 'localtime'));
+
+-- v13：手机端错误日志上报（AppLog 的 W/E 级别批量上报，便于远程定位失败原因）。
+CREATE TABLE IF NOT EXISTS app_error_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    username    TEXT NOT NULL DEFAULT '',
+    app_version TEXT NOT NULL DEFAULT '',
+    device      TEXT NOT NULL DEFAULT '',
+    level       TEXT NOT NULL DEFAULT 'E',
+    tag         TEXT NOT NULL DEFAULT '',
+    message     TEXT NOT NULL,
+    detail      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_app_error_log_created ON app_error_log(created_at DESC);
+INSERT OR IGNORE INTO sys_schema_version(version, applied_at)
+VALUES (13, datetime('now', 'localtime'));
