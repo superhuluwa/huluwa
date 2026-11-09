@@ -520,7 +520,11 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
     }
 }
 
-/** 单条进度：标题与百分比同行，下方为圆角细进度条；fraction 为空时画不确定进度。 */
+/**
+ * 单条进度：标题行（名称、明细、右对齐百分比）+ 下方细进度条。
+ * 进度条复用 [DownloadProgress]（自绘圆角色带），避免 Material3 默认在进度与轨道之间留断口、
+ * 并在轨道末端画一个悬浮圆点的问题；fraction 为空时显示循环扫描的未知进度。
+ */
 @Composable private fun HongguoOfflineProgressRow(
     label: String, detail: String, fraction: Float?, accent: Color,
 ) {
@@ -537,13 +541,7 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                     fontWeight = FontWeight.SemiBold, color = accent, maxLines = 1)
             }
         }
-        if (fraction != null) {
-            LinearProgressIndicator({ fraction }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = accent, trackColor = accent.copy(alpha = .15f))
-        } else {
-            LinearProgressIndicator(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = accent, trackColor = accent.copy(alpha = .15f))
-        }
+        DownloadProgress(fraction, color = accent, trackColor = accent.copy(alpha = .15f), height = 6.dp)
     }
 }
 
