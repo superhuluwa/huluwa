@@ -106,7 +106,7 @@ import com.huluwa.android.hongguo.HongguoOfflineStatus
             }
         }
         items(ui.discover, key = { "discover-${it.id}" }) { series ->
-            HongguoSeriesCard(series) { focus.clearFocus(); vm.openSeries(series) }
+            HongguoSeriesCard(series, onOpen = { focus.clearFocus(); vm.openSeries(series) })
         }
     }
 }
@@ -300,7 +300,7 @@ private fun HongguoRankItem.rankLabel(all: List<HongguoRankItem>, index: Int): S
                     color = HuluwaColors.Ink, maxLines = 1)
             } else if (done > 0) {
                 Icon(Icons.Outlined.DownloadDone, "已离线", Modifier.size(20.dp), tint = Color(0xFF3D8B4F))
-                Text("已离线$done集", style = MaterialTheme.typography.labelSmall,
+                Text("已离线${done}集", style = MaterialTheme.typography.labelSmall,
                     color = HuluwaColors.Ink, maxLines = 1)
             } else {
                 Icon(Icons.Outlined.Download, "离线下载全剧", Modifier.size(20.dp), tint = Color(0xFFCA3D32))
@@ -366,7 +366,7 @@ private fun hongguoOfflineSizeText(bytes: Long): String = when {
                 }
             }
             items(ui.results, key = { "search-${it.id}" }) { series ->
-                HongguoSeriesCard(series) { focus.clearFocus(); vm.openSeries(series) }
+                HongguoSeriesCard(series, onOpen = { focus.clearFocus(); vm.openSeries(series) })
             }
             if (ui.loadingMore) item { HongguoLoading("正在加载更多…") }
             else if (ui.hasMore && ui.results.isNotEmpty()) item {

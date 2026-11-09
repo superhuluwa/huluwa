@@ -171,7 +171,7 @@ internal class HongguoOfflineDownloader(context: Context, private val repository
                     continue
                 }
                 val total = range?.groupValues?.get(3)?.toLongOrNull()
-                    ?: remaining.takeIf { it != C.LENGTH_UNSET }?.let { start + it } ?: -1L
+                    ?: remaining.takeIf { it != C.LENGTH_UNSET.toLong() }?.let { start + it } ?: -1L
                 if (total > 2L * 1024 * 1024 * 1024) throw IOException("该集文件过大，暂不支持离线")
                 RandomAccessFile(part, "rw").use { output ->
                     output.setLength(start)
