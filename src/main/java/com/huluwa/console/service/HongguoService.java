@@ -26,6 +26,8 @@ import java.util.zip.GZIPInputStream;
 @Service
 public class HongguoService {
     private static final String ORIGIN = "https://api5-normal-sinfonlineb.fqnovel.com";
+    private static final String PLAYBACK_ORIGIN = "https://api5-normal-sinfonlinea.fqnovel.com";
+    private static final String PLAYBACK_PATH = "/novel/player/video_model/v1/";
     private static final String DEFAULT_SIGN_URL = "http://192.168.3.77:8901";
     private static final String PREFIX = "/reading/bookapi/";
     private static final Set<String> PROFILE_KEYS = Set.of(
@@ -34,7 +36,11 @@ public class HongguoService {
             "language", "os_api", "os_version", "resolution", "dpi", "ac", "host_abi", "device_platform",
             "dragon_device_type", "user_is_login");
     private static final Set<String> SIGN_HEADERS = Set.of(
+            "x-gorgon", "x-khronos", "x-argus", "x-ladon", "x-medusa", "x-helios", "x-ss-stub");
+    private static final Set<String> GET_SIGN_HEADERS = Set.of(
             "x-gorgon", "x-khronos", "x-argus", "x-ladon", "x-medusa", "x-helios");
+    private static final Set<String> PLAYBACK_SIGN_HEADERS = Set.of(
+            "x-gorgon", "x-khronos", "x-argus", "x-ladon", "x-helios", "x-ss-stub");
     private final ConfigService config;
     private final ObjectMapper json;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
@@ -280,8 +286,13 @@ public class HongguoService {
 
     public Map<String, Object> playback(String videoId) {
         id(videoId);
-        JsonNode data = request("video_tab/video_model/v", Map.of("video_id", videoId, "source", "0",
-                "need_all_video_definition", "true")).path("data");
+        // Match openhongguo PR #7: sign and send the same player POST body.
+        String payload;
+        try {
+            payload = json.writeValueAsString(Map.of("video_id", videoId, "biz_param", Map.of(
+                    "video_id_type", 0, "need_all_video_definition", true, "video_platform", 3)));
+        } catch (IOException error) { throw new BusinessException(500, "播放请求构造失败"); }
+        JsonNode data = request(PLAYBACK_PATH, Map.of(), payload).path("data");
         JsonNode model = data.path("video_model");
         if (model.isTextual()) {
             try { model = json.readTree(model.asText()); }
@@ -318,13 +329,17 @@ public class HongguoService {
     }
 
     private JsonNode request(String path, Map<String, String> business) {
+        return request(path, business, null);
+    }
+
+    private JsonNode request(String path, Map<String, String> business, String payload) {
         String signerUrl = signUrl();
-        JsonNode result = requestOnce(path, business, signerUrl);
-        boolean playback = "video_tab/video_model/v".equals(path);
+        JsonNode result = requestOnce(path, business, signerUrl, payload);
+        boolean playback = PLAYBACK_PATH.equals(path);
         if (playback && result.path("code").asInt(-1) == 110) {
-            // 110 只说明上游拒绝访问，设备 ID 可能仍正确；只恢复一次签名 App，再重新取设备并签名。
+            // 明确拒绝访问时只恢复一次匿名设备，再读取新档案重签同一请求。
             recoverSigner(signerUrl);
-            result = requestOnce(path, business, signerUrl);
+            result = requestOnce(path, business, signerUrl, payload);
         }
         int code = result.path("code").asInt(-1);
         if (code == 110) throw new BusinessException(502, playback
@@ -346,7 +361,7 @@ public class HongguoService {
         }
     }
 
-    private JsonNode requestOnce(String path, Map<String, String> business, String signerUrl) {
+    private JsonNode requestOnce(String path, Map<String, String> business, String signerUrl, String payload) {
         ObjectNode profile = profile(signerUrl);
         Map<String, String> params = new LinkedHashMap<>(Map.ofEntries(
                 Map.entry("device_platform", "android"), Map.entry("aid", "8662"), Map.entry("app_name", "novelread"),
@@ -359,27 +374,43 @@ public class HongguoService {
                 Map.entry("channel", "vivo_8662_64"), Map.entry("device_type", "redroid14_x86_64_only"),
                 Map.entry("device_brand", "redroid")));
         profile.path("params").fields().forEachRemaining(e -> params.put(e.getKey(), e.getValue().asText()));
-        params.putAll(business); params.put("_rticket", String.valueOf(System.currentTimeMillis()));
+        params.putAll(business);
+        long ticket = System.currentTimeMillis();
+        params.put("_rticket", String.valueOf(ticket));
+        if (payload != null) params.put("ts", String.valueOf(ticket / 1000));
         String query = params.entrySet().stream().map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
                 .collect(java.util.stream.Collectors.joining("&"));
-        String url = ORIGIN + PREFIX + path + "?" + query;
+        String url = (payload == null ? ORIGIN + PREFIX : PLAYBACK_ORIGIN) + path + "?" + query;
         String body;
-        try { body = json.writeValueAsString(Map.of("url", url)); }
+        try {
+            Map<String, String> signing = new LinkedHashMap<>();
+            signing.put("url", url);
+            if (payload != null) signing.put("body", payload);
+            body = json.writeValueAsString(signing);
+        }
         catch (IOException error) { throw new BusinessException(500, "签名请求构造失败"); }
         JsonNode signature = readJson(send(HttpRequest.newBuilder(URI.create(signerUrl + "/sign"))
                 .timeout(Duration.ofSeconds(45)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build()), "签名服务");
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(40))
                 .header("User-Agent", profile.path("user_agent").asText(defaultUserAgent()))
-                .header("Accept-Encoding", "gzip").GET();
+                .header("Accept-Encoding", "gzip").header("Accept", "application/json");
+        if (payload == null) request.GET();
+        else request.header("Content-Type", "application/json; charset=utf-8")
+                .header("lc", "101").header("x-ss-dp", params.getOrDefault("aid", "8662"))
+                .header("x-ss-req-ticket", String.valueOf(ticket)).header("x-xs-from-web", "0")
+                .header("sdk-version", "2").header("passport-sdk-version", "50561")
+                .header("x-vc-bdturing-sdk-version", "3.7.2.cn").header("x-tt-request-tag", "t=0;n=0")
+                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8));
         Set<String> found = new java.util.HashSet<>();
         signature.fields().forEachRemaining(e -> {
             String name = e.getKey().toLowerCase(java.util.Locale.ROOT);
-            if (SIGN_HEADERS.contains(name) && e.getValue().isTextual() && !e.getValue().asText().isBlank()) {
+            if (SIGN_HEADERS.contains(name) && !(payload != null && "x-medusa".equals(name)) && e.getValue().isTextual() && !e.getValue().asText().isBlank()) {
                 request.header(e.getKey(), e.getValue().asText()); found.add(name);
             }
         });
-        if (!found.containsAll(SIGN_HEADERS)) throw new BusinessException(502, "签名服务未返回完整签名，请检查 App 状态");
+        Set<String> required = payload == null ? GET_SIGN_HEADERS : PLAYBACK_SIGN_HEADERS;
+        if (!found.containsAll(required)) throw new BusinessException(502, "签名服务未返回完整签名，请更新红果算法服务");
         return readJson(send(request.build()), "红果接口");
     }
 

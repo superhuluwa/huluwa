@@ -26,6 +26,9 @@ import (
 const engine = "portable-go"
 
 var upstreamRevision = "42b73f201309423f012d483bfc0ce579dcc0937c"
+
+const playbackRevision = "bed14595d35b02e0d550270621812ca7386c4108"
+
 var signHeaderNames = []string{"X-Argus", "X-Gorgon", "X-Helios", "X-Khronos", "X-Ladon", "X-Medusa"}
 
 type profile struct {
@@ -34,18 +37,18 @@ type profile struct {
 }
 
 type service struct {
-	mutex              sync.RWMutex
-	recoverMutex       sync.Mutex
-	profile            profile
-	profilePath        string
-	registerProgram    string
-	registerTimeout    time.Duration
-	recoveryCooldown   time.Duration
-	lastRecovery       time.Time
-	started            time.Time
-	signatures         atomic.Uint64
-	failures           atomic.Uint64
-	recoveries         atomic.Uint64
+	mutex            sync.RWMutex
+	recoverMutex     sync.Mutex
+	profile          profile
+	profilePath      string
+	registerProgram  string
+	registerTimeout  time.Duration
+	recoveryCooldown time.Duration
+	lastRecovery     time.Time
+	started          time.Time
+	signatures       atomic.Uint64
+	failures         atomic.Uint64
+	recoveries       atomic.Uint64
 }
 
 func readProfile(path string) (profile, error) {
@@ -202,7 +205,7 @@ func send(w http.ResponseWriter, status int, value any) {
 	}
 }
 
-func (s *service) sign(rawURL string) (map[string]string, error) {
+func (s *service) sign(rawURL string, body []byte) (map[string]string, error) {
 	p := s.currentProfile()
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" {
@@ -222,7 +225,17 @@ func (s *service) sign(rawURL string) (map[string]string, error) {
 	if version == "" {
 		version = p.Params["version_name"]
 	}
-	return portable.RawURL(rawURL, p.Params["device_id"], version, time.Now())
+	// Only the player API changed its signing contract in PR #7. Legacy
+	// video_tab GETs keep their six headers for existing clients.
+	if isPlaybackPath(parsed.Path) {
+		return portable.RawPlaybackURL(rawURL, p.Params["device_id"], version, body, time.Now())
+	}
+	return portable.RawURLWithBody(rawURL, p.Params["device_id"], version, body, time.Now())
+}
+
+func isPlaybackPath(path string) bool {
+	return strings.HasPrefix(path, "/novel/player/video_model/") ||
+		strings.HasPrefix(path, "/novel/player/multi_video_model/")
 }
 
 func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +247,7 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"iid":       {p.Params["iid"]},
 			"aid":       {"8662"},
 		}.Encode()
-		_, err := s.sign(target)
+		_, err := s.sign(target, nil)
 		if err != nil {
 			send(w, 503, map[string]any{"ok": false, "engine": engine})
 			return
@@ -249,16 +262,18 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"pkg": "com.phoenix.read", "target_pkg": "com.phoenix.read", "model": p.Params["device_type"],
 			"engine": engine, "upstreamRevision": upstreamRevision, "androidRequired": false,
 			"deviceProfile": p, "supportsRecovery": true, "recoveryMode": "rotate-device",
-			"registration": "openhongguo-sdk", "playbackPreflight": false,
+			"registration": "openhongguo-sdk", "playbackSigning": "argus-ladon-551",
+			"playbackRevision": playbackRevision, "supportsBodySigning": true,
 			"uptimeSeconds": int64(time.Since(s.started).Seconds()),
-			"signatures": s.signatures.Load(), "failures": s.failures.Load(), "recoveries": s.recoveries.Load(),
+			"signatures":    s.signatures.Load(), "failures": s.failures.Load(), "recoveries": s.recoveries.Load(),
 			"endpoints": []string{"GET /health", "GET /info", "POST /sign", "POST /recover"},
 		})
 	case r.Method == http.MethodPost && r.URL.Path == "/sign":
 		r.Body = http.MaxBytesReader(w, r.Body, 65536)
 		defer r.Body.Close()
 		var input struct {
-			URL string `json:"url"`
+			URL  string  `json:"url"`
+			Body *string `json:"body"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		if err := decoder.Decode(&input); err != nil || input.URL == "" || len(input.URL) > 16384 {
@@ -269,7 +284,11 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			send(w, 400, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-		headers, err := s.sign(input.URL)
+		var body []byte
+		if input.Body != nil {
+			body = []byte(*input.Body)
+		}
+		headers, err := s.sign(input.URL, body)
 		if err != nil {
 			s.failures.Add(1)
 			send(w, 400, map[string]string{"error": err.Error()})

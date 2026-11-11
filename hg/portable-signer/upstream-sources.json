@@ -12,5 +12,15 @@
     "internal/protocol/sign/prim.go": "b2c5d5cafdb0ea80682f85250604cac92e3da067cda1bd7dace011c37e873977",
     "internal/protocol/sign/request.go": "6f994b0e16a5f06ccaa947f9b782c76960bc098c26e7a55c9d3df3772390f91e",
     "internal/protocol/sign/sm3.go": "019d8fda594fde6b3d56f7d227fe61b2eceb9c4ec5932b4e3574115c7b7dc612"
-  }
+  },
+  "patches": [
+    {
+      "pullRequest": "https://github.com/beilunyang/openhongguo/pull/7",
+      "commit": "bed14595d35b02e0d550270621812ca7386c4108",
+      "files": {
+        "internal/protocol/sign/playback.go": "0c6a767412472a75064c8320f36d2e310bf02585c22fba8ae16bf64ce7aa0938",
+        "internal/protocol/sign/playback_test.go": "ad6de9336a8d3bb6b8152071199c14fb87a85ac9c367ff7e7fae4ad4998caf73"
+      }
+    }
+  ]
 }

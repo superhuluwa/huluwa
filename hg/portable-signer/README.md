@@ -3,7 +3,8 @@
 红果短剧的无 Android 签名实现。服务使用
 [openhongguo](https://github.com/beilunyang/openhongguo) v0.2.0（提交
 `42b73f201309423f012d483bfc0ce579dcc0937c`）的公开 Go SDK 注册匿名设备，
-并在本机完成签名计算。
+并在本机完成签名计算。播放签名移植自 [PR #7](https://github.com/beilunyang/openhongguo/pull/7)，
+固定提交为 `bed14595d35b02e0d550270621812ca7386c4108`。
 
 它兼容葫芦娃使用的原签名接口：
 
@@ -11,12 +12,18 @@
 |---|---|
 | `GET /health` | 生成一次签名并返回健康状态 |
 | `GET /info` | 当前设备参数、引擎版本和恢复统计 |
-| `POST /sign` | 输入 `{"url":"..."}`，返回 6 个签名头 |
+| `POST /sign` | 输入 `{"url":"...","body":"原样请求体（可选）"}`，返回签名头 |
 | `POST /recover` | 更换匿名设备并立即重载，不依赖 Android/Frida |
 
 与 redroid 方案相比，这个服务不需要 Android、ADB、Frida、KVM 或时钟同步，
-冷启动约 1 秒。播放接口返回 `110` 后，葫芦娃后端现有的 `/recover` 兜底会更换匿名
-设备，必要时由 SDK 自动再换一次；旧的 `/sign` 调用协议不变。
+冷启动约 1 秒。播放模型接口从 2026-11-10 起校验真实 `X-Argus`/`X-Ladon`，普通六头中的
+时间戳占位会得到 HTTP 200 空响应。`/novel/player/video_model/` 与
+`/novel/player/multi_video_model/` 自动使用播放专用签名，移除 `X-Medusa`；
+其他路由继续返回通用六头。POST 时 `body` 必须是实际发送的 UTF-8 JSON 字符串，
+服务按原始字节计算 Argus、Gorgon 和 `X-SS-STUB`，不会重新序列化请求体。
+省略 `body` 的旧 GET 客户端保持兼容。签名过程只做本地计算，不预先请求播放接口，
+也不在 `/sign` 中轮换设备。`/info` 提供 `playbackRevision`、`playbackSigning` 与
+`supportsBodySigning`，用于识别支持 PR #7 的部署版本。
 
 ## 构建
 
