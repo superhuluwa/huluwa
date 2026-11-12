@@ -46,7 +46,7 @@ public class AndroidSessionService {
                 throw new BusinessException(500, "安卓会话配置条目必须为对象");
             }
             // 已下线入口的历史配置直接跳过，避免整张会话列表报错。
-            if (Set.of("starwar", "hongguo", "hongguotv-build").contains(entry.path("kind").asText("").trim())) continue;
+            if (Set.of("starwar", "hongguo").contains(entry.path("kind").asText("").trim())) continue;
             if (!entry.path("enabled").asBoolean(true)) continue;
             String id = entry.path("id").asText("").trim();
             String title = entry.path("title").asText("").trim();

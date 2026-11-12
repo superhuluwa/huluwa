@@ -40,7 +40,8 @@ enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
 }
 enum class AndroidBuildProject(val id: String, val title: String, val apiPath: List<String>) {
     Huluwa("huluwa", "葫芦娃", listOf("android")),
-    TerminalBuddy("terminalbuddy", "TerminalBuddy", listOf("terminalbuddy", "android"));
+    TerminalBuddy("terminalbuddy", "TerminalBuddy", listOf("terminalbuddy", "android")),
+    HongguoTv("hongguotv", "红果TV", listOf("hongguotv", "android"));
     fun path(vararg tail: String): Array<String> = (apiPath + tail).toTypedArray()
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
@@ -48,6 +49,7 @@ enum class ManagementService(val sessionId: String, val kind: String, val title:
     Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
     AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
     TerminalBuddyBuild("local-terminalbuddy-build", "terminalbuddy-build", "TerminalBuddy App 打包", "更新源码 · 编译安装包 · 执行日志"),
+    HongguoTvBuild("local-hongguotv-build", "hongguotv-build", "红果TV App 打包", "更新源码 · 编译安装包 · 执行日志"),
     CheckLogs("local-check-logs", "check-logs", "巡检记录", "订阅巡检结果与新增明细"),
     Library("local-library", "library", "剧集管理", "扫描下载目录 · 管理磁盘空间"),
     Subscriptions("local-subscriptions", "subscriptions", "我的订阅", "电影港与电影天堂订阅 · 追更状态与资源列表"),

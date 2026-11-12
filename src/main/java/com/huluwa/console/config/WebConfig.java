@@ -32,6 +32,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/public/**",
                         "/api/android/agents/**",
                         "/api/terminalbuddy/android/agents/**",
+                        "/api/hongguotv/android/agents/**",
                         "/api/health",
                         "/error"
                 );
