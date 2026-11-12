@@ -22,7 +22,6 @@ import com.huluwa.android.data.formatBytes
     val service = session.managementService ?: return
     val buildProject = when (service) {
         ManagementService.TerminalBuddyBuild -> AndroidBuildProject.TerminalBuddy
-        ManagementService.HongguoTvBuild -> AndroidBuildProject.HongguoTv
         else -> AndroidBuildProject.Huluwa
     }
     val reconnecting = rememberReconnecting(vm)
@@ -30,7 +29,7 @@ import com.huluwa.android.data.formatBytes
     val loading = when (service) {
         ManagementService.Frp -> ui.tunnels.loading
         ManagementService.Docker -> ui.containers.loading || ui.resources[ui.dockerSection]?.loading == true
-        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild, ManagementService.HongguoTvBuild -> ui.build(buildProject).tasks.loading
+        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> ui.build(buildProject).tasks.loading
         ManagementService.CheckLogs -> ui.checkLogs.loading
         ManagementService.Library -> ui.library.scan.loading
         ManagementService.Subscriptions -> ui.subscriptions.loading
@@ -83,7 +82,7 @@ import com.huluwa.android.data.formatBytes
                             }
                             "连接状态：$connection\n服务端版本：${overview.version.ifBlank { "未知" }}\n${current.containers.error ?: overview.message}"
                         } }) { Icon(Icons.Outlined.Dns, "Docker 主机信息") }
-                        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild, ManagementService.HongguoTvBuild -> IconButton({ vm.loadText("构建详情") {
+                        ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> IconButton({ vm.loadText("构建详情") {
                             val build = vm.state.value.build(buildProject)
                             val status = build.status
                             val server = status.servers.firstOrNull { it.id == build.serverId }
@@ -131,7 +130,7 @@ import com.huluwa.android.data.formatBytes
                 when (service) {
                     ManagementService.Frp -> FrpScreen(ui, vm)
                     ManagementService.Docker -> DockerScreen(ui, vm)
-                    ManagementService.AppBuild, ManagementService.TerminalBuddyBuild, ManagementService.HongguoTvBuild -> AppBuildScreen(ui, vm, snackbar, buildProject)
+                    ManagementService.AppBuild, ManagementService.TerminalBuddyBuild -> AppBuildScreen(ui, vm, snackbar, buildProject)
                     ManagementService.CheckLogs -> CheckLogsScreen(ui, vm)
                     ManagementService.Library -> LibraryScreen(ui, vm)
                     ManagementService.Subscriptions -> SubscriptionsScreen(ui, vm)

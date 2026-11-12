@@ -117,10 +117,6 @@ def run(config_path):
         'ANDROID_SDK_ROOT': config['androidHome'],
         'HULUWA_ANDROID_PACKAGE': config.get('packageName', 'com.huluwa.android'),
         'HULUWA_ANDROID_ARTIFACT_PREFIX': config.get('artifactPrefix', 'huluwa'),
-        # 红果 TV 的源码在 kotlin-tv 子目录，且走 HONGGUOTV_* 版本与签名变量。
-        'HULUWA_ANDROID_APP_DIRECTORY': config.get('appDirectory', 'android'),
-        'HULUWA_ANDROID_APP_NAME': config.get('appName', ''),
-        'HULUWA_ANDROID_GRADLE_SHA256': config.get('gradleSha256', ''),
     })
     env['PATH'] = str(Path(config['javaHome']) / 'bin') + os.pathsep + env['PATH']
     if config.get('gradleHome'):

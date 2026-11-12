@@ -18,7 +18,7 @@ import java.util.Set;
 public class AndroidSessionService {
 
     private static final String CONFIG_KEY = "chat.android.sessions";
-    private static final Set<String> SUPPORTED_KINDS = Set.of("dengta", "hongguo");
+    private static final Set<String> SUPPORTED_KINDS = Set.of("dengta");
 
     private final ConfigService configService;
     private final ObjectMapper objectMapper;
@@ -41,21 +41,12 @@ public class AndroidSessionService {
         List<Map<String, Object>> result = new ArrayList<>(chatSessions);
         Set<String> ids = new HashSet<>();
         chatSessions.forEach(row -> ids.add(String.valueOf(row.get("id"))));
-        List<JsonNode> entries = new ArrayList<>();
-        configured.forEach(entries::add);
-        // 升级已有数据库也能出现入口；显式配置（包括 enabled=false）优先。
-        if (entries.stream().noneMatch(entry -> "hongguo".equals(entry.path("kind").asText()))) {
-            var hongguo = objectMapper.createObjectNode();
-            hongguo.put("id", "local-hongguo"); hongguo.put("title", "红果短视频");
-            hongguo.put("kind", "hongguo"); hongguo.put("preview", "搜索短剧 · 选集播放 · 自动连播");
-            entries.add(hongguo);
-        }
-        for (JsonNode entry : entries) {
+        for (JsonNode entry : configured) {
             if (!entry.isObject()) {
                 throw new BusinessException(500, "安卓会话配置条目必须为对象");
             }
-            // 星球大战功能已移除：历史配置里残留的 starwar 条目直接跳过，避免整张会话列表报错。
-            if ("starwar".equals(entry.path("kind").asText("").trim())) continue;
+            // 已下线入口的历史配置直接跳过，避免整张会话列表报错。
+            if (Set.of("starwar", "hongguo", "hongguotv-build").contains(entry.path("kind").asText("").trim())) continue;
             if (!entry.path("enabled").asBoolean(true)) continue;
             String id = entry.path("id").asText("").trim();
             String title = entry.path("title").asText("").trim();

@@ -27,11 +27,6 @@ BUILDER = Path(__file__).resolve().parent
 NODE_ID = os.environ.get('HULUWA_ANDROID_NODE_ID', 'local')
 PACKAGE_NAME = os.environ.get('HULUWA_ANDROID_PACKAGE', 'com.huluwa.android')
 ARTIFACT_PREFIX = os.environ.get('HULUWA_ANDROID_ARTIFACT_PREFIX', 'huluwa')
-# 源码根目录与应用名解耦：huluwa 位于仓库根，红果 TV 位于 kotlin-tv 子目录。
-APP_DIRECTORY = os.environ.get('HULUWA_ANDROID_APP_DIRECTORY', 'android')
-APP_NAME = os.environ.get('HULUWA_ANDROID_APP_NAME', '')
-# 源码未固定 Gradle 发行包校验值时，用节点配置补充期望值（校验下载与已有缓存）。
-GRADLE_SHA256 = os.environ.get('HULUWA_ANDROID_GRADLE_SHA256', '').lower()
 STOP = threading.Event()
 CURRENT = None
 SECRET_VALUES = []
@@ -186,11 +181,10 @@ class Job:
         commit = self.run(['git', '-C', str(REPO), 'rev-parse', ref], capture=True).strip()
         if not re.fullmatch(r'[0-9a-f]{40}', commit):
             raise RuntimeError('无法确定源码提交号。')
-        gradle = self.run(['git', '-C', str(REPO), 'show', commit + ':' + APP_DIRECTORY + '/app/build.gradle.kts'], capture=True)
-        # TerminalBuddy 直接写死字面量；红果 TV 通过 HONGGUOTV_VERSION_CODE 环境变量覆盖。
-        # 两种写法都取其中的数字，缺省值只用于展示，真实版本由主服务统一分配。
-        version_code = re.search(r'versionCode\s*=\s*(?:System\.getenv\("HONGGUOTV_VERSION_CODE"\)\?\.toInt\(\)\s*\?\:\s*)?(\d+)', gradle)
-        version_name = re.search(r'versionName\s*=\s*(?:System\.getenv\("HONGGUOTV_VERSION_NAME"\)\s*\?\:\s*)?"([^"]*)"', gradle)
+        gradle = self.run(['git', '-C', str(REPO), 'show', commit + ':android/app/build.gradle.kts'], capture=True)
+        # 源码缺省版本只用于展示，实际构建版本由主服务统一分配。
+        version_code = re.search(r'versionCode\s*=\s*(\d+)', gradle)
+        version_name = re.search(r'versionName\s*=\s*"([^"]*)"', gradle)
         subject = self.run(['git', '-C', str(REPO), 'show', '-s', '--format=%s', commit], capture=True).strip()
         source = {
             'commit': commit, 'commitSubject': subject,
@@ -213,30 +207,20 @@ class Job:
         if parsed.scheme != 'https':
             raise RuntimeError('Gradle Wrapper 必须配置 HTTPS 发行地址。')
         if not expected:
-            # 红果 TV 的 Wrapper 未固定校验值，可由节点配置补充。
-            if APP_NAME != 'hongguotv':
-                raise RuntimeError('Gradle Wrapper 必须配置 SHA-256 校验值。')
-            expected = GRADLE_SHA256
-            if expected:
-                if not re.fullmatch(r'[0-9a-f]{64}', expected):
-                    raise RuntimeError('节点配置的 Gradle SHA-256 格式无效。')
-                log(self.directory, '源码未提供 Gradle 发行包 SHA-256，使用节点配置的校验值。\n')
-            else:
-                log(self.directory, '源码未提供 Gradle 发行包 SHA-256，本次仅按文件名复用本地缓存。\n')
-        elif not re.fullmatch(r'[0-9a-f]{64}', expected):
+            raise RuntimeError('Gradle Wrapper 必须配置 SHA-256 校验值。')
+        if not re.fullmatch(r'[0-9a-f]{64}', expected):
             raise RuntimeError('Gradle Wrapper 的 SHA-256 校验值格式无效。')
         filename = Path(parsed.path).name
         if not filename.endswith('.zip'):
             raise RuntimeError('Gradle 发行文件格式无效。')
-        cache_key = expected or hashlib.sha256(parsed.path.encode()).hexdigest()
-        distribution = WORK / 'distributions' / cache_key / filename
+        distribution = WORK / 'distributions' / expected / filename
         distribution.parent.mkdir(parents=True, exist_ok=True)
-        if not distribution.is_file() or (expected and file_sha256(distribution) != expected):
+        if not distribution.is_file() or file_sha256(distribution) != expected:
             self.stage('PREPARING', '下载并校验 Gradle 发行包，下载结果将持久缓存……')
             temporary = distribution.with_suffix('.zip.part')
             self.run(['curl', '--fail', '--location', '--retry', '3', '--connect-timeout', '20',
                       '--output', str(temporary), url])
-            if expected and file_sha256(temporary) != expected:
+            if file_sha256(temporary) != expected:
                 temporary.unlink(missing_ok=True)
                 raise RuntimeError('Gradle 发行包 SHA-256 校验失败。')
             os.replace(temporary, distribution)
@@ -274,51 +258,33 @@ class Job:
         job_dir.mkdir(parents=True, exist_ok=True)
         self.run(['git', '-C', str(REPO), 'worktree', 'add', '--detach', str(source), commit])
         try:
-            android = source / APP_DIRECTORY
+            android = source / 'android'
             # The shared release signing is authoritative, including for old Git revisions.
             # Remove machine-specific SDK paths; use ANDROID_HOME from this image.
             (android / 'local.properties').unlink(missing_ok=True)
             self.prepare_gradle(android)
-            if APP_NAME == 'hongguotv':
-                # 红果 TV 通过 HONGGUOTV_* 环境变量读取版本与签名。
-                password_env = 'HONGGUOTV_STORE_PASSWORD'
-                env = {
-                    'HONGGUOTV_VERSION_CODE': str(self.request['versionCode']),
-                    'HONGGUOTV_VERSION_NAME': self.request['versionName'],
-                    'HONGGUOTV_KEYSTORE': str(keystore),
-                    'HONGGUOTV_STORE_PASSWORD': signing['storePassword'],
-                    'HONGGUOTV_KEY_ALIAS': signing['keyAlias'],
-                    'HONGGUOTV_KEY_PASSWORD': signing['keyPassword'],
-                    'LC_ALL': 'C.UTF-8',
-                }
-            else:
-                password_env = 'HULUWA_STORE_PASSWORD'
-                env = {
-                    'HULUWA_VERSION_CODE': str(self.request['versionCode']),
-                    'HULUWA_VERSION_NAME': self.request['versionName'],
-                    'HULUWA_KEYSTORE_FILE': str(keystore),
-                    'HULUWA_STORE_PASSWORD': signing['storePassword'],
-                    'HULUWA_KEY_ALIAS': signing['keyAlias'],
-                    'HULUWA_KEY_PASSWORD': signing['keyPassword'],
-                    'LC_ALL': 'C.UTF-8',
-                }
+            password_env = 'HULUWA_STORE_PASSWORD'
+            env = {
+                'HULUWA_VERSION_CODE': str(self.request['versionCode']),
+                'HULUWA_VERSION_NAME': self.request['versionName'],
+                'HULUWA_KEYSTORE_FILE': str(keystore),
+                'HULUWA_STORE_PASSWORD': signing['storePassword'],
+                'HULUWA_KEY_ALIAS': signing['keyAlias'],
+                'HULUWA_KEY_PASSWORD': signing['keyPassword'],
+                'LC_ALL': 'C.UTF-8',
+            }
             workers = os.environ.get('HULUWA_ANDROID_GRADLE_WORKERS', '2')
             if not re.fullmatch(r'[1-9][0-9]*', workers):
                 raise RuntimeError('HULUWA_ANDROID_GRADLE_WORKERS 必须为正整数。')
             jvm_args = os.environ.get('HULUWA_ANDROID_GRADLE_JVM_ARGS', '-Xmx2048m -Dfile.encoding=UTF-8')
             self.stage('COMPILING', f'执行 Gradle Release 编译（{workers} 个工作线程），首次运行需要下载依赖……')
             (android / 'keystore.properties').unlink(missing_ok=True)
-            init_script = 'hongguotv.init.gradle' if APP_NAME == 'hongguotv' else 'android.init.gradle'
             command = ([str(android / 'gradlew.bat')] if os.name == 'nt' else ['bash', './gradlew'])
-            if APP_NAME == 'hongguotv':
-                # 红果 TV 额外编译 :core 模块并执行测试与 Release lint，与官方发布流程一致。
-                command += [':core:test', ':app:lintRelease', ':app:assembleRelease']
-            else:
-                command += [':app:assembleRelease']
+            command += [':app:assembleRelease']
             command += ['--no-daemon', '--console=plain', '--stacktrace', '--build-cache', f'--max-workers={workers}',
                         f'-Dorg.gradle.jvmargs={jvm_args}',
                         '-Pkotlin.compiler.execution.strategy=in-process',
-                        '--init-script', str(BUILDER / init_script)]
+                        '--init-script', str(BUILDER / 'android.init.gradle')]
             self.run(command, cwd=android, env=env)
             self.stage('VERIFYING', '读取 APK 信息并校验 Release 签名……')
             candidates = list((android / 'app/build/outputs/apk/release').glob('*.apk'))

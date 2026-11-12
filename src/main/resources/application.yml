@@ -41,9 +41,6 @@ huluwa:
   terminalbuddy-public:
     # 只开放 TerminalBuddy 构建、日志和下载，不签发后台登录令牌。
     enabled: ${TERMINALBUDDY_PUBLIC_ENABLED:true}
-  hongguotv-public:
-    # 只开放红果 TV 的版本查询与安装包下载，不开放编译、日志等管理接口。
-    enabled: ${HONGGUOTV_PUBLIC_ENABLED:true}
   android-build:
     enabled: ${HULUWA_ANDROID_BUILD_ENABLED:false}
     directory: ${HULUWA_ANDROID_BUILD_DIR:/app/android-build}

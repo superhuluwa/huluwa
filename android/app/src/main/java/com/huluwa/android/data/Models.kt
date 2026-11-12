@@ -40,8 +40,7 @@ enum class MainTab(val title: String, val isSessionTab: Boolean = false) {
 }
 enum class AndroidBuildProject(val id: String, val title: String, val apiPath: List<String>) {
     Huluwa("huluwa", "葫芦娃", listOf("android")),
-    TerminalBuddy("terminalbuddy", "TerminalBuddy", listOf("terminalbuddy", "android")),
-    HongguoTv("hongguotv", "红果TV", listOf("hongguotv", "android"));
+    TerminalBuddy("terminalbuddy", "TerminalBuddy", listOf("terminalbuddy", "android"));
     fun path(vararg tail: String): Array<String> = (apiPath + tail).toTypedArray()
 }
 enum class ManagementService(val sessionId: String, val kind: String, val title: String, val subtitle: String) {
@@ -49,7 +48,6 @@ enum class ManagementService(val sessionId: String, val kind: String, val title:
     Docker("local-docker-management", "docker", "Docker 管理", "容器与资源管理"),
     AppBuild("local-android-build", "android-build", "App 构建管理", "更新源码 · 编译安装包 · 执行日志"),
     TerminalBuddyBuild("local-terminalbuddy-build", "terminalbuddy-build", "TerminalBuddy App 打包", "更新源码 · 编译安装包 · 执行日志"),
-    HongguoTvBuild("local-hongguotv-build", "hongguotv-build", "红果TV App 打包", "更新源码 · 编译安装包 · 执行日志"),
     CheckLogs("local-check-logs", "check-logs", "巡检记录", "订阅巡检结果与新增明细"),
     Library("local-library", "library", "剧集管理", "扫描下载目录 · 管理磁盘空间"),
     Subscriptions("local-subscriptions", "subscriptions", "我的订阅", "电影港与电影天堂订阅 · 追更状态与资源列表"),
@@ -66,10 +64,9 @@ data class Session(
     /** 由客户端生成的管理入口；服务端配置的灯塔不在此列。 */
     val isAppManaged: Boolean get() = kind == "upgrade" || managementService != null
     /** 使用原生功能页，不走聊天消息接口；与入口是否由服务端下发无关。 */
-    // 灯塔、红果走原生界面，同属本地会话
-    val isLocal: Boolean get() = isAppManaged || kind in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND)
-    /** 本地管理服务归入系统；灯塔、红果和系统通知等日常功能会话仍在功能入口。 */
-    val isSystemSession: Boolean get() = isLocal && kind !in setOf(DENGTA_SESSION_KIND, HONGGUO_SESSION_KIND)
+    val isLocal: Boolean get() = isAppManaged || kind == DENGTA_SESSION_KIND
+    /** 本地管理服务归入系统；灯塔和系统通知等日常功能会话仍在功能入口。 */
+    val isSystemSession: Boolean get() = isLocal && kind != DENGTA_SESSION_KIND
     val preview: String get() = previewOverride ?: last?.let { it.contentText.ifBlank { it.content } }?.replace(Regex("<[^>]+>"), "")?.take(160).orEmpty().ifBlank { "发条消息，开始使用这个服务" }
     companion object {
         fun from(raw: JsonObject): Session {

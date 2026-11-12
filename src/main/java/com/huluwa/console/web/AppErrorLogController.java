@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * 手机端错误日志上报与查询：App 侧 AppLog 的 W/E 条目批量上报，
- * 远程排查手机上的失败原因（如红果离线下载失败）时直接查库或调 list 接口。
+ * 远程排查手机上的失败原因时直接查库或调 list 接口。
  */
 @RestController
 @RequestMapping("/api/app-logs")

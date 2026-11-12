@@ -65,7 +65,6 @@ import java.time.format.DateTimeFormatter
 
 fun sessionIcon(kind: String): ImageVector = when (kind) {
     DENGTA_SESSION_KIND -> Icons.Outlined.Insights
-    HONGGUO_SESSION_KIND -> Icons.Outlined.SmartDisplay
     "movie" -> Icons.Outlined.LocalMovies
     "dytt", "movie-hls" -> Icons.Outlined.PlayCircleOutline
     // 懂片帝：独自一套图标与配色，与电影港 / 电影天堂区分
@@ -81,7 +80,6 @@ fun sessionIcon(kind: String): ImageVector = when (kind) {
     "docker" -> Icons.Outlined.DirectionsBoat
     "android-build" -> Icons.Outlined.Android
     "terminalbuddy-build" -> Icons.Outlined.Terminal
-    "hongguotv-build" -> Icons.Outlined.PlayCircleOutline
     "check-logs" -> Icons.AutoMirrored.Outlined.ListAlt
     "library" -> Icons.Outlined.VideoLibrary
     "subscriptions" -> Icons.Outlined.BookmarkBorder
@@ -93,7 +91,6 @@ fun sessionColor(kind: String): Color = when (kind) {
     "dpd" -> Color(0xFF2E7D6F)
     "btbtla" -> Color(0xFF526BA3)
     "fanqie" -> Color(0xFFD9483B)
-    HONGGUO_SESSION_KIND -> Color(0xFFE44B40)
     "magnet", "docker" -> HuluwaColors.Blue
     "video" -> Color(0xFFAE6B5E)
     "xunlei", "xunlei-win" -> HuluwaColors.Amber

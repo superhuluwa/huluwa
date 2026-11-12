@@ -95,7 +95,6 @@ data class AppState(
     val dockerSection: DockerSection = DockerSection.Containers, val resources: Map<DockerSection, LoadState<List<DockerResource>>> = emptyMap(),
     val realtime: Boolean = false, val sheet: AppSheet? = null, val busy: String? = null, val actionError: String? = null,
     val terminalBuddyBuild: AndroidBuildState = AndroidBuildState(),
-    val hongguoTvBuild: AndroidBuildState = AndroidBuildState(),
     val androidBuild: AndroidBuildState = AndroidBuildState(), val clock: Long = System.currentTimeMillis(),
     val checkLogs: LoadState<List<CheckLog>> = LoadState(emptyList()),
     val library: LibraryState = LibraryState(),
@@ -110,13 +109,11 @@ data class AppState(
     fun build(project: AndroidBuildProject) = when (project) {
         AndroidBuildProject.Huluwa -> androidBuild
         AndroidBuildProject.TerminalBuddy -> terminalBuddyBuild
-        AndroidBuildProject.HongguoTv -> hongguoTvBuild
     }
     fun updateBuild(project: AndroidBuildProject, transform: (AndroidBuildState) -> AndroidBuildState): AppState =
         when (project) {
             AndroidBuildProject.Huluwa -> copy(androidBuild = transform(androidBuild))
             AndroidBuildProject.TerminalBuddy -> copy(terminalBuddyBuild = transform(terminalBuddyBuild))
-            AndroidBuildProject.HongguoTv -> copy(hongguoTvBuild = transform(hongguoTvBuild))
         }
 }
 
@@ -133,11 +130,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private val sessionListCache = (application as HuluwaApplication).sessionListCache
     private val appUpdates = (application as HuluwaApplication).appUpdates
     private val terminalBuddyBuildDownloads = (application as HuluwaApplication).terminalBuddyBuildDownloads
-    private val hongguoTvBuildDownloads = (application as HuluwaApplication).hongguoTvBuildDownloads
     private fun buildDownloader(project: AndroidBuildProject) = when (project) {
         AndroidBuildProject.Huluwa -> buildDownloads
         AndroidBuildProject.TerminalBuddy -> terminalBuddyBuildDownloads
-        AndroidBuildProject.HongguoTv -> hongguoTvBuildDownloads
     }
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
     private val readerPreferences = FanqieReaderPreferences(application)
@@ -149,7 +144,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         pinnedSessionIds = if (session.loggedIn) sessionListPreferences.pinnedSessions(session.server, session.username) else emptyList(),
         androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
         terminalBuddyBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.TerminalBuddy)),
-        hongguoTvBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.HongguoTv)),
     )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
         // 先恢复整份缓存；无缓存时等首次服务端结果，避免先显示少数本地入口再重排。
@@ -181,7 +175,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 ManagementService.AppBuild -> androidBuildPreview(value.androidBuild)
                 ManagementService.TerminalBuddyBuild -> androidBuildPreview(value.terminalBuddyBuild)
-                ManagementService.HongguoTvBuild -> androidBuildPreview(value.hongguoTvBuild)
                 ManagementService.CheckLogs -> when {
                     value.checkLogs.error != null -> "巡检记录加载失败，点击重试"
                     !value.checkLogs.loaded -> if (value.checkLogs.loading) "正在同步巡检记录…" else "电影港与电影天堂的订阅巡检历史"
@@ -213,7 +206,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             else Session(service.sessionId, service.title, service.kind, 0, null, preview)
         }
         val localIds = managementSessions.map { it.id }.toSet() + UPGRADE_SESSION_ID
-        val remoteSessions = value.sessions.data.filterNot { it.isAppManaged || it.id in localIds }
+        // 过滤旧服务端与历史快照中的已下线入口，升级后不会恢复到会话列表。
+        val remoteSessions = value.sessions.data.filterNot {
+            it.kind in setOf("hongguo", "hongguotv-build") || it.isAppManaged || it.id in localIds
+        }
             .groupBy { it.id }.values.map { rows ->
                 rows.maxBy { it.updatedAt }.copy(unread = rows.sumOf { it.unread })
             }
@@ -229,7 +225,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         ManagementService.Docker -> value.containers.loaded && value.containers.error == null
         ManagementService.AppBuild -> value.androidBuild.tasks.loaded && !value.androidBuild.connectionError
         ManagementService.TerminalBuddyBuild -> value.terminalBuddyBuild.tasks.loaded && !value.terminalBuddyBuild.connectionError
-        ManagementService.HongguoTvBuild -> value.hongguoTvBuild.tasks.loaded && !value.hongguoTvBuild.connectionError
         ManagementService.CheckLogs -> value.checkLogs.loaded && value.checkLogs.error == null
         ManagementService.Library -> value.library.scan.loaded && value.library.scan.error == null
         ManagementService.Subscriptions -> value.subscriptions.loaded
@@ -238,15 +233,13 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private fun upgradePreviewReady(upgrade: AppUpgradeState) = (upgrade.checked && upgrade.checkError == null)
         || upgrade.download.active || upgrade.download.phase == UpgradePhase.Ready
 
-    val state = combine(mutable, appUpdates.state, buildDownloads.state, terminalBuddyBuildDownloads.state,
-        hongguoTvBuildDownloads.state) { value, upgrade, download, terminalDownload, hongguoDownload ->
+    val state = combine(mutable, appUpdates.state, buildDownloads.state, terminalBuddyBuildDownloads.state) {
+        value, upgrade, download, terminalDownload ->
         withAppSessions(value.copy(androidBuild = value.androidBuild.copy(download = download),
-            terminalBuddyBuild = value.terminalBuddyBuild.copy(download = terminalDownload),
-            hongguoTvBuild = value.hongguoTvBuild.copy(download = hongguoDownload)), upgrade)
+            terminalBuddyBuild = value.terminalBuddyBuild.copy(download = terminalDownload)), upgrade)
     }.stateIn(viewModelScope, SharingStarted.Eagerly,
         withAppSessions(mutable.value.copy(androidBuild = mutable.value.androidBuild.copy(download = buildDownloads.state.value),
-            terminalBuddyBuild = mutable.value.terminalBuddyBuild.copy(download = terminalBuddyBuildDownloads.state.value),
-            hongguoTvBuild = mutable.value.hongguoTvBuild.copy(download = hongguoTvBuildDownloads.state.value)), appUpdates.state.value))
+            terminalBuddyBuild = mutable.value.terminalBuddyBuild.copy(download = terminalBuddyBuildDownloads.state.value)), appUpdates.state.value))
 
     /**
      * 服务器是否可达：由 ApiClient 在每次请求后更新（成功即在线，连接失败即离线）。
@@ -498,7 +491,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         generation++; shelfGeneration++; shelfJob?.cancel(); shelfDeleteJob?.cancel(); shelfUpdateJob?.cancel(); cancelReaderLoads(); readerProgressJob?.cancel(); readerPosition = null; queuedReaderPosition = null
         stopForegroundWork(); sessionCacheJob?.cancel(); chatJob?.cancel(); cancelSheetLoads(); mutationJob?.cancel()
         refreshJobs.values.forEach(Job::cancel); refreshJobs.clear()
-        appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); hongguoTvBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
+        appUpdates.reset(); buildDownloads.reset(); terminalBuddyBuildDownloads.reset(); session.clear(); repository.clearCaches(); sessionListCache.clear()
         // 重新构造状态会一并关闭隐藏浏览器，重新登录一律回到正常首页。
         mutable.value = initialState(error = message)
         if (message != null) notify(message)
@@ -536,7 +529,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (pollingJob?.isActive != true) pollingJob = viewModelScope.launch {
             while (isActive && session.loggedIn) {
                 refreshCurrent(true); refreshSessions(true); refreshChat(); checkAppUpdate()
-                try { buildDownloads.poll(); terminalBuddyBuildDownloads.poll(); hongguoTvBuildDownloads.poll() } catch (error: CancellationException) { throw error } catch (_: Throwable) {}
+                try { buildDownloads.poll(); terminalBuddyBuildDownloads.poll() } catch (error: CancellationException) { throw error } catch (_: Throwable) {}
                 if (mutable.value.chat.processing && System.currentTimeMillis() - processingStarted > 180_000) mutable.update { it.copy(chat = it.chat.copy(processing = false)) }
                 delay(if (mutable.value.realtime) 15_000 else 8_000)
             }
@@ -569,7 +562,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
                     // 构建会话摘要与 Frp / Docker 一样在前台自动同步。
                     refreshAndroidBuild(silent)
                     refreshAndroidBuild(silent, AndroidBuildProject.TerminalBuddy)
-                    refreshAndroidBuild(silent, AndroidBuildProject.HongguoTv)
                     // 巡检与剧集摘要同样在会话列表常驻刷新（安卓新增的两条系统会话）。
                     refreshCheckLogs(silent)
                     refreshLibrary(silent)
@@ -591,7 +583,6 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             }
             ManagementService.AppBuild -> refreshAndroidBuild(silent)
             ManagementService.TerminalBuddyBuild -> refreshAndroidBuild(silent, AndroidBuildProject.TerminalBuddy)
-            ManagementService.HongguoTvBuild -> refreshAndroidBuild(silent, AndroidBuildProject.HongguoTv)
             ManagementService.CheckLogs -> refreshCheckLogs(silent)
             ManagementService.Library -> refreshLibrary(silent)
             ManagementService.Subscriptions -> refreshSubscriptions(silent)
