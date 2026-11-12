@@ -1,6 +1,6 @@
 services:
   signer:
-    image: huluwa-hongguo-signer:portable-42b73f2-pr7-r2
+    image: huluwa-hongguo-signer:portable-015a388
     build:
       context: .
       additional_contexts:

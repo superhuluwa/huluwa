@@ -25,7 +25,7 @@ import (
 
 const engine = "portable-go"
 
-var upstreamRevision = "42b73f201309423f012d483bfc0ce579dcc0937c"
+var upstreamRevision = "015a388112ee148a7d2dfb7ecfafe171bbab957f"
 
 const playbackRevision = "bed14595d35b02e0d550270621812ca7386c4108"
 

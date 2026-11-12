@@ -1,10 +1,10 @@
 # 红果独立签名服务
 
 红果短剧的无 Android 签名实现。服务使用
-[openhongguo](https://github.com/beilunyang/openhongguo) v0.2.0（提交
-`42b73f201309423f012d483bfc0ce579dcc0937c`）的公开 Go SDK 注册匿名设备，
-并在本机完成签名计算。播放签名移植自 [PR #7](https://github.com/beilunyang/openhongguo/pull/7)，
-固定提交为 `bed14595d35b02e0d550270621812ca7386c4108`。
+[openhongguo](https://github.com/beilunyang/openhongguo) 最新主分支（固定提交
+`015a388112ee148a7d2dfb7ecfafe171bbab957f`，2026-11-12）的公开 Go SDK 注册匿名设备，
+并在本机完成签名计算。播放签名包含已合并的 [PR #7](https://github.com/beilunyang/openhongguo/pull/7)
+修复（原提交 `bed14595d35b02e0d550270621812ca7386c4108`）。
 
 它兼容葫芦娃使用的原签名接口：
 
@@ -25,13 +25,16 @@
 也不在 `/sign` 中轮换设备。`/info` 提供 `playbackRevision`、`playbackSigning` 与
 `supportsBodySigning`，用于识别支持 PR #7 的部署版本。
 
+最新正式标签仍为 `v0.2.0`，未包含 PR #7；部署固定使用上述主分支提交。
+`/info.upstreamRevision` 返回该提交，便于确认 8901 容器的实际来源。
+
 ## 构建
 
 构建时需要本机已有这个固定版本的 openhongguo 源码：
 
 ```bash
 git clone https://github.com/beilunyang/openhongguo.git ../../../openhongguo
-git -C ../../../openhongguo checkout 42b73f201309423f012d483bfc0ce579dcc0937c
+git -C ../../../openhongguo checkout 015a388112ee148a7d2dfb7ecfafe171bbab957f
 docker compose build
 ```
 

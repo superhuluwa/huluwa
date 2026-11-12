@@ -1,7 +1,7 @@
 # The named openhongguo context is the clean, pinned upstream checkout.
 ARG GO_VERSION=1.27.3
 FROM golang:${GO_VERSION}-alpine AS build
-ARG UPSTREAM_COMMIT=42b73f201309423f012d483bfc0ce579dcc0937c
+ARG UPSTREAM_COMMIT=015a388112ee148a7d2dfb7ecfafe171bbab957f
 WORKDIR /src/signer
 COPY go.mod main.go ./
 COPY internal/ ./internal/
