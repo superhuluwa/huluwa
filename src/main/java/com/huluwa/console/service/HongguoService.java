@@ -334,19 +334,27 @@ public class HongguoService {
 
     private JsonNode request(String path, Map<String, String> business, String payload) {
         String signerUrl = signUrl();
-        JsonNode result = requestOnce(path, business, signerUrl, payload);
-        boolean playback = PLAYBACK_PATH.equals(path);
-        if (playback && result.path("code").asInt(-1) == 110) {
-            // 明确拒绝访问时只恢复一次匿名设备，再读取新档案重签同一请求。
-            recoverSigner(signerUrl);
+        JsonNode result;
+        try {
             result = requestOnce(path, business, signerUrl, payload);
+        } catch (RecoverablePlaybackException error) {
+            // 播放空响应与 110 共用一次恢复机会；重试重新读取设备、构造 URL 并签名。
+            recoverSigner(signerUrl);
+            try {
+                result = requestOnce(path, business, signerUrl, payload);
+            } catch (RecoverablePlaybackException retryError) {
+                throw new BusinessException(502, retryError.getMessage() + "，更换匿名设备后仍未恢复，请稍后重试");
+            }
         }
         int code = result.path("code").asInt(-1);
-        if (code == 110) throw new BusinessException(502, playback
-                ? "红果拒绝了播放请求（110），自动恢复后仍未通过，请稍后重试"
-                : "红果拒绝了本次请求（110），请稍后重试");
+        if (code == 110) throw new BusinessException(502, "红果拒绝了本次请求（110），请稍后重试");
         if (code != 0) throw new BusinessException(502, "红果请求失败（" + code + "）：" + text(result, "message"));
         return result;
+    }
+
+    /** 仅播放上游的空响应和 110 可触发换设备，签名服务故障不触发。 */
+    private static final class RecoverablePlaybackException extends BusinessException {
+        private RecoverablePlaybackException(String message) { super(502, message); }
     }
 
     private void recoverSigner(String signerUrl) {
@@ -354,10 +362,10 @@ public class HongguoService {
                 .timeout(Duration.ofSeconds(60)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString("{}")).build());
         if (response.statusCode() == 404) {
-            throw new BusinessException(502, "红果拒绝播放请求（110），请升级签名服务以启用自动恢复");
+            throw new BusinessException(502, "红果播放暂不可用，请升级签名服务以启用自动恢复");
         }
         if (response.statusCode() != 200 || !readJson(response, "签名服务恢复接口").path("ok").asBoolean()) {
-            throw new BusinessException(502, "红果拒绝播放请求（110），签名 App 自动恢复未完成，请稍后重试");
+            throw new BusinessException(502, "红果播放暂不可用，匿名设备自动恢复未完成，请稍后重试");
         }
     }
 
@@ -411,7 +419,12 @@ public class HongguoService {
         });
         Set<String> required = payload == null ? GET_SIGN_HEADERS : PLAYBACK_SIGN_HEADERS;
         if (!found.containsAll(required)) throw new BusinessException(502, "签名服务未返回完整签名，请更新红果算法服务");
-        return readJson(send(request.build()), "红果接口");
+        boolean playback = PLAYBACK_PATH.equals(path);
+        JsonNode result = readJson(send(request.build()), "红果接口", playback);
+        if (playback && result.path("code").asInt(-1) == 110) {
+            throw new RecoverablePlaybackException("红果拒绝了播放请求（110）");
+        }
+        return result;
     }
 
     private HttpResponse<byte[]> send(HttpRequest request) {
@@ -422,12 +435,19 @@ public class HongguoService {
     }
 
     private JsonNode readJson(HttpResponse<byte[]> response, String source) {
+        return readJson(response, source, false);
+    }
+
+    private JsonNode readJson(HttpResponse<byte[]> response, String source, boolean playback) {
         if (response.statusCode() != 200) throw new BusinessException(502, source + "返回 HTTP " + response.statusCode());
         byte[] bytes = response.body();
-        if (bytes.length == 0) throw new BusinessException(502, "服务返回空内容，请稍后重试或检查签名 App 的运行状态");
         try {
             if (bytes.length > 1 && (bytes[0] & 255) == 31 && (bytes[1] & 255) == 139) {
                 try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(bytes))) { bytes = gzip.readAllBytes(); }
+            }
+            if (bytes.length == 0 || new String(bytes, StandardCharsets.UTF_8).isBlank()) {
+                if (playback) throw new RecoverablePlaybackException("红果播放接口返回空内容");
+                throw new BusinessException(502, source + "返回空内容，请稍后重试");
             }
             JsonNode result = json.readTree(bytes);
             if (result == null || !result.isObject()) throw new IOException("not an object");
