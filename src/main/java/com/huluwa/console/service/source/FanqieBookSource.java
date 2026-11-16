@@ -3,6 +3,7 @@ package com.huluwa.console.service.source;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.FanqieLibraryService;
 import com.huluwa.console.service.FanqieSearchService;
+import com.huluwa.console.service.fanqie.FanqieChapterParser;
 import com.huluwa.console.service.fanqie.FanqieClient;
 import org.springframework.stereotype.Component;
 
@@ -68,6 +69,24 @@ public class FanqieBookSource implements BookSource {
     @Override
     public List<Chapter> chapters(String bookId) {
         FanqieLibraryService.BookIndex index = prepare(bookId);
+        // 短篇常把多章合并为一个上游条目，需要从完整正文补出可跳转的目录。
+        if (index.chapters().size() == 1) {
+            List<FanqieChapterParser.Part> parts;
+            try {
+                parts = FanqieChapterParser.split(readContent(bookId, index, 0));
+            } catch (BusinessException error) {
+                // 正文暂时不可用时仍返回上游目录，保留稍后重试阅读的入口。
+                parts = List.of();
+            }
+            if (!parts.isEmpty()) {
+                String itemId = index.chapters().getFirst().itemId();
+                List<Chapter> chapters = new ArrayList<>(parts.size());
+                for (int i = 0; i < parts.size(); i++) {
+                    chapters.add(new Chapter(itemId + "-" + (i + 1), parts.get(i).title(), i + 1));
+                }
+                return chapters;
+            }
+        }
         List<Chapter> chapters = new ArrayList<>(index.chapters().size());
         for (int i = 0; i < index.chapters().size(); i++) {
             FanqieClient.ChapterEntry entry = index.chapters().get(i);
@@ -81,22 +100,40 @@ public class FanqieBookSource implements BookSource {
     @Override
     public ChapterContent chapter(String bookId, String chapterId) {
         FanqieLibraryService.BookIndex index = prepare(bookId);
-        int position = -1;
-        for (int i = 0; i < index.chapters().size(); i++) {
-            if (index.chapters().get(i).itemId().equals(chapterId)) { position = i; break; }
+        if (index.chapters().size() == 1) {
+            String prefix = index.chapters().getFirst().itemId() + "-";
+            if (chapterId.startsWith(prefix)) {
+                String suffix = chapterId.substring(prefix.length());
+                if (!suffix.matches("[1-9][0-9]{0,5}")) {
+                    throw new BusinessException(404, "章节不存在，请刷新目录");
+                }
+                int partIndex = Integer.parseInt(suffix) - 1;
+                List<FanqieChapterParser.Part> parts = FanqieChapterParser.split(readContent(bookId, index, 0));
+                if (partIndex >= parts.size()) throw new BusinessException(404, "章节不存在，请刷新目录");
+                FanqieChapterParser.Part part = parts.get(partIndex);
+                return new ChapterContent(chapterId, part.title(), part.content());
+            }
         }
-        if (position < 0) throw new BusinessException(404, "章节不存在，请刷新目录");
+        for (int i = 0; i < index.chapters().size(); i++) {
+            FanqieClient.ChapterEntry entry = index.chapters().get(i);
+            if (!entry.itemId().equals(chapterId)) continue;
+            String title = entry.title().isBlank() ? "第 " + (i + 1) + " 章" : entry.title();
+            // 旧目录中的上游章节地址继续返回完整正文，已有阅读进度仍可使用。
+            return new ChapterContent(chapterId, title, readContent(bookId, index, i));
+        }
+        throw new BusinessException(404, "章节不存在，请刷新目录");
+    }
+
+    private String readContent(String bookId, FanqieLibraryService.BookIndex index, int position) {
         FanqieClient.ChapterEntry entry = index.chapters().get(position);
-        String content = library.cachedChapter(bookId, chapterId);
-        if (content == null) {
-            // 复用阅读链路的「按需拉取并落盘」，避免重复实现缓存逻辑；
-            // read() 的参数是章节在目录中的位置（从 1 开始），不是上游的章节序号。
+        String content = library.cachedChapter(bookId, entry.itemId());
+        if (content == null || content.isBlank()) {
+            // read() 使用目录位置（从 1 开始），并复用现有的按需拉取和落盘缓存。
             Object value = library.read(bookId, position + 1).get("content");
             content = value == null ? "" : value.toString();
         }
         if (content.isBlank()) throw new BusinessException(502, "当前章节暂时无法获取，请重试");
-        String title = entry.title() == null || entry.title().isBlank() ? "未命名章节" : entry.title();
-        return new ChapterContent(chapterId, title, content);
+        return content;
     }
 
     /**

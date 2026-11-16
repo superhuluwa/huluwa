@@ -171,6 +171,10 @@ public final class FanqieClient {
 
     /** 目录章节。 */
     public record ChapterEntry(String itemId, String title, long order, String volumeName, long wordNumber) {
+        public ChapterEntry {
+            // 同时覆盖上游新目录和磁盘旧目录的反序列化。
+            title = FanqieChapterParser.normalizeTitle(title);
+        }
     }
 
     /** 单章正文。 */
@@ -1593,7 +1597,8 @@ public final class FanqieClient {
 
     /** 单章在 TXT 中的块：标题行 + 空行 + 正文 + 空行。 */
     public static String chapterBlock(Fetched chapter) {
-        String title = chapter.title() == null || chapter.title().isBlank() ? "未命名章节" : chapter.title().trim();
+        String title = FanqieChapterParser.normalizeTitle(chapter.title());
+        if (title.isEmpty()) title = "未命名章节";
         String text = chapter.text() == null || chapter.text().isBlank()
                 ? "[下载失败: " + chapter.error() + "]" : chapter.text();
         return title + "\n\n" + text + "\n\n";
