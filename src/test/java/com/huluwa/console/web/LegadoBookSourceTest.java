@@ -65,7 +65,7 @@ class LegadoBookSourceTest {
     }
 
     @Test
-    void rulesUseJsonPathOnDataEnvelope() {
+    void rulesKeepEachBookAndChapterInAnIndependentJsonContext() {
         Map<String, Object> json = LegadoBookSource.json(SOURCE, ORIGIN, "token-1").getFirst();
 
         @SuppressWarnings("unchecked")
@@ -75,9 +75,15 @@ class LegadoBookSourceTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> content = (Map<String, Object>) json.get("ruleContent");
 
-        assertEquals("$.data.books[*]", search.get("bookList"));
+        String bookListRule = (String) search.get("bookList");
+        assertTrue(bookListRule.startsWith("@js:"));
+        assertTrue(bookListRule.contains("JSON.stringify(row)"));
+        assertTrue(bookListRule.contains("encodeURIComponent(id)"));
         assertEquals("$.bookUrl", search.get("bookUrl"));
-        assertEquals("$.data[*]", toc.get("chapterList"));
+        String chapterListRule = (String) toc.get("chapterList");
+        assertTrue(chapterListRule.startsWith("@js:"));
+        assertTrue(chapterListRule.contains("JSON.stringify(row)"));
+        assertTrue(chapterListRule.contains("encodeURIComponent(id)"));
         assertEquals("$.url", toc.get("chapterUrl"));
         assertEquals("$.data.content", content.get("content"));
     }
@@ -94,6 +100,7 @@ class LegadoBookSourceTest {
         Map<String, Object> bookInfo = (Map<String, Object>) json.get("ruleBookInfo");
 
         assertEquals("$.data.tocUrl", bookInfo.get("tocUrl"));
+        assertEquals("true", bookInfo.get("canReName"));
     }
 
     /** 移除的字段曾被阅读器版本差异影响，不应再出现。 */

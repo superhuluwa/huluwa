@@ -9,7 +9,8 @@ import java.util.Map;
 /**
  * 生成开源阅读（Legado）书源 JSON。
  *
- * <p>书源接口返回的是扁平 JSON，因此全部使用 JSONPath 规则，不需要 HTML 页面或 JS 规则。</p>
+ * <p>搜索和目录先将每个条目转为独立 JSON 文本，再以 JSONPath 读取字段，
+ * 避免阅读不同版本对 Map 条目的处理差异使书籍地址为空、回退为同一个搜索页地址。</p>
  *
  * <p>两点容易踩坑，务必保持：</p>
  * <ul>
@@ -35,7 +36,7 @@ final class LegadoBookSource {
         String base = origin + "/api/sources/" + source.id();
 
         Map<String, Object> search = new LinkedHashMap<>();
-        search.put("bookList", "$.data.books[*]");
+        search.put("bookList", searchItemsRule());
         search.put("name", "$.name");
         search.put("author", "$.author");
         search.put("intro", "$.intro");
@@ -46,6 +47,8 @@ final class LegadoBookSource {
         search.put("bookUrl", "$.bookUrl");
 
         Map<String, Object> bookInfo = new LinkedHashMap<>();
+        // 允许详情响应纠正阅读本地已经保存过的错误书名/作者。
+        bookInfo.put("canReName", "true");
         bookInfo.put("name", "$.data.name");
         bookInfo.put("author", "$.data.author");
         bookInfo.put("intro", "$.data.intro");
@@ -58,7 +61,7 @@ final class LegadoBookSource {
         bookInfo.put("tocUrl", "$.data.tocUrl");
 
         Map<String, Object> toc = new LinkedHashMap<>();
-        toc.put("chapterList", "$.data[*]");
+        toc.put("chapterList", chapterItemsRule());
         toc.put("chapterName", "$.title");
         toc.put("chapterUrl", "$.url");
 
@@ -68,7 +71,7 @@ final class LegadoBookSource {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("bookSourceName", "番茄书源【葫芦娃】");
         json.put("bookSourceGroup", "番茄");
-        json.put("bookSourceComment", "支持输入番茄分享链接、完整分享口令或书号精确找书；刷新目录同步上游全部章节，兼容章节标题空格。");
+        json.put("bookSourceComment", "支持按书名、分享链接或书号搜索；搜索条目独立解析并校验书号与地址，详情同步书名作者，目录按原章节完整显示。更新后请覆盖导入本书源。");
         json.put("lastUpdateTime", System.currentTimeMillis());
         json.put("bookSourceUrl", base);
         json.put("bookSourceType", 0);
@@ -85,5 +88,44 @@ final class LegadoBookSource {
         json.put("ruleToc", toc);
         json.put("ruleContent", content);
         return json;
+    }
+
+    private static String searchItemsRule() {
+        return """
+                @js:
+                var payload = JSON.parse(String(result));
+                var rows = payload.data && payload.data.books;
+                if (!Array.isArray(rows)) throw new Error("书籍列表格式不正确");
+                rows.map(function (row) {
+                    var id = String(row.bookId || "");
+                    var url = String(row.bookUrl || "");
+                    var path = url.split(/[?#]/)[0];
+                    var suffix = "/books/" + encodeURIComponent(id);
+                    if (!id || !/^https?:\\/\\//i.test(url) ||
+                        path.slice(-suffix.length) !== suffix) {
+                        throw new Error("书籍地址与书号不一致，请更新葫芦娃书源");
+                    }
+                    return JSON.stringify(row);
+                });
+                """.strip();
+    }
+
+    private static String chapterItemsRule() {
+        return """
+                @js:
+                var rows = JSON.parse(String(result)).data;
+                if (!Array.isArray(rows)) throw new Error("章节列表格式不正确");
+                rows.map(function (row) {
+                    var id = String(row.chapterId || "");
+                    var url = String(row.url || "");
+                    var path = url.split(/[?#]/)[0];
+                    var suffix = "/chapters/" + encodeURIComponent(id);
+                    if (!id || !/^https?:\\/\\//i.test(url) ||
+                        path.slice(-suffix.length) !== suffix) {
+                        throw new Error("章节地址与章节号不一致，请刷新目录");
+                    }
+                    return JSON.stringify(row);
+                });
+                """.strip();
     }
 }
