@@ -61,6 +61,7 @@ services:
       - '${SIGN_BIND:-0.0.0.0}:${SIGN_PORT:-8901}:8901'
     volumes:
       - '${APK_DIR:-./apk}:/apk:ro'
+      - './signer/sign_server.py:/app/sign_server.py:ro'
     environment:
       ADB_TARGET: android:5555
       TARGET_PKG: com.phoenix.read

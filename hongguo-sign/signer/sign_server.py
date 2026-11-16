@@ -11,9 +11,9 @@
 HTTP 接口
 ---------
   GET  /health   健康检查（会真实签一次名）
-  GET  /info     环境信息（frida 版本、App 包名、设备型号、可用接口）
+  GET  /info     环境信息、当前 App 的 deviceProfile 和请求体签名能力
   POST /sign     生成签名
-       Body:   {"url": "https://..."}
+       Body:   {"url": "https://...", "body_base64": "可选，原始请求体的 Base64"}
        Resp:   {"X-Gorgon":"...","X-Khronos":"...","X-Argus":"...",
                 "X-Ladon":"...","X-Medusa":"...","X-Helios":"..."}
   POST /verify   端到端验证（签名 -> 真实请求 search/tab -> 校验 code=0）
@@ -33,6 +33,9 @@ HTTP 接口
 import sys
 import os
 import json
+import base64
+import binascii
+import hashlib
 import time
 import argparse
 import threading
@@ -77,10 +80,48 @@ Java.perform(function () {
                 out.model = String(Build.MODEL.value);
                 out.sdkInt = String(Build.VERSION.SDK_INT.value);
             } catch (e) {}
+
+            // HULUWA_DEVICE_PROFILE_BEGIN
+            try {
+                var Params = Java.use('com.bytedance.frameworks.baselib.network.http.NetworkParams');
+                var Uri = Java.use('android.net.Uri');
+                var BuildInfo = Java.use('android.os.Build');
+                var VersionInfo = Java.use('android.os.Build$VERSION');
+                var LocaleInfo = Java.use('java.util.Locale');
+                var common = Params.addCommonParams.overload('java.lang.String', 'boolean').call(
+                    Params, 'https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/video_model/v', false);
+                var uri = Uri.parse(String(common));
+                var keys = ['device_id', 'iid', 'cdid', 'device_type', 'device_brand', 'channel',
+                    'aid', 'app_name', 'version_code', 'version_name', 'manifest_version_code',
+                    'update_version_code', 'os', 'ssmix', 'language', 'os_api', 'os_version',
+                    'resolution', 'dpi', 'ac', 'host_abi', 'device_platform',
+                    'dragon_device_type', 'user_is_login'];
+                var params = {};
+                for (var i = 0; i < keys.length; i++) {
+                    var value = uri.getQueryParameter(keys[i]);
+                    if (value !== null) params[keys[i]] = String(value);
+                }
+                if (!params.device_id || !params.iid || !params.cdid) {
+                    throw new Error('App device parameters are not initialized');
+                }
+                var agent = Params.getUserAgent();
+                var userAgent = agent === null ? '' : String(agent);
+                if (!userAgent || userAgent === 'null') {
+                    userAgent = 'com.phoenix.read/' + (params.version_code || '73932') +
+                        ' (Linux; U; Android ' + (params.os_version || String(VersionInfo.RELEASE.value)) +
+                        '; ' + String(LocaleInfo.getDefault()) + '; ' +
+                        (params.device_type || String(BuildInfo.MODEL.value)) + '; Build/' +
+                        String(BuildInfo.ID.value) + ';tt-ok/3.12.13.20)';
+                }
+                out.deviceProfile = {params: params, user_agent: userAgent};
+            } catch (e) {
+                out.deviceProfileError = String(e);
+            }
+            // HULUWA_DEVICE_PROFILE_END
             return out;
         },
 
-        sign: function (url) {
+        sign: function (url, bodyMd5) {
             try {
                 var NP = Java.use('com.bytedance.frameworks.baselib.network.http.NetworkParams');
                 var HM = Java.use('java.util.HashMap');
@@ -90,6 +131,11 @@ Java.perform(function () {
                 var l = AL.$new();
                 l.add('application/json; charset=utf-8');
                 m.put('accept', l);
+                if (bodyMd5 !== null && bodyMd5 !== undefined) {
+                    var stub = AL.$new();
+                    stub.add(String(bodyMd5));
+                    m.put('x-ss-stub', stub);
+                }
 
                 var ret = NP.tryAddSecurityFactor(url, m);
                 if (ret === null) return {__error: 'tryAddSecurityFactor returned null'};
@@ -274,8 +320,10 @@ class Signer:
     def info(self):
         return self._call("info", timeout=20)
 
-    def sign(self, url, timeout=30):
-        return self._call("sign", url, timeout=timeout)
+    def sign(self, url, timeout=30, body=None):
+        # 必须使用线上原始字节；包括空请求体和已经 gzip 的账号请求。
+        body_md5 = hashlib.md5(body).hexdigest().upper() if body is not None else None
+        return self._call("sign", url, body_md5, timeout=timeout)
 
     def reset(self):
         script, session = self.script, self.session
@@ -443,6 +491,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/info":
             try:
                 info = self.signer.info()
+                info["supportsBodySigning"] = True
+                info["bodyEncoding"] = "base64"
                 info["frida_version"] = frida.__version__
                 info["target_pkg"] = self.signer.pkg
                 info["frida_host"] = self.signer.host
@@ -465,7 +515,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "missing 'url' in JSON body"})
                 return
             try:
-                sig = self.signer.sign(url)
+                body = None
+                if "body_base64" in data:
+                    if not isinstance(data["body_base64"], str):
+                        raise ValueError("body_base64 必须为 Base64 字符串")
+                    body = base64.b64decode(data["body_base64"], validate=True)
+                elif "body" in data:
+                    if not isinstance(data["body"], str):
+                        raise ValueError("body 必须为 UTF-8 字符串")
+                    body = data["body"].encode("utf-8")
+            except (ValueError, binascii.Error) as error:
+                self._send(400, {"error": str(error)})
+                return
+            try:
+                sig = self.signer.sign(url, body=body)
                 if not sig:
                     self._send(500, {"error": "sign returned empty"})
                 else:

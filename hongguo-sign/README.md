@@ -72,6 +72,12 @@ curl -X POST http://192.168.3.83:8901/sign \
   -d '{"url":"https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/search/tab/v?aid=8662&query=test"}'
 ```
 
+`/info.deviceProfile` 提供当前 App 的设备参数和 `user_agent`，调用端必须与这些身份字段保持一致，不能混用本机算法注册的设备。`supportsBodySigning=true` 声明请求体签名能力；`POST /sign` 可额外传入 `body_base64`（原始请求字节的 Base64），也兼容 UTF-8 字符串字段 `body`。服务按原始字节的 MD5 向 App 传入 `x-ss-stub`，包含空请求体和 gzip 请求体，调用端发送上游时须使用同一份字节。
+
+Compose 只读挂载 `signer/sign_server.py`，更新 Python 服务后重新创建 signer 即可生效，无需重新构建镜像。
+
+红果 TV 默认经飞牛 frpc 的 `http://123.57.172.104:8901` 访问本服务，对应映射转发到 `192.168.3.83:8901`。
+
 `/sign` 返回 `X-Gorgon`、`X-Khronos`、`X-Argus`、`X-Ladon`、`X-Medusa`、`X-Helios`。签名绑定完整 URL，改变任何查询参数都需要重新生成。
 
 `/health` 会实际调用签名入口，只有具备 `X-Medusa` 和 `X-Helios` 才会报告就绪。原 HTTP 协议和 `/verify` 接口保持兼容；部署过程不自动执行额外的端到端验证脚本。
