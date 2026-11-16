@@ -71,7 +71,7 @@ final class LegadoBookSource {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("bookSourceName", "番茄书源【葫芦娃】");
         json.put("bookSourceGroup", "番茄");
-        json.put("bookSourceComment", "支持按书名、分享链接或书号搜索；搜索条目独立解析并校验书号与地址，详情同步书名作者，目录按原章节完整显示。更新后请覆盖导入本书源。");
+        json.put("bookSourceComment", "支持按当前书名、原书名、分享链接或书号搜索换源；同名不同作者保留各自书号与目录。搜索条目独立解析，详情同步所选书名与作者。");
         json.put("lastUpdateTime", System.currentTimeMillis());
         json.put("bookSourceUrl", base);
         json.put("bookSourceType", 0);

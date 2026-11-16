@@ -166,7 +166,10 @@ public final class FanqieClient {
     public record Book(String bookId, String bookName, String author, String abstractText,
                        long wordNumber, Integer creationStatus, boolean finished,
                        double score, long readCount, String category, String thumbUrl,
-                       String lastChapterTitle) {
+                       String lastChapterTitle, List<String> alternateNames) {
+        public Book {
+            alternateNames = alternateNames == null ? List.of() : List.copyOf(alternateNames);
+        }
     }
 
     /** 目录章节。 */
@@ -1237,7 +1240,17 @@ public final class FanqieClient {
                 status != null && status == 1,
                 numDouble(b.path("score")), numLong(b.path("read_count")),
                 text(b.path("category")), text(b.path("thumb_url")),
-                text(b.path("last_chapter_title")));
+                text(b.path("last_chapter_title")), alternateBookNames(b, name));
+    }
+
+    /** 番茄改名后仍保留原书名；换源匹配需要同时识别这些名字，而不是只认当前书名。 */
+    private static List<String> alternateBookNames(JsonNode book, String name) {
+        Set<String> names = new LinkedHashSet<>();
+        for (String field : List.of("original_book_name", "modified_reputation_book_name", "reputation_book_name")) {
+            String alternate = text(book.path(field)).strip();
+            if (!alternate.isBlank() && !alternate.equals(name)) names.add(alternate);
+        }
+        return List.copyOf(names);
     }
 
     /** 取一页搜索结果，返回 (书目列表, 下一页 passback 令牌或 null)。 */

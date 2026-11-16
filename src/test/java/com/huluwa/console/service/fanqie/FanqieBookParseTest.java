@@ -41,6 +41,22 @@ class FanqieBookParseTest {
     }
 
     @Test
+    void renamedBookKeepsItsOriginalNameWithoutChangingItsAuthorOrId() throws Exception {
+        var node = JSON.readTree("""
+                {"book_id":"7652970460308589592","book_name":"我是伪人惊悚世界唯一预言家",
+                 "original_book_name":"伪人降临！我是全场唯一预言家",
+                 "modified_reputation_book_name":"伪人降临！我是全场唯一预言家",
+                 "author":"蘑菇炖猪头"}
+                """);
+
+        var book = FanqieClient.parseBookNode(node).getFirst();
+        assertEquals("7652970460308589592", book.bookId());
+        assertEquals("我是伪人惊悚世界唯一预言家", book.bookName());
+        assertEquals("蘑菇炖猪头", book.author());
+        assertEquals(List.of("伪人降临！我是全场唯一预言家"), book.alternateNames());
+    }
+
+    @Test
     void finishedIsTrueWhenCreationStatusIsOne() throws Exception {
         var node = JSON.readTree("""
                 {"book_id":"123456789012","book_name":"完结书","creation_status":1}

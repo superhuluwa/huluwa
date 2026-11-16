@@ -65,16 +65,20 @@ public class FanqieBookSource implements BookSource {
     public BookInfo book(String bookId) {
         FanqieLibraryService.BookIndex index = library.findIndex(bookId);
         if (index != null) {
-            // 已加入书架：目录缓存里的书名、简介最可靠，且不需要再访问上游。
+            // 目录只保存打开时的书名；优先用书目元数据补齐当前书名、作者及原书名。
             FanqieClient.Book cached = searchService.findCached(bookId);
+            if (cached == null) cached = searchService.describe(bookId);
             FanqieClient.ChapterEntry last = index.chapters().isEmpty()
                     ? null : index.chapters().getLast();
             long words = index.chapters().stream().mapToLong(FanqieClient.ChapterEntry::wordNumber).sum();
-            return new BookInfo(index.bookId(), index.title(), index.author(),
+            return new BookInfo(index.bookId(),
+                    cached == null || cached.bookName().isBlank() ? index.title() : cached.bookName(),
+                    cached == null || cached.author().isBlank() ? index.author() : cached.author(),
                     cached == null ? "" : cached.abstractText(),
                     cached == null ? "" : cached.category(), index.cover(),
                     last == null ? "" : last.title(), words,
-                    cached == null ? null : cached.finished());
+                    cached == null ? null : cached.finished(),
+                    cached == null ? List.of() : cached.alternateNames());
         }
         FanqieClient.Book detail = searchService.describe(bookId);
         return detail == null ? null : toBookInfo(detail);
@@ -165,6 +169,6 @@ public class FanqieBookSource implements BookSource {
     private static BookInfo toBookInfo(FanqieClient.Book book) {
         return new BookInfo(book.bookId(), book.bookName(), book.author(), book.abstractText(),
                 book.category(), book.thumbUrl(), book.lastChapterTitle(), book.wordNumber(),
-                book.finished());
+                book.finished(), book.alternateNames());
     }
 }

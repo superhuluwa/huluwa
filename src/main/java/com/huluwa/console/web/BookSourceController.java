@@ -17,12 +17,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -76,7 +78,7 @@ public class BookSourceController {
         String origin = origins.resolve(null, request);
         List<Map<String, Object>> books = new ArrayList<>(result.books().size());
         for (BookSource.BookInfo book : result.books()) {
-            books.add(describeBook(origin, sourceId, book));
+            books.add(describeBook(origin, sourceId, book, matchingName(book, key)));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("books", books);
@@ -87,11 +89,19 @@ public class BookSourceController {
     /** 书籍详情；书籍不在书架时实时查一次上游。 */
     @GetMapping("/{sourceId}/books/{bookId}")
     public ApiResult<Map<String, Object>> book(@PathVariable String sourceId, @PathVariable String bookId,
+                                               @RequestParam(required = false) String title,
                                                HttpServletRequest request) {
         BookSource.BookInfo book = registry.require(sourceId).book(bookId);
         if (book == null) throw new BusinessException(404, "书籍不存在");
-        return ApiResult.ok(describeBook(origins.resolve(null, request),
-                sourceId, book));
+        String name = book.name();
+        if (title != null && !title.isBlank()) {
+            // 别名仅影响展示和换源匹配，必须确实属于该书号；不能拿另一本书的标题冒用。
+            if (!title.equals(book.name()) && !book.alternateNames().contains(title)) {
+                throw new BusinessException(400, "书名与书号不匹配，请重新搜索或刷新换源列表");
+            }
+            name = title;
+        }
+        return ApiResult.ok(describeBook(origins.resolve(null, request), sourceId, book, name));
     }
 
     /**
@@ -147,11 +157,16 @@ public class BookSourceController {
      * <p>tocUrl 是必须的：阅读器会拿 bookUrl 的响应去跑目录规则，而详情接口返回的是
      * 单个对象，`$.data[*]` 取不到数组；显式给出 tocUrl 后才会请求真正的目录接口。</p>
      */
-    private static Map<String, Object> describeBook(String origin, String sourceId, BookSource.BookInfo book) {
+    private static Map<String, Object> describeBook(String origin, String sourceId, BookSource.BookInfo book,
+                                                     String name) {
         String bookBase = origin + "/api/sources/" + sourceId + "/books/" + book.bookId();
+        String bookUrl = name.equals(book.name()) ? bookBase
+                : bookBase + "?title=" + URLEncoder.encode(name, StandardCharsets.UTF_8);
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("bookId", book.bookId());
-        item.put("name", book.name());
+        item.put("name", name);
+        item.put("canonicalName", book.name());
+        item.put("alternateNames", book.alternateNames());
         item.put("author", book.author());
         item.put("intro", book.intro());
         item.put("kind", book.kind());
@@ -159,9 +174,28 @@ public class BookSourceController {
         item.put("lastChapterName", book.lastChapterName());
         item.put("wordCount", book.wordCount());
         item.put("finished", book.finished());
-        item.put("bookUrl", bookBase);
+        item.put("bookUrl", bookUrl);
         item.put("tocUrl", bookBase + "/chapters");
         return item;
+    }
+
+    /** 优先精确匹配当前名或别名，部分书名搜索只在当前名不匹配时选择别名。 */
+    private static String matchingName(BookSource.BookInfo book, String keyword) {
+        String query = normalizedName(keyword);
+        String current = normalizedName(book.name());
+        if (query.isEmpty() || current.equals(query)) return book.name();
+        for (String alternate : book.alternateNames()) {
+            if (normalizedName(alternate).equals(query)) return alternate;
+        }
+        if (current.contains(query)) return book.name();
+        for (String alternate : book.alternateNames()) {
+            if (normalizedName(alternate).contains(query)) return alternate;
+        }
+        return book.name();
+    }
+
+    private static String normalizedName(String name) {
+        return name == null ? "" : name.replaceAll("[\\p{P}\\p{Z}\\s]+", "").toLowerCase(Locale.ROOT);
     }
 
     @GetMapping("/exports/{taskId}/download")

@@ -43,9 +43,20 @@ public interface BookSource {
      * @param lastChapterName 最新章节名
      * @param wordCount       字数
      * @param finished        是否完结，null 表示未知
+     * @param alternateNames  同一书号的原书名或别名，用于跨书源换源时匹配
      */
     record BookInfo(String bookId, String name, String author, String intro, String kind,
-                    String coverUrl, String lastChapterName, long wordCount, Boolean finished) { }
+                    String coverUrl, String lastChapterName, long wordCount, Boolean finished,
+                    List<String> alternateNames) {
+        public BookInfo {
+            alternateNames = alternateNames == null ? List.of() : List.copyOf(alternateNames);
+        }
+
+        public BookInfo(String bookId, String name, String author, String intro, String kind,
+                        String coverUrl, String lastChapterName, long wordCount, Boolean finished) {
+            this(bookId, name, author, intro, kind, coverUrl, lastChapterName, wordCount, finished, List.of());
+        }
+    }
 
     /** 目录章节。 */
     record Chapter(String chapterId, String title, int order) { }
