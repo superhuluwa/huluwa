@@ -68,6 +68,8 @@ final class LegadoBookSource {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("bookSourceName", "番茄书源【葫芦娃】");
         json.put("bookSourceGroup", "番茄");
+        json.put("bookSourceComment", "支持输入番茄分享链接、完整分享口令或书号精确找书；刷新目录同步上游全部章节，兼容章节标题空格。");
+        json.put("lastUpdateTime", System.currentTimeMillis());
         json.put("bookSourceUrl", base);
         json.put("bookSourceType", 0);
         json.put("customOrder", 1);
@@ -75,7 +77,8 @@ final class LegadoBookSource {
         // 阅读器只能配置静态请求头，令牌直接写在这份 JSON 里。
         json.put("header", "{\"Authorization\":\"Bearer " + token + "\"}");
         // {{page}} 从 1 开始，对应接口的页码语义；返回空列表时阅读器自动停止翻页。
-        json.put("searchUrl", base + "/search?key={{key}}&page={{page}}");
+        // 分享链接本身可能有 &、+、#，先编码整个关键字，防止它被拆成额外查询参数。
+        json.put("searchUrl", base + "/search?key={{java.encodeURI(key)}}&page={{page}}");
 
         json.put("ruleSearch", search);
         json.put("ruleBookInfo", bookInfo);

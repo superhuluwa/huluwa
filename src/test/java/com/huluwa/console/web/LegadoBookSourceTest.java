@@ -50,7 +50,7 @@ class LegadoBookSourceTest {
         String searchUrl = (String) json.get("searchUrl");
 
         assertTrue(searchUrl.startsWith("http://"), "搜索地址必须是绝对地址");
-        assertTrue(searchUrl.contains("{{key}}"), "必须保留关键字变量");
+        assertTrue(searchUrl.contains("{{java.encodeURI(key)}}"), "分享链接和口令必须作为完整关键字编码");
         assertTrue(searchUrl.contains("{{page}}"), "必须保留页码变量");
     }
 

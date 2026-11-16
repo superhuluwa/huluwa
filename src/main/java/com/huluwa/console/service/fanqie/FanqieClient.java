@@ -1396,6 +1396,8 @@ public final class FanqieClient {
                 if (order == 0) {
                     order = numLong(r.path("order"));
                 }
+                // 部分目录不提供 order 字段，保持上游列表顺序；标题中的章号可能重复或缺省。
+                if (order <= 0) order = out.size() + 1L;
                 out.add(new ChapterEntry(text(r.path("item_id")), text(r.path("title")),
                         order, text(r.path("volume_name")), numLong(r.path("chapter_word_number"))));
             }

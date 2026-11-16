@@ -3,8 +3,8 @@ package com.huluwa.console.service.source;
 import com.huluwa.console.common.BusinessException;
 import com.huluwa.console.service.FanqieLibraryService;
 import com.huluwa.console.service.FanqieSearchService;
-import com.huluwa.console.service.fanqie.FanqieChapterParser;
 import com.huluwa.console.service.fanqie.FanqieClient;
+import com.huluwa.console.service.fanqie.FanqieShareLinks;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -23,7 +23,7 @@ public class FanqieBookSource implements BookSource {
 
     private final FanqieSearchService searchService;
     private final FanqieLibraryService library;
-    /** 按书号串行化「首次打开」，避免并发请求重复拉取上游目录。 */
+    /** 按书号串行化打开与刷新，避免并发请求重复拉取上游目录。 */
     private final ConcurrentHashMap<String, Object> openLocks = new ConcurrentHashMap<>();
 
     public FanqieBookSource(FanqieSearchService searchService, FanqieLibraryService library) {
@@ -37,7 +37,21 @@ public class FanqieBookSource implements BookSource {
 
     @Override
     public SearchResult search(String keyword, String cursor, int size) {
-        FanqieClient.SearchPage page = searchService.searchPage(keyword, cursor, size);
+        String query = keyword == null ? "" : keyword.strip();
+        String shareUrl = FanqieShareLinks.firstUrl(query);
+        boolean bookIdQuery = query.matches("[0-9]{6,24}");
+        if (shareUrl != null || bookIdQuery) {
+            // 分享口令可能超过普通关键字长度限制，优先按链接中的书号定位，避免命中同名短篇。
+            if (FanqieSearchService.SearchCursor.parse(cursor).page() > 1) {
+                return new SearchResult(List.of(), null);
+            }
+            String bookId = bookIdQuery ? query : searchService.resolveShareUrl(shareUrl);
+            if (bookId == null) throw new BusinessException(502, "分享链接暂时无法解析，请稍后重试或输入书号");
+            FanqieClient.Book book = searchService.describe(bookId);
+            if (book == null) throw new BusinessException(404, "分享书籍暂时无法获取，请稍后重试");
+            return new SearchResult(List.of(toBookInfo(book)), null);
+        }
+        FanqieClient.SearchPage page = searchService.searchPage(query, cursor, size);
         List<BookInfo> books = new ArrayList<>(page.books().size());
         for (FanqieClient.Book book : page.books()) {
             // 只有高亮文本、没有书号的结果无法定位书籍，书源里必须过滤掉。
@@ -68,25 +82,8 @@ public class FanqieBookSource implements BookSource {
 
     @Override
     public List<Chapter> chapters(String bookId) {
-        FanqieLibraryService.BookIndex index = prepare(bookId);
-        // 短篇常把多章合并为一个上游条目，需要从完整正文补出可跳转的目录。
-        if (index.chapters().size() == 1) {
-            List<FanqieChapterParser.Part> parts;
-            try {
-                parts = FanqieChapterParser.split(readContent(bookId, index, 0));
-            } catch (BusinessException error) {
-                // 正文暂时不可用时仍返回上游目录，保留稍后重试阅读的入口。
-                parts = List.of();
-            }
-            if (!parts.isEmpty()) {
-                String itemId = index.chapters().getFirst().itemId();
-                List<Chapter> chapters = new ArrayList<>(parts.size());
-                for (int i = 0; i < parts.size(); i++) {
-                    chapters.add(new Chapter(itemId + "-" + (i + 1), parts.get(i).title(), i + 1));
-                }
-                return chapters;
-            }
-        }
+        // 阅读器主动更新目录时刷新上游；正文请求只读缓存，避免逐章重复拉目录。
+        FanqieLibraryService.BookIndex index = prepare(bookId, true);
         List<Chapter> chapters = new ArrayList<>(index.chapters().size());
         for (int i = 0; i < index.chapters().size(); i++) {
             FanqieClient.ChapterEntry entry = index.chapters().get(i);
@@ -100,23 +97,12 @@ public class FanqieBookSource implements BookSource {
     @Override
     public ChapterContent chapter(String bookId, String chapterId) {
         FanqieLibraryService.BookIndex index = prepare(bookId);
-        if (index.chapters().size() == 1) {
-            String prefix = index.chapters().getFirst().itemId() + "-";
-            if (chapterId.startsWith(prefix)) {
-                String suffix = chapterId.substring(prefix.length());
-                if (!suffix.matches("[1-9][0-9]{0,5}")) {
-                    throw new BusinessException(404, "章节不存在，请刷新目录");
-                }
-                int partIndex = Integer.parseInt(suffix) - 1;
-                List<FanqieChapterParser.Part> parts = FanqieChapterParser.split(readContent(bookId, index, 0));
-                if (partIndex >= parts.size()) throw new BusinessException(404, "章节不存在，请刷新目录");
-                FanqieChapterParser.Part part = parts.get(partIndex);
-                return new ChapterContent(chapterId, part.title(), part.content());
-            }
-        }
+        // 兼容上一版生成过的拆分地址，统一返回原上游整章正文，不再截取片段。
+        String itemId = chapterId.matches("[0-9]{6,24}-[1-9][0-9]{0,5}")
+                ? chapterId.substring(0, chapterId.indexOf('-')) : chapterId;
         for (int i = 0; i < index.chapters().size(); i++) {
             FanqieClient.ChapterEntry entry = index.chapters().get(i);
-            if (!entry.itemId().equals(chapterId)) continue;
+            if (!entry.itemId().equals(itemId)) continue;
             String title = entry.title().isBlank() ? "第 " + (i + 1) + " 章" : entry.title();
             // 旧目录中的上游章节地址继续返回完整正文，已有阅读进度仍可使用。
             return new ChapterContent(chapterId, title, readContent(bookId, index, i));
@@ -137,21 +123,31 @@ public class FanqieBookSource implements BookSource {
     }
 
     /**
-     * 取书籍目录索引；不在书架时先按书号打开。
+     * 取书籍目录索引；首次访问按书号打开，目录更新请求重新拉取上游。
      *
      * <p>外部阅读器的流程是「搜索结果 → 目录 → 正文」，不会经过 App 的「加入书架」，
      * 因此这里自动调用 open 完成目录缓存，但书籍不会因此出现在书架里。</p>
      */
     private FanqieLibraryService.BookIndex prepare(String bookId) {
-        FanqieLibraryService.BookIndex index = library.findIndex(bookId);
-        if (index != null) return index;
+        return prepare(bookId, false);
+    }
+
+    private FanqieLibraryService.BookIndex prepare(String bookId, boolean refresh) {
+        if (bookId == null || !bookId.matches("[0-9]{6,24}")) {
+            throw new BusinessException(400, "小说书号不正确");
+        }
+        FanqieLibraryService.BookIndex previous = library.findIndex(bookId);
+        if (previous != null && !refresh) return previous;
+        FanqieLibraryService.BookIndex index;
         // 阅读器会并发请求详情与目录，这里串行化，避免同一本书重复拉取上游目录。
         Object lock = openLocks.computeIfAbsent(bookId, key -> new Object());
         try {
             synchronized (lock) {
                 index = library.findIndex(bookId);
-                if (index != null) return index;
+                // 等待期间已有请求更新过目录时，直接复用它的结果。
+                if (index != null && (!refresh || index != previous)) return index;
                 FanqieClient.Book known = searchService.findCached(bookId);
+                if (known == null && index == null) known = searchService.describe(bookId);
                 // 外部阅读器只缓存目录，不替用户把书加入书架。
                 library.open(bookId,
                         known == null ? "" : known.bookName(),
