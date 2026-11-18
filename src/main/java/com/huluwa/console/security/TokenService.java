@@ -3,6 +3,7 @@ package com.huluwa.console.security;
 import com.huluwa.console.config.AppProperties;
 import com.huluwa.console.service.ConfigService;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -24,6 +25,7 @@ import java.util.Date;
  * JWT 签发与校验。
  * 密钥优先取 huluwa.token.secret；未配置时自动生成 64 字节随机值并持久化到 sys_config，
  * 保证重启后已签发的令牌仍然有效。
+ * 默认不写入 exp 声明，登录令牌长期有效；改密时通过令牌版本号统一吊销。
  */
 @Service
 public class TokenService {
@@ -70,16 +72,24 @@ public class TokenService {
         }
     }
 
+    /**
+     * 签发登录令牌。
+     * <p>{@code huluwa.token.expire-hours} 小于等于 0 时不写入 exp 声明，令牌永不过期；
+     * 大于 0 时按小时数限时，保留按需收紧的能力。
+     * 即便不过期，改密后 {@link #revokeAll()} 仍会使历史令牌立即失效。
+     */
     public String issue(String username) {
         Instant now = Instant.now();
-        Duration ttl = Duration.ofHours(Math.max(1, properties.getToken().getExpireHours()));
-        return Jwts.builder()
+        JwtBuilder builder = Jwts.builder()
                 .subject(username)
                 .claim(CLAIM_VERSION, currentVersion())
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(ttl)))
-                .signWith(key())
-                .compact();
+                .signWith(key());
+        int expireHours = properties.getToken().getExpireHours();
+        if (expireHours > 0) {
+            builder.expiration(Date.from(now.plus(Duration.ofHours(expireHours))));
+        }
+        return builder.compact();
     }
 
     public String parseSubject(String token) {

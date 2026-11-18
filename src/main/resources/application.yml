@@ -70,7 +70,8 @@ huluwa:
   token:
     # 留空则首次启动自动生成并持久化到数据库
     secret: ''
-    expire-hours: 72
+    # 登录令牌有效期（小时）：0 或负数表示永不过期，可随时改成正数收紧
+    expire-hours: 0
   source:
     # 书源接口的对外地址（如 http://taihe.678120.cn:8086）。
     # 留空时按请求的 Host / X-Forwarded-* 头推断；反向代理改写 Host 时请显式配置。

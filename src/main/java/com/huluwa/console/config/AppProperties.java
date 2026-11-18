@@ -50,7 +50,8 @@ public class AppProperties {
     public static class Token {
         /** 留空则由应用首次启动生成并写入数据库 */
         private String secret = "";
-        private int expireHours = 72;
+        /** 登录令牌有效期（小时）；小于等于 0 表示永不过期，大于 0 时按该时长限时 */
+        private int expireHours = 0;
 
         public String getSecret() {
             return secret;
