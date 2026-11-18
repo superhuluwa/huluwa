@@ -175,6 +175,10 @@ import java.util.concurrent.atomic.AtomicReference
         WebView(context).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            // 默认 WebView 忽略网页的 viewport 声明，按 980px 排版；uni-app 等按 innerWidth 换算尺寸的站点
+            // 会因此字号和卡片都缩到极小、内容挤到左侧。开启后按设备宽度排版，与系统浏览器表现一致。
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
             settings.setGeolocationEnabled(false)
             settings.allowFileAccess = false
             settings.allowContentAccess = false
