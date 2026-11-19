@@ -28,6 +28,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 黄果短剧源站客户端。
@@ -214,7 +215,7 @@ public class HuangguoClient {
         byte[] responseKey = hkdf(shared, salt, info + "\nres", 32);
         long offset = hello.path("server_time").asLong() - System.currentTimeMillis() / 1000;
         return new Session(scope, referer, info, hello.path("kid").asText(),
-                hello.path("sid").asText(), offset, requestKey, responseKey);
+                hello.path("sid").asText(), offset, requestKey, responseKey, new AtomicInteger());
     }
 
     private JsonNode call(Session session, String plain) throws Exception {
@@ -301,11 +302,9 @@ public class HuangguoClient {
     }
 
     private record Session(String scope, String referer, String info, String kid, String sid,
-                           long offset, byte[] requestKey, byte[] responseKey) {
-        int seq;
-
-        synchronized int nextSeq() {
-            return ++seq;
+                           long offset, byte[] requestKey, byte[] responseKey, AtomicInteger sequence) {
+        int nextSeq() {
+            return sequence.incrementAndGet();
         }
 
         byte[] ad(int seq, long timestamp, String direction) {
