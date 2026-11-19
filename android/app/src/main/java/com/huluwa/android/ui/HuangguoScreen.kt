@@ -412,26 +412,6 @@ private fun Context.huangguoActivity(): Activity? {
     return null
 }
 
-@Composable fun HuangguoEntry(vm: HuluwaViewModel, active: Boolean) {
-    Row(Modifier.fillMaxWidth()
-        .clip(RoundedCornerShape(20.dp))
-        .background(if (active) Color(0xFFF1B83B) else Color.White)
-        .border(1.dp, if (active) Color.Transparent else HuluwaColors.Line, RoundedCornerShape(20.dp))
-        .clickable(role = androidx.compose.ui.semantics.Role.Button) { vm.openHuangguo() }
-        .padding(horizontal = 15.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(if (active) Color(0x33FFFFFF) else Color(0xFFFFF0C9)),
-            contentAlignment = Alignment.Center) {
-            Text("黄", color = if (active) Color.White else Color(0xFF8A5B00), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(if (active) "黄果短剧 · 返回中" else "黄果短剧", color = HuangguoInk, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text("竖屏推荐 · 搜索 · 选集连播", color = if (active) HuangguoInk.copy(alpha = .72f) else HuangguoMuted, fontSize = 12.sp)
-        }
-        Text("›", color = if (active) HuangguoInk else HuangguoMuted, fontSize = 24.sp)
-    }
-}
-
 
 private fun clockLabel(position: Long, duration: Long): String {
     fun part(value: Long): String {

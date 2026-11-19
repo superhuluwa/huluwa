@@ -30,14 +30,14 @@ import com.huluwa.android.*
 import com.huluwa.android.data.*
 
 /** 隐藏入口的点击计数：相邻两次点击间隔超过 2 秒就重新计数，累计 10 次后触发。 */
-@Composable private fun rememberHiddenBrowserTap(vm: HuluwaViewModel): () -> Unit {
+@Composable private fun rememberHiddenTap(action: () -> Unit): () -> Unit {
     var taps by remember { mutableIntStateOf(0) }
     var lastTapAt by remember { mutableLongStateOf(0L) }
     return {
         val now = System.currentTimeMillis()
         taps = if (now - lastTapAt > 2_000L) 1 else taps + 1
         lastTapAt = now
-        if (taps >= 10) { taps = 0; vm.openHiddenBrowser() }
+        if (taps >= 10) { taps = 0; action() }
     }
 }
 private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
@@ -53,7 +53,8 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo }
     val reconnecting = rememberReconnecting(vm)
     val snackbar = remember { SnackbarHostState() }
     val holder = rememberSaveableStateHolder()
-    val onMineTitleTap = rememberHiddenBrowserTap(vm)
+    val onFunctionsTitleTap = rememberHiddenTap(vm::openHuangguo)
+    val onMineTitleTap = rememberHiddenTap(vm::openHiddenBrowser)
     // 系统分享（番茄 App「分享 → 葫芦娃」）到达时切到番茄会话，文本由 ChatScreen 预填到输入框。
     val pendingShare by vm.pendingShare.collectAsStateWithLifecycle()
     LaunchedEffect(pendingShare, ui.auth.loggedIn, ui.sessionCacheReady) {
@@ -114,7 +115,11 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo }
                             // 连不上服务器时统一在标题右侧显示「重连中」，连接恢复后自动消失。
                             key(ui.tab) {
                                 PageHeader(ui.tab.title,
-                                    onTap = if (ui.tab == MainTab.Mine) onMineTitleTap else null,
+                                    onTap = when (ui.tab) {
+                                        MainTab.Functions -> onFunctionsTitleTap
+                                        MainTab.Mine -> onMineTitleTap
+                                        else -> null
+                                    },
                                     reconnecting = reconnecting) {
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
                                     if (ui.tab == MainTab.Mine) {
