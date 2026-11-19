@@ -66,6 +66,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
@@ -81,6 +82,9 @@ private val HuangguoMuted = Color(0xFF746B5F)
 
 /** 竖版黄果：独立于聊天会话的全屏模块，从功能页进入。 */
 @Composable fun HuangguoScreen(ui: AppState, vm: HuluwaViewModel) {
+    val context = LocalContext.current
+    val imageLoader = remember(context) { huangguoImageLoader(context) }
+    DisposableEffect(imageLoader) { onDispose { imageLoader.shutdown() } }
     val state = ui.huangguo
     BackHandler(state.visible) {
         when {
@@ -102,7 +106,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
             Spacer(Modifier.height(12.dp))
             Button(vm::closeHuangguoDetail) { Text("返回") }
         }
-        detail != null -> HuangguoDetailPage(state, vm)
+        detail != null -> HuangguoDetailPage(state, vm, imageLoader)
         else -> Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -143,7 +147,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(cards.data, key = { it.id }) { card ->
-                    HuangguoCardView(card,
+                    HuangguoCardView(card, imageLoader,
                         onClick = { vm.openHuangguoDetail(card) },
                         onPlay = { vm.openHuangguoDetail(card, playImmediately = true) })
                 }
@@ -152,10 +156,10 @@ private val HuangguoMuted = Color(0xFF746B5F)
     }
 }
 
-@Composable private fun HuangguoCardView(card: HuangguoCard, onClick: () -> Unit, onPlay: () -> Unit) {
+@Composable private fun HuangguoCardView(card: HuangguoCard, imageLoader: ImageLoader, onClick: () -> Unit, onPlay: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(0.72f).background(Color(0xFFE8DED0), RoundedCornerShape(14.dp))) {
-            AsyncImage(card.cover, card.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            AsyncImage(card.cover, card.title, imageLoader, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Surface(Modifier.align(Alignment.Center).size(48.dp), color = Color.Black.copy(alpha = .48f), shape = RoundedCornerShape(50)) {
                 IconButton(onPlay) { Icon(Icons.Outlined.PlayArrow, "立即播放", tint = Color.White) }
             }
@@ -169,7 +173,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
     }
 }
 
-@Composable private fun HuangguoDetailPage(state: HuangguoState, vm: HuluwaViewModel) {
+@Composable private fun HuangguoDetailPage(state: HuangguoState, vm: HuluwaViewModel, imageLoader: ImageLoader) {
     val detail = state.detail ?: return
     val card = detail.card
     Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding().verticalScroll(rememberScrollState())) {
@@ -179,7 +183,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            AsyncImage(card.cover, card.title, Modifier.width(128.dp).height(178.dp), contentScale = ContentScale.Crop)
+            AsyncImage(card.cover, card.title, imageLoader, Modifier.width(128.dp).height(178.dp), contentScale = ContentScale.Crop)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(card.meta, color = HuangguoMuted, fontSize = 12.sp)
                 Text(card.description, color = HuangguoInk, fontSize = 13.sp, maxLines = 7, overflow = TextOverflow.Ellipsis)
