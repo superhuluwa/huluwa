@@ -66,6 +66,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.*
 import kotlinx.coroutines.delay

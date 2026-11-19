@@ -2,6 +2,7 @@ package com.huluwa.android.data
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /** 黄果推荐流/搜索结果卡片。 */
 data class HuangguoCard(
