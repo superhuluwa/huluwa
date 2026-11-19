@@ -2,6 +2,7 @@ package com.huluwa.console.common;
 
 import com.huluwa.console.service.DongPianSearchService.DongPianException;
 import com.huluwa.console.service.DongPianSearchService.DongPianLineUnavailableException;
+import com.huluwa.console.service.huangguo.HuangguoException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -38,6 +39,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResult<Void>> handleDongPian(DongPianException ex) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(ApiResult.fail(502, ex.getMessage()));
+    }
+
+    /** 黄果源站在网络、加密握手或播放响应异常时返回 502，客户端可直接展示原因。 */
+    @ExceptionHandler(HuangguoException.class)
+    public ResponseEntity<ApiResult<Void>> handleHuangguo(HuangguoException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResult.fail(502, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

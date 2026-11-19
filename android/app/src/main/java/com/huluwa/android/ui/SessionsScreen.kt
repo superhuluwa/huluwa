@@ -70,6 +70,7 @@ private object SessionsColors {
         if (ui.sessions.error != null && !ui.sessions.error.isServerUnreachable()) item {
             Feedback(error = ui.sessions.error, onRetry = { vm.refreshSessions() })
         }
+        if (!system) item(key = "huangguo-entry") { HuangguoHomeEntry(vm) }
         if (rows.isEmpty()) item {
             EmptyContent(if (system) "暂无系统会话" else "暂无功能会话", "", loading = !ui.sessions.loaded)
         }
@@ -266,6 +267,13 @@ private object SessionsColors {
         ) {
             Icon(sessionIcon(session.kind), null, Modifier.size(24.dp), tint = tone)
         }
+    }
+}
+
+@Composable
+fun HuangguoHomeEntry(vm: HuluwaViewModel) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
+        HuangguoEntry(vm, active = false)
     }
 }
 

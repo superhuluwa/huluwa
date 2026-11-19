@@ -42,6 +42,18 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun send(id: String, content: String, requestId: String) = api.post("chat", "sessions", id, "messages", body = ApiJson.encodeToJsonElement(SendMessageRequest(content, requestId)))
         .asArray().map { ChatMessage.from(it.asObject()) }
     suspend fun markRead(id: String) { api.post("chat", "sessions", id, "read") }
+    suspend fun huangguoRecommend(): List<HuangguoCard> =
+        api.get("huangguo", "recommend").asObject().rows("items").map { HuangguoCard.from(it.asObject()) }
+
+    suspend fun huangguoSearch(keyword: String, page: Int = 1, size: Int = 20): List<HuangguoCard> =
+        api.get("huangguo", "search", query = mapOf("keyword" to keyword, "page" to page.toString(), "size" to size.toString()))
+            .asObject().rows("items").map { HuangguoCard.from(it.asObject()) }
+
+    suspend fun huangguoDetail(id: String): HuangguoDetail =
+        HuangguoDetail.from(api.get("huangguo", "detail", query = mapOf("id" to id)).asObject())
+
+    suspend fun huangguoPlay(id: String, ep: Int): HuangguoPlayback =
+        HuangguoPlayback.from(api.get("huangguo", "play", query = mapOf("id" to id, "ep" to ep.toString())).asObject())
     suspend fun clearChat(id: String) { api.delete("chat", "sessions", id, "messages") }
 
     suspend fun downloads(refresh: Boolean): MultiSourceResult<DownloadTask> = coroutineScope {

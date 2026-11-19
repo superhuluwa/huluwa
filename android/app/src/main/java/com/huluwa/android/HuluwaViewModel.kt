@@ -106,6 +106,9 @@ data class AppState(
     /** 阅读页：非空时展示番茄小说阅读界面（全屏二级页）。 */
     val reader: FanqieReaderState? = null,
     val fanqieShelf: FanqieShelfState? = null,
+    /** 黄果竖版短剧：推荐流、详情与播放地址都由服务端解析。 */
+    val huangguo: HuangguoState = HuangguoState(),
+    val huangguoResume: HuangguoPreferences.Progress? = null,
 ) {
     fun build(project: AndroidBuildProject) = when (project) {
         AndroidBuildProject.Huluwa -> androidBuild
@@ -141,6 +144,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     private val buildDownloads = (application as HuluwaApplication).buildDownloads
     private val readerPreferences = FanqieReaderPreferences(application)
+    private val huangguoPreferences = HuangguoPreferences(application)
     private val buildPreferences = AndroidBuildPreferences(application)
     private val sessionListPreferences = SessionListPreferences(application)
     private val mutable = MutableStateFlow(initialState())
@@ -150,6 +154,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         androidBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server)),
         terminalBuddyBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.TerminalBuddy)),
         hongguoTvBuild = AndroidBuildState(serverId = buildPreferences.selectedServer(session.server, AndroidBuildProject.HongguoTv)),
+        huangguoResume = huangguoPreferences.last(),
     )
     private fun withAppSessions(value: AppState, upgrade: AppUpgradeState): AppState {
         // 先恢复整份缓存；无缓存时等首次服务端结果，避免先显示少数本地入口再重排。
@@ -305,6 +310,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var generation = 0
     private var sheetGeneration = 0
     private var processingStarted = 0L
+    private var huangguoPlaybackJob: Job? = null
 
     init {
         // 进度请求串行提交，避免翻章和退出时的网络乱序把新位置覆盖回旧位置。
@@ -550,10 +556,150 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         upgradeDownloadJob?.cancel(); upgradeDownloadJob = null
         mutable.update { it.copy(realtime = false) }
     }
-    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false, reader = null) }; refreshCurrent(false) }
+    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false)) }; refreshCurrent(false) }
+    // ------------------------------------------------------------------ 黄果竖版
+
+    fun openHuangguo() {
+        closeChat(); dismissSheet()
+        mutable.update { it.copy(serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = true, fromFunctions = true)) }
+        mutable.update { it.copy(huangguoResume = huangguoPreferences.last()) }
+        if (!mutable.value.huangguo.recommend.loaded) refreshHuangguoRecommend()
+    }
+
+    fun closeHuangguo() {
+        mutable.update { it.copy(huangguo = it.huangguo.copy(visible = false, fromFunctions = false, playerVisible = false,
+            playback = null, playerError = null, resumePositionMs = 0L)) }
+    }
+
+    fun refreshHuangguoRecommend() {
+        if (mutable.value.huangguo.recommend.loading) return
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(recommend = state.huangguo.recommend.copy(loading = true, error = null))) }
+        viewModelScope.launch {
+            try {
+                val cards = repository.huangguoRecommend()
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(recommend = LoadState(cards, loaded = true))) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(recommend = state.huangguo.recommend.copy(loading = false, error = error.userMessage(), loaded = true))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun searchHuangguo(keyword: String) {
+        val query = keyword.trim()
+        if (query.isBlank()) return
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(searchKeyword = query,
+            search = state.huangguo.search.copy(loading = true, error = null))) }
+        viewModelScope.launch {
+            try {
+                val cards = repository.huangguoSearch(query)
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(search = LoadState(cards, loaded = true))) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(search = state.huangguo.search.copy(loading = false, error = error.userMessage(), loaded = true))) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun openHuangguoDetail(card: HuangguoCard, playImmediately: Boolean = false) {
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detail = null, detailLoading = true,
+            detailError = null, playback = null, playerVisible = false, selectedEp = 1, resumePositionMs = 0L)) }
+        viewModelScope.launch {
+            try {
+                val detail = repository.huangguoDetail(card.id)
+                val first = detail.episodes.firstOrNull()?.ep ?: 1
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detail = detail, detailLoading = false, selectedEp = first)) }
+                if (playImmediately) playHuangguo(first)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detailLoading = false, detailError = error.userMessage())) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun closeHuangguoDetail() = mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
+        detail = null, detailError = null, playback = null, playerVisible = false, selectedEp = 1)) }
+
+    /** 播放器持续回报进度，退出或切集时落到本机，作为首页「继续看」入口。 */
+    fun saveHuangguoProgress(positionMs: Long, durationMs: Long) {
+        val state = mutable.value
+        val detail = state.huangguo.detail ?: return
+        if (positionMs <= 0 || durationMs <= 0 || positionMs >= durationMs - 2_000L) return
+        val progress = HuangguoPreferences.Progress(detail.card.id, detail.card.title, detail.card.cover,
+            state.huangguo.selectedEp, positionMs, durationMs)
+        huangguoPreferences.save(progress)
+        mutable.update { it.copy(huangguoResume = progress) }
+    }
+
+    /** 从首页继续看：重新打开详情、定位到保存的集并播放。 */
+    fun resumeHuangguo(progress: HuangguoPreferences.Progress) {
+        if (!progress.id.isNotBlank()) return
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detail = null, detailLoading = true,
+            detailError = null, playback = null, playerVisible = false, selectedEp = progress.ep, resumePositionMs = progress.positionMs)) }
+        viewModelScope.launch {
+            try {
+                val detail = repository.huangguoDetail(progress.id)
+                val target = detail.episodes.firstOrNull { it.ep == progress.ep }?.ep ?: detail.episodes.firstOrNull()?.ep ?: 1
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detail = detail, detailLoading = false, selectedEp = target)) }
+                playHuangguo(target)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguo = state.huangguo.copy(detailLoading = false, detailError = error.userMessage())) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    /** 播放地址每次重新获取；源站 m3u8 带短时签名，不能复用。 */
+    fun playHuangguo(ep: Int? = null) {
+        val huangguo = mutable.value.huangguo
+        val detail = huangguo.detail ?: return
+        val target = ep ?: huangguo.selectedEp
+        if (detail.episodes.none { it.ep == target }) return
+        // 同一集加载中再次点击时直接返回，避免快速重试同时解析出多个短时地址。
+        if (huangguo.playerLoading && huangguo.selectedEp == target) return
+        val resumeAt = huangguo.resumePositionMs.takeIf { huangguo.selectedEp == target } ?: 0L
+        huangguoPlaybackJob?.cancel()
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(selectedEp = target, playerVisible = true,
+            playerLoading = true, playerError = null, playback = null, resumePositionMs = resumeAt)) }
+        huangguoPlaybackJob = viewModelScope.launch {
+            try {
+                val playback = repository.huangguoPlay(detail.card.id, target)
+                mutable.update { state ->
+                    if (!state.huangguo.playerVisible || state.huangguo.selectedEp != target) state
+                    else state.copy(huangguo = state.huangguo.copy(playback = playback, playerLoading = false))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state ->
+                    if (!state.huangguo.playerVisible || state.huangguo.selectedEp != target) state
+                    else state.copy(huangguo = state.huangguo.copy(playerLoading = false, playerError = error.userMessage()))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun closeHuangguoPlayer() {
+        huangguoPlaybackJob?.cancel(); huangguoPlaybackJob = null
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
+            playerVisible = false, playback = null, playerError = null)) }
+    }
+
+    fun switchHuangguoEpisode(delta: Int) {
+        val detail = mutable.value.huangguo.detail ?: return
+        val current = mutable.value.huangguo.selectedEp
+        val index = detail.episodes.indexOfFirst { it.ep == current }
+        val next = detail.episodes.getOrNull(index + delta) ?: return
+        playHuangguo(next.ep)
+    }
+
 
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false, reader = null) } }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false)) } }
     fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "", browserBookmarksEnabled = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value
@@ -607,7 +753,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun openServerStatus() {
         closeChat(); dismissSheet()
-        mutable.update { it.copy(serverStatusVisible = true, reader = null) }
+        mutable.update { it.copy(serverStatusVisible = true, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false)) }
         refreshServer()
     }
     fun closeServerStatus() { mutable.update { it.copy(serverStatusVisible = false) } }
