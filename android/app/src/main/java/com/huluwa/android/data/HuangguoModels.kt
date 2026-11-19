@@ -58,11 +58,55 @@ data class HuangguoPlayback(
     }
 }
 
+/** 官网一级分类；route 为空表示“全部”。 */
+data class HuangguoCategory(val name: String, val route: String, val available: Boolean = true) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoCategory(raw.text("name"), raw.text("route"), raw.flag("available", true))
+    }
+}
+
+data class HuangguoTag(val name: String, val slug: String) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoTag(raw.text("name"), raw.text("slug"))
+    }
+}
+
+data class HuangguoTagGroup(val code: String, val name: String, val tags: List<HuangguoTag>) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoTagGroup(
+            raw.text("code"), raw.text("name"), raw.rows("tags").map { HuangguoTag.from(it.asObject()) },
+        )
+    }
+}
+
+/** 分类浏览列表与分页状态。 */
+data class HuangguoBrowsePage(
+    val items: List<HuangguoCard>, val page: Int, val pages: Int, val total: Int,
+) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoBrowsePage(
+            raw.rows("items").map { HuangguoCard.from(it.asObject()) },
+            raw.number("page")?.toInt() ?: 1,
+            (raw.number("pages")?.toInt() ?: 1).coerceAtLeast(1),
+            raw.number("total")?.toInt() ?: 0,
+        )
+    }
+}
+
 data class HuangguoState(
     val visible: Boolean = false,
     /** 是否从功能页进入；用于只高亮当前入口，不影响其他页面。 */
     val fromFunctions: Boolean = false,
     val recommend: LoadState<List<HuangguoCard>> = LoadState(emptyList()),
+    val categories: LoadState<List<HuangguoCategory>> = LoadState(emptyList()),
+    val tagGroups: LoadState<List<HuangguoTagGroup>> = LoadState(emptyList()),
+    val selectedCategory: String = "",
+    val selectedTagGroup: String = "",
+    val selectedTag: String = "",
+    val browse: LoadState<List<HuangguoCard>> = LoadState(emptyList()),
+    val browsePage: Int = 1,
+    val browsePages: Int = 1,
+    val browseLoadingMore: Boolean = false,
     val searchKeyword: String = "",
     val search: LoadState<List<HuangguoCard>> = LoadState(emptyList()),
     val detail: HuangguoDetail? = null,

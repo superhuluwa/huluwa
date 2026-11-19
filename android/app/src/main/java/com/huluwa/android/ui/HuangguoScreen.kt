@@ -17,8 +17,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,6 +75,7 @@ import com.huluwa.android.AppState
 import com.huluwa.android.HuluwaViewModel
 import com.huluwa.android.data.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
@@ -107,52 +111,133 @@ private val HuangguoMuted = Color(0xFF746B5F)
             Button(vm::closeHuangguoDetail) { Text("返回") }
         }
         detail != null -> HuangguoDetailPage(state, vm, imageLoader)
-        else -> Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding()) {
-            Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(vm::closeHuangguo) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = HuangguoInk) }
-                Text("黄果短剧", Modifier.weight(1f), color = HuangguoInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                IconButton(vm::refreshHuangguoRecommend) { Icon(Icons.Outlined.Refresh, "刷新", tint = HuangguoMuted) }
+        else -> HuangguoBrowsePage(state, vm, imageLoader, query, { query = it })
+    }
+}
+
+/** 黄果首页：一级频道 + 二级题材筛选，结构与红果 TV 排行榜页一致。 */
+@Composable private fun HuangguoBrowsePage(
+    state: HuangguoState, vm: HuluwaViewModel, imageLoader: ImageLoader,
+    query: String, onQueryChange: (String) -> Unit,
+) {
+    val grid = rememberLazyGridState()
+    val searching = state.searchKeyword.isNotBlank()
+    val cards = if (searching) state.search else state.browse
+    val selectedGroup = state.tagGroups.data.firstOrNull { it.code == state.selectedTagGroup }
+    val visibleTags = selectedGroup?.tags.orEmpty()
+    // 滚动到底部附近时续页；用末项可见位置判断，避免首屏只显示少量卡片时反复触发。
+    LaunchedEffect(grid, state.browse.data.size, state.browsePage) {
+        snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
+            .distinctUntilChanged()
+            .collect { last ->
+                val lastIndex = state.browse.data.lastIndex
+                if (!searching && lastIndex >= 0 && last != null && last >= lastIndex - 4) vm.loadMoreHuangguoBrowse()
             }
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                singleLine = true,
-                placeholder = { Text("搜索剧名，例如：任意门") },
-                leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                trailingIcon = {
-                    TextButton(onClick = { vm.searchHuangguo(query) }, enabled = query.isNotBlank()) { Text("搜索") }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { vm.searchHuangguo(query) }),
-                shape = RoundedCornerShape(16.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            val searching = state.searchKeyword.isNotBlank()
-            val cards = if (searching) state.search else state.recommend
-            val load = if (searching) state.search else state.recommend
-            if (load.loading && load.data.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = HuangguoAccent)
-            } else if (load.error != null && load.data.isEmpty()) {
-                Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center) {
-                    Text(load.error.orEmpty(), color = HuluwaColors.Danger)
-                    Spacer(Modifier.height(12.dp))
-                    Button({ if (searching) vm.searchHuangguo(state.searchKeyword) else vm.refreshHuangguoRecommend() }) { Text("重试") }
+    }
+    Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(vm::closeHuangguo) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = HuangguoInk) }
+            Text("黄果短剧", Modifier.weight(1f), color = HuangguoInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            IconButton({ if (searching) vm.searchHuangguo(state.searchKeyword) else vm.refreshHuangguoBrowse() }) {
+                Icon(Icons.Outlined.Refresh, "刷新", tint = HuangguoMuted)
+            }
+            if (searching) IconButton(vm::clearHuangguoSearch) {
+                Icon(Icons.Outlined.Close, "退出搜索", tint = HuangguoMuted)
+            }
+        }
+        OutlinedTextField(
+            value = query, onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            singleLine = true,
+            placeholder = { Text("搜索剧名，例如：任意门") },
+            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+            trailingIcon = {
+                TextButton(onClick = { vm.searchHuangguo(query) }, enabled = query.isNotBlank()) { Text("搜索") }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { vm.searchHuangguo(query) }),
+            shape = RoundedCornerShape(16.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val categories = state.categories.data.ifEmpty { listOf(HuangguoCategory("全部", "")) }
+            categories.forEach { category ->
+                HuangguoFilterChip(if (category.available) category.name else "${category.name} · 暂不可用",
+                    state.selectedTag.isBlank() && state.selectedCategory == category.route,
+                    { if (category.available) vm.selectHuangguoCategory(category.route) },
+                    enabled = category.available)
+            }
+        }
+        if (!searching) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HuangguoFilterChip("全部题材", selectedGroup == null, { vm.clearHuangguoTag() })
+                state.tagGroups.data.forEach { group ->
+                    if (group.name.startsWith("成人")) return@forEach
+                    HuangguoFilterChip(group.name, selectedGroup?.code == group.code,
+                        { vm.selectHuangguoTagGroup(group.code) })
                 }
-            } else LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(cards.data, key = { it.id }) { card ->
-                    HuangguoCardView(card, imageLoader,
-                        onClick = { vm.openHuangguoDetail(card) },
-                        onPlay = { vm.openHuangguoDetail(card, playImmediately = true) })
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(selectedGroup?.name ?: "题材分类", color = HuangguoMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("第 ${state.browsePage}/${state.browsePages} 页", color = HuangguoMuted, fontSize = 12.sp)
+            }
+            if (visibleTags.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    visibleTags.forEach { tag ->
+                        if (tag.name != "萝莉") HuangguoFilterChip(tag.name, state.selectedTag == tag.slug, { vm.selectHuangguoTag(tag.slug) })
+                    }
                 }
             }
         }
+        if (cards.loading && cards.data.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = HuangguoAccent)
+        } else if (cards.error != null && cards.data.isEmpty()) {
+            Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center) {
+                Text(cards.error.orEmpty(), color = HuluwaColors.Danger)
+                Spacer(Modifier.height(12.dp))
+                Button({ if (searching) vm.searchHuangguo(state.searchKeyword) else vm.refreshHuangguoBrowse() }) { Text("重试") }
+            }
+        } else LazyVerticalGrid(
+            state = grid,
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(cards.data, key = { it.id }) { card ->
+                HuangguoCardView(card, imageLoader,
+                    onClick = { vm.openHuangguoDetail(card) },
+                    onPlay = { vm.openHuangguoDetail(card, playImmediately = true) })
+            }
+            if (!searching && state.browsePage >= state.browsePages && cards.data.isNotEmpty()) item(span = { GridItemSpan(2) }) {
+                Text("已经到底了", Modifier.fillMaxWidth().padding(vertical = 16.dp), color = HuangguoMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+            }
+            if (!searching && state.browseLoadingMore) item(span = { GridItemSpan(2) }) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), color = HuangguoAccent)
+            }
+            if (cards.data.isEmpty() && !cards.loading) item(span = { GridItemSpan(2) }) {
+                Text("暂无匹配内容", Modifier.fillMaxWidth().padding(32.dp), color = HuangguoMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+    }
+}
+
+@Composable private fun HuangguoFilterChip(text: String, selected: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(18.dp),
+        enabled = enabled,
+        color = when { !enabled -> Color(0xFFE9E1D5); selected -> HuangguoAccent; else -> Color.White },
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) HuangguoAccent else Color(0xFFE2D8C8))) {
+        Text(text, Modifier.padding(horizontal = 14.dp, vertical = 8.dp), color = if (enabled) HuangguoInk else HuangguoMuted,
+            fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 

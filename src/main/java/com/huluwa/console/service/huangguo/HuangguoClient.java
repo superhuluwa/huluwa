@@ -29,6 +29,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 黄果短剧源站客户端。
@@ -67,6 +69,17 @@ public class HuangguoClient {
     public record Playback(String id, int ep, String url, String hevc, String preview,
                            Map<String, Object> cdn) { }
 
+    /** 黄果官网的一级分类，route 直接对应 /api/videos/category/{route}。 */
+    public record Category(String name, String route) { }
+
+    /** 黄果官网题材页的分组；具体题材通过 /tag/{slug}/ 页面读取。 */
+    public record TagGroup(String code, String name, List<Tag> tags) { }
+
+    public record Tag(String name, String slug) { }
+
+    /** 分类列表的下一页状态；黄果分类接口返回分页对象。 */
+    public record Page(List<Catalog> items, int page, int pages, int total) { }
+
     /** 搜索；参数名必须是 q，keyword 会被源站忽略。 */
     public List<Catalog> search(String keyword, int page, int size) {
         String query = encode(keyword);
@@ -98,6 +111,64 @@ public class HuangguoClient {
             }
         }
         return list.size() > size ? list.subList(0, size) : list;
+    }
+
+    /** 一级分类与题材分组来自官网公开配置接口，避免客户端自行维护菜单。 */
+    public List<Category> categories() {
+        JsonNode root = getJson("/api/site/categories/video");
+        List<Category> list = new ArrayList<>();
+        for (JsonNode item : root.path("data").path("items")) {
+            addCategory(list, item.path("name").asText(""), item.path("route").asText(""));
+        }
+        return list;
+    }
+
+    public List<TagGroup> tagGroups() {
+        JsonNode root = getJson("/api/tags");
+        List<TagGroup> list = new ArrayList<>();
+        for (JsonNode group : root.path("data").path("categories")) {
+            List<Tag> tags = new ArrayList<>();
+            for (JsonNode item : group.path("tags")) {
+                String name = item.path("name").asText("");
+                String slug = item.path("slug").asText("");
+                if (!name.isBlank() && !slug.isBlank()) tags.add(new Tag(name, slug));
+            }
+            if (!tags.isEmpty()) list.add(new TagGroup(group.path("code").asText(""),
+                    group.path("name").asText(""), tags));
+        }
+        return list;
+    }
+
+    /** 分类列表；sort=hot 是官网分类页使用的排序参数。 */
+    public Page category(String route, int page, int size) {
+        JsonNode root = getJson("/api/videos/category/" + encode(route) + "?page=" + page + "&size=" + size + "&sort=hot");
+        return page(root.path("data"), page);
+    }
+
+    /** 题材页按官网服务端渲染页面读取，兼容官网当前没有公开的题材 JSON 列表接口。 */
+    public Page tag(String slug, int page, int size) {
+        String path = "/tag/" + encode(slug) + "/" + (page <= 1 ? "" : "page/" + page + "/");
+        String html = getText(path, SITE + "/tag/" + slug + "/");
+        List<Catalog> items = new ArrayList<>();
+        // 页面顶部还有「猜你喜欢」等卡片；只解析正文列表，避免跨区域匹配到推荐内容。
+        int gridStart = html.indexOf("hg-card-grid");
+        if (gridStart >= 0) html = html.substring(gridStart);
+        Pattern card = Pattern.compile(
+                "<div class=\"hg-drama-card\"[^>]*data-track-item-id=\"([0-9]+)\"[\\s\\S]*?<img[^>]*data-src=\"([^\"]+)\"[^>]*alt=\"([^\"]*)\"[\\s\\S]*?class=\"hg-drama-card__score\">([^<]*)</span>[\\s\\S]*?class=\"hg-drama-card__episode\">([^<]*)</span>");
+        Matcher matcher = card.matcher(html);
+        int limit = Math.min(Math.max(size, 1), 50);
+        while (matcher.find() && items.size() < limit) {
+            String id = matcher.group(1);
+            String cover = matcher.group(2).replace("&amp;", "&");
+            String title = matcher.group(3).replace("&amp;", "&").replace("&quot;", "\"");
+            double score = parseScore(matcher.group(4));
+            int episodes = parseEpisodes(matcher.group(5));
+            items.add(new Catalog(id, title, cover, "", score, episodes, List.of()));
+        }
+        int pages = 1;
+        Matcher pager = Pattern.compile("data-pages=\"([0-9]+)\"").matcher(html);
+        if (pager.find()) pages = Integer.parseInt(pager.group(1));
+        return new Page(items, page, pages, items.size());
     }
 
     /** 详情同时给出规范集数；源站 total_episodes 经常为 0，以 episodes 实际列表为准。 */
@@ -150,6 +221,51 @@ public class HuangguoClient {
                     streams.path("preview").asText(""), cdn);
         } catch (Exception error) {
             throw new HuangguoException("黄果播放地址解析失败：" + error.getMessage(), error);
+        }
+    }
+
+    private Page page(JsonNode data, int page) {
+        List<Catalog> items = new ArrayList<>();
+        for (JsonNode item : data.path("items")) items.add(catalog(item));
+        JsonNode pagination = data.path("pagination");
+        return new Page(items, pagination.path("page").asInt(page), Math.max(pagination.path("pages").asInt(1), 1),
+                pagination.path("total").asInt(items.size()));
+    }
+
+    private static void addCategory(List<Category> list, String name, String route) {
+        if (name.isBlank() || route.isBlank() || list.stream().anyMatch(item -> item.route().equals(route))) return;
+        list.add(new Category(name, route));
+    }
+
+    private static double parseScore(String text) {
+        Matcher matcher = Pattern.compile("([0-9]+(?:\\.[0-9]+)?)").matcher(text);
+        return matcher.find() ? Double.parseDouble(matcher.group(1)) : 0;
+    }
+
+    private static int parseEpisodes(String text) {
+        Matcher matcher = Pattern.compile("([0-9]+)").matcher(text);
+        return matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
+    }
+
+    private String getText(String path, String referer) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(SITE + path))
+                    .timeout(Duration.ofSeconds(25))
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", referer)
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) throw new HuangguoException("黄果题材页 HTTP " + response.statusCode());
+            return response.body();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new HuangguoException("黄果题材页请求被中断", error);
+        } catch (HuangguoException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new HuangguoException("黄果题材页请求失败：" + error.getMessage(), error);
         }
     }
 

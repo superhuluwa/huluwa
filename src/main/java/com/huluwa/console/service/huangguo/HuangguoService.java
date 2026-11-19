@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /** 黄果短剧聚合服务：列表与详情短缓存；播放地址只缓存极短时间并合并同集并发请求。 */
 @Service
@@ -34,6 +35,63 @@ public class HuangguoService {
             }
             return Map.of("items", items, "source", "huangguo");
         });
+    }
+
+    /** 黄果官网一级分类；额外提供“全部”，由客户端作为默认首页。 */
+    public Map<String, Object> categories() {
+        return cached("categories", CACHE_TTL_MS, () -> {
+            List<Map<String, Object>> items = new ArrayList<>();
+            items.add(Map.of("name", "全部", "route", ""));
+            for (HuangguoClient.Category category : client.categories()) {
+                items.add(Map.of("name", category.name(), "route", category.route(),
+                        "available", !category.route().equals("ai-mogai") && !category.route().equals("ai-huanlian")));
+            }
+            return Map.of("items", items);
+        });
+    }
+
+    /** 二级题材菜单按官网分组下发，界面不再自行维护分类名称。 */
+    public Map<String, Object> tagGroups() {
+        return cached("tag-groups", CACHE_TTL_MS, () -> {
+            List<Map<String, Object>> groups = new ArrayList<>();
+            for (HuangguoClient.TagGroup group : client.tagGroups()) {
+                List<Map<String, Object>> tags = new ArrayList<>();
+                for (HuangguoClient.Tag tag : group.tags()) {
+                    tags.add(Map.of("name", tag.name(), "slug", tag.slug()));
+                }
+                groups.add(Map.of("code", group.code(), "name", group.name(), "tags", tags));
+            }
+            return Map.of("items", groups);
+        });
+    }
+
+    /** 一级分类或二级题材列表，返回统一下一页状态。 */
+    public Map<String, Object> browse(String category, String tag, int page, int size) {
+        String route = category == null ? "" : category.trim();
+        String slug = tag == null ? "" : tag.trim();
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 50);
+        String key = "browse:" + route + ":" + slug + ":" + safePage + ":" + safeSize;
+        return cached(key, CACHE_TTL_MS, () -> {
+            HuangguoClient.Page result = !slug.isBlank()
+                    ? client.tag(slug, safePage, safeSize)
+                    : route.isBlank() ? client.category("ai-duanju", safePage, safeSize)
+                    : client.category(route, safePage, safeSize);
+            return pageBody(result, route, slug);
+        });
+    }
+
+    private Map<String, Object> pageBody(HuangguoClient.Page result, String category, String tag) {
+        List<Map<String, Object>> items = result.items().stream().map(this::card).collect(Collectors.toList());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("category", category);
+        body.put("tag", tag);
+        body.put("page", result.page());
+        body.put("pages", result.pages());
+        body.put("total", result.total());
+        body.put("source", "huangguo");
+        return body;
     }
 
     public Map<String, Object> search(String keyword, int page, int size) {
