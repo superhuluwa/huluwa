@@ -46,7 +46,7 @@ private fun tabIcon(tab: MainTab): ImageVector = when (tab) {
     MainTab.Downloads -> Icons.Outlined.FileDownload
     MainTab.Mine -> Icons.Outlined.PersonOutline
 }
-private enum class RootPage { Home, Chat, ServerStatus, Huangguo, HuangguoPlayer }
+private enum class RootPage { Home, Chat, ServerStatus, Huangguo }
 
 @Composable fun HuluwaRoot(vm: HuluwaViewModel, onSkinSelected: (AppSkin) -> Unit) {
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -86,7 +86,6 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo, HuangguoPlayer
         val activeSession = ui.chat.session
         val page = when {
             ui.serverStatusVisible -> RootPage.ServerStatus
-            ui.huangguo.playerVisible -> RootPage.HuangguoPlayer
             ui.huangguo.visible -> RootPage.Huangguo
             activeSession != null -> RootPage.Chat
             else -> RootPage.Home
@@ -157,7 +156,7 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo, HuangguoPlayer
                 when {
                     destination == RootPage.ServerStatus ->
                         holder.SaveableStateProvider("server-status") { ServerStatusScreen(ui, vm, snackbar) }
-                    destination == RootPage.Huangguo || destination == RootPage.HuangguoPlayer ->
+                    destination == RootPage.Huangguo ->
                         holder.SaveableStateProvider("huangguo") { HuangguoScreen(ui, vm) }
                     pageUi.chat.session?.kind == "upgrade" -> AppUpgradeScreen(pageUi, vm, snackbar)
                     pageUi.chat.session?.kind == DENGTA_SESSION_KIND ->
@@ -180,7 +179,7 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo, HuangguoPlayer
  * 时长 320ms，缓动曲线对齐网页端 app-shell.vue 的 cubic-bezier(.32,.72,0,1)。
  */
 private fun AnimatedContentTransitionScope<RootPage>.pageSlideTransition(): ContentTransform {
-    val forward = targetState != RootPage.Home && targetState != RootPage.HuangguoPlayer
+    val forward = targetState != RootPage.Home
     val spec = tween<IntOffset>(durationMillis = 320, easing = CubicBezierEasing(.32f, .72f, 0f, 1f))
     val enter = slideInHorizontally(spec) { width -> if (forward) width else -width / 4 }
     val exit = slideOutHorizontally(spec) { width -> if (forward) -width / 4 else width }

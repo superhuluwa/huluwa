@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -271,26 +272,29 @@ private val HuangguoMuted = Color(0xFF746B5F)
             delay(200)
         }
     }
-    val view = LocalView.current
-    val window = activity?.window
-    DisposableEffect(window, view, fullscreen) {
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
-        val original = activity?.requestedOrientation
-        controller?.isAppearanceLightStatusBars = false
-        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (fullscreen) {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            controller?.hide(WindowInsetsCompat.Type.systemBars())
-        } else {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            controller?.show(WindowInsetsCompat.Type.systemBars())
+    Dialog(vm::closeHuangguoPlayer, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        // 全屏播放器必须操作 Dialog 自己的 window；Activity.window 属于下层页面，改它会把页面状态弄乱。
+        val view = LocalView.current
+        val window = (view.parent as? DialogWindowProvider)?.window
+        DisposableEffect(window, view, fullscreen) {
+            val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+            val original = activity?.requestedOrientation
+            window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            controller?.isAppearanceLightStatusBars = false
+            controller?.isAppearanceLightNavigationBars = false
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (fullscreen) {
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                controller?.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+            }
+            onDispose {
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+                if (original != null) activity?.requestedOrientation = original
+            }
         }
-        onDispose {
-            controller?.show(WindowInsetsCompat.Type.systemBars())
-            if (original != null) activity?.requestedOrientation = original
-        }
-    }
-    Dialog(vm::closeHuangguoPlayer, DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             if (player != null) AndroidView(factory = { PlayerView(it).apply {
                 this.player = player; useController = false; keepScreenOn = true
