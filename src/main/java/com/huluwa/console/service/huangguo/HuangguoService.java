@@ -159,7 +159,8 @@ public class HuangguoService {
     public Map<String, Object> postPlayback(String id) {
         List<Map<String, Object>> videos = new ArrayList<>();
         for (HuangguoClient.PostVideo video : client.postVideos(id)) {
-            videos.add(Map.of("index", video.index(), "url", video.url()));
+            videos.add(Map.of("index", video.index(), "url", video.url(),
+                    "authKey", video.authKey(), "authValue", video.authValue(), "app", video.app()));
         }
         return Map.of("id", id, "videos", videos, "source", "huangguo");
     }

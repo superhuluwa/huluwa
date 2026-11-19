@@ -1017,16 +1017,9 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         )) }
     }
 
-    /** 文章正文视频按需获取短时地址；同一文章只请求一次，切回已加载的视频不重复握手。 */
+    /** 文章正文视频地址约 1 秒失效；每次点击都重新取新地址，不能在缓存地址上重试。 */
     fun playHuangguoPostVideo(id: String, index: Int = 0) {
         val current = mutable.value.huangguoBlog
-        current.videos[index]?.let { url ->
-            if (url.isNotBlank()) {
-                huangguoPostVideoJob?.cancel()
-                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(activeVideoIndex = index, videoError = null)) }
-                return
-            }
-        }
         if (current.videoLoading && current.activeVideoIndex == index) return
         huangguoPostVideoJob?.cancel()
         mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
@@ -1034,9 +1027,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         )) }
         huangguoPostVideoJob = viewModelScope.launch {
             try {
-                val videos = repository.huangguoPostVideos(id).associate { it.index to it.url }
+                val videos = repository.huangguoPostVideos(id).associateBy { it.index }
                 mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
                     videos = state.huangguoBlog.videos + videos, videoLoading = false, activeVideoIndex = index,
+                    videoRefreshToken = state.huangguoBlog.videoRefreshToken + 1,
                 )) }
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {

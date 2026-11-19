@@ -175,11 +175,23 @@ data class HuangguoPostDetail(
     }
 }
 
-data class HuangguoPostVideo(val index: Int, val url: String) {
+data class HuangguoPostVideo(
+    val index: Int,
+    val url: String,
+    val authKey: String = "",
+    val authValue: String = "",
+    val app: String = "",
+) {
+    val headers: Map<String, String>
+        get() = HuangguoPlaybackHeaders.of(authKey, authValue, app)
+
     companion object {
         fun rows(raw: JsonObject) = raw.rows("videos").map { element ->
             val item = element.asObject()
-            HuangguoPostVideo(item.number("index")?.toInt() ?: 0, item.text("url"))
+            HuangguoPostVideo(
+                item.number("index")?.toInt() ?: 0, item.text("url"),
+                item.text("authKey"), item.text("authValue"), item.text("app"),
+            )
         }
     }
 }
@@ -207,8 +219,19 @@ data class HuangguoBlogState(
     /** 点击顶部博客入口时显示博客列表；为 false 时显示影视浏览。 */
     val fromEntry: Boolean = false,
     val visible: Boolean = false,
-    val videos: Map<Int, String> = emptyMap(),
+    val videos: Map<Int, HuangguoPostVideo> = emptyMap(),
     val videoLoading: Boolean = false,
     val videoError: String? = null,
     val activeVideoIndex: Int? = null,
+    val videoRefreshToken: Int = 0,
 )
+
+/** 黄果视频 CDN 的固定公开鉴权头，站点所有 m3u8 播放器共用。 */
+object HuangguoPlaybackHeaders {
+    fun of(authKey: String, authValue: String, app: String): Map<String, String> = buildMap {
+        put("Referer", "https://huangguoai.com/")
+        put("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")
+        if (authKey.isNotBlank() && authValue.isNotBlank()) put(authKey, authValue)
+        if (app.isNotBlank()) put("x-cdn-app", app)
+    }
+}

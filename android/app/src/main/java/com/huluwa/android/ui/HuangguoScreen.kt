@@ -371,12 +371,11 @@ private val HuangguoMuted = Color(0xFF746B5F)
 }
 
 @Composable private fun HuangguoPostVideoBlock(state: HuangguoBlogState, id: String, index: Int, vm: HuluwaViewModel, imageLoader: ImageLoader) {
-    val url = state.videos[index].orEmpty()
+    val video = state.videos[index]
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("帖子视频", color = HuangguoInk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        if (state.activeVideoIndex == index && url.isNotBlank() && !state.videoLoading) {
-            InlineVideoBubble(url, "", active = true, onPlay = {}, onStop = { vm.stopHuangguoPostVideo() },
-                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        if (state.activeVideoIndex == index && video != null && video.url.isNotBlank() && !state.videoLoading) {
+            HuangguoPostVideoPlayer(video, state.videoRefreshToken, { vm.playHuangguoPostVideo(id, index) }, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         } else {
             Surface(onClick = { vm.playHuangguoPostVideo(id, index) }, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
                 color = Color.Black, shape = RoundedCornerShape(10.dp)) {
@@ -387,6 +386,44 @@ private val HuangguoMuted = Color(0xFF746B5F)
             }
         }
         state.videoError?.takeIf { state.activeVideoIndex == index }?.let { Text(it, color = HuluwaColors.Danger, fontSize = 12.sp) }
+    }
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable private fun HuangguoPostVideoPlayer(video: HuangguoPostVideo, refreshToken: Int, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current
+    var failure by remember(video.url, refreshToken) { mutableStateOf<String?>(null) }
+    val player = remember(video.url, refreshToken) {
+        val source = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")
+            .setDefaultRequestProperties(video.headers)
+        ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(source)).build().apply {
+            setMediaItem(MediaItem.fromUri(video.url)); prepare(); playWhenReady = true
+        }
+    }
+    DisposableEffect(player, lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) player.pause() }
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) { failure = "视频播放失败：${error.errorCodeName}" }
+        }
+        lifecycle.lifecycle.addObserver(observer); player.addListener(listener)
+        onDispose {
+            lifecycle.lifecycle.removeObserver(observer); player.removeListener(listener); player.release()
+        }
+    }
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black)) {
+        AndroidView(factory = { PlayerView(it).apply {
+            this.player = player; useController = true
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        } }, modifier = Modifier.fillMaxSize(), update = { view -> view.player = player; view.keepScreenOn = player.isPlaying })
+        failure?.let { message ->
+            Column(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .78f)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(message, color = Color.White, fontSize = 12.sp)
+                TextButton(onClick = { failure = null; onRetry() }) { Text("重新获取地址并重试", color = Color.White) }
+            }
+        }
     }
 }
 
@@ -475,9 +512,10 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val resumeMs = state.resumePositionMs
     val player = remember(url) {
         if (url.isBlank()) null else {
-            val source = DefaultHttpDataSource.Factory()
-                .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")
-                .setDefaultRequestProperties(mapOf("Referer" to "https://huangguoai.com/"))
+            val headers = state.playback?.cdn.orEmpty().let { cdn ->
+                HuangguoPlaybackHeaders.of(cdn["authKey"]?.toString().orEmpty(), cdn["authValue"]?.toString().orEmpty(), cdn["app"]?.toString().orEmpty())
+            }
+            val source = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
             ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(source)).build().apply {
                 setMediaItem(MediaItem.fromUri(url)); prepare(); playWhenReady = true
             }

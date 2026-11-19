@@ -95,7 +95,7 @@ public class HuangguoClient {
     public record PostDetail(Post post, String authorAvatar, int reads,
                              List<PostBlock> blocks, List<String> tagLinks) { }
 
-    public record PostVideo(String id, int index, String url) { }
+    public record PostVideo(String id, int index, String url, String authKey, String authValue, String app) { }
 
     /** 搜索；参数名必须是 q，keyword 会被源站忽略。 */
     public List<Catalog> search(String keyword, int page, int size) {
@@ -240,9 +240,14 @@ public class HuangguoClient {
     public List<PostVideo> postVideos(String id) {
         JsonNode root = postJson("/api/posts/" + encode(id) + "/playback", "{}");
         if (root.path("status").asInt(0) != 1) throw new HuangguoException("黄果文章视频接口返回失败");
+        JsonNode cdn = root.path("data").path("cdn");
+        String authKey = cdn.path("authKey").asText("");
+        String authValue = cdn.path("authValue").asText("");
+        String app = cdn.path("app").asText("");
         List<PostVideo> videos = new ArrayList<>();
         for (JsonNode item : root.path("data").path("videos")) {
-            videos.add(new PostVideo(id, item.path("index").asInt(videos.size()), item.path("url").asText("")));
+            videos.add(new PostVideo(id, item.path("index").asInt(videos.size()), item.path("url").asText(""),
+                    authKey, authValue, app));
         }
         return videos;
     }
