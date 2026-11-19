@@ -71,9 +71,11 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
@@ -396,6 +398,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val lifecycle = LocalLifecycleOwner.current
     var failure by remember(video.url, refreshToken) { mutableStateOf<String?>(null) }
     var fullscreen by remember { mutableStateOf(false) }
+    var portraitVideo by remember(video.url, refreshToken) { mutableStateOf<Boolean?>(null) }
     val player = remember(video.url, refreshToken) {
         val source = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")
@@ -407,9 +410,13 @@ private val HuangguoMuted = Color(0xFF746B5F)
     DisposableEffect(player, lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) player.pause() }
         val listener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                portraitVideo = videoSize.portraitOrNull()
+            }
             override fun onPlayerError(error: PlaybackException) { failure = "视频播放失败：${error.errorCodeName}" }
         }
         lifecycle.lifecycle.addObserver(observer); player.addListener(listener)
+        portraitVideo = player.videoSize.portraitOrNull()
         onDispose {
             lifecycle.lifecycle.removeObserver(observer); player.removeListener(listener); player.release()
         }
@@ -433,7 +440,8 @@ private val HuangguoMuted = Color(0xFF746B5F)
         }
     }
     if (fullscreen) {
-        HuangguoPostVideoFullscreen(player, failure, onClose = { fullscreen = false }, onRetry = { failure = null; onRetry() })
+        HuangguoPostVideoFullscreen(player, failure, portrait = portraitVideo == true,
+            onClose = { fullscreen = false }, onRetry = { failure = null; onRetry() })
     }
 }
 
@@ -441,31 +449,44 @@ private val HuangguoMuted = Color(0xFF746B5F)
 @Composable private fun HuangguoPostVideoFullscreen(
     player: ExoPlayer,
     failure: String?,
+    portrait: Boolean,
     onClose: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.huangguoActivity() }
+    val originalOrientation = remember(activity) { activity?.requestedOrientation }
+    // 全屏层优先消费系统返回，避免关闭全屏时同时触发文章页返回。
+    BackHandler(onBack = onClose)
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = LocalView.current
         val window = (view.parent as? DialogWindowProvider)?.window
-        DisposableEffect(window, view) {
+        DisposableEffect(window, view, portrait) {
             val controller = window?.let { WindowCompat.getInsetsController(it, view) }
-            val original = activity?.requestedOrientation
             window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             controller?.isAppearanceLightStatusBars = false
             controller?.isAppearanceLightNavigationBars = false
             controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            activity?.requestedOrientation = if (portrait) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             controller?.hide(WindowInsetsCompat.Type.systemBars())
             onDispose {
                 controller?.show(WindowInsetsCompat.Type.systemBars())
-                if (original != null) activity?.requestedOrientation = original
+                // 文章页固定在竖屏使用；进入全屏前的默认自动方向也恢复为竖屏。
+                activity?.requestedOrientation = when (originalOrientation) {
+                    null,
+                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED,
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR,
+                    ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR,
+                    ActivityInfo.SCREEN_ORIENTATION_USER -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    else -> originalOrientation
+                }
             }
         }
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(factory = { PlayerView(it).apply {
                 this.player = player; useController = false; keepScreenOn = true
+                setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             } }, modifier = Modifier.fillMaxSize(), update = { it.player = player })
@@ -486,6 +507,12 @@ private val HuangguoMuted = Color(0xFF746B5F)
             }
         }
     }
+}
+
+/** 视频宽高可能在轨道解析后变化；旋转 90/270 度时需交换显示宽高再判断横竖版。 */
+private fun VideoSize.portraitOrNull(): Boolean? {
+    if (width <= 0 || height <= 0) return null
+    return if (unappliedRotationDegrees % 180 == 0) height > width else width > height
 }
 
 @Composable private fun HuangguoFilterChip(text: String, selected: Boolean, onClick: () -> Unit, enabled: Boolean = true) {
