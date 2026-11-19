@@ -69,7 +69,7 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
         HuangguoPostDetail.from(api.get("huangguo", "post", query = mapOf("id" to id)).asObject())
 
     suspend fun huangguoPostVideos(id: String): List<HuangguoPostVideo> =
-        HuangguoPostVideo.rows(api.get("huangguo", "post", "play").asObject())
+        HuangguoPostVideo.rows(api.get("huangguo", "post", "play", query = mapOf("id" to id)).asObject())
 
     suspend fun huangguoSearch(keyword: String, page: Int = 1, size: Int = 20): List<HuangguoCard> =
         api.get("huangguo", "search", query = mapOf("keyword" to keyword, "page" to page.toString(), "size" to size.toString()))
