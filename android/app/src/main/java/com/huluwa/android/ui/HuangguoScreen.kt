@@ -395,6 +395,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     var failure by remember(video.url, refreshToken) { mutableStateOf<String?>(null) }
+    var fullscreen by remember { mutableStateOf(false) }
     val player = remember(video.url, refreshToken) {
         val source = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")
@@ -419,10 +420,69 @@ private val HuangguoMuted = Color(0xFF746B5F)
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         } }, modifier = Modifier.fillMaxSize(), update = { view -> view.player = player; view.keepScreenOn = player.isPlaying })
+        // 放在右下角控制条上方，避免与系统播放器的全屏控件重叠。
+        Surface(onClick = { player.play(); fullscreen = true }, Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 48.dp),
+            color = Color.Black.copy(alpha = .62f), shape = RoundedCornerShape(8.dp)) {
+            Icon(Icons.Outlined.Fullscreen, "全屏播放", Modifier.padding(6.dp).size(20.dp), tint = Color.White)
+        }
         failure?.let { message ->
             Column(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .78f)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Text(message, color = Color.White, fontSize = 12.sp)
                 TextButton(onClick = { failure = null; onRetry() }) { Text("重新获取地址并重试", color = Color.White) }
+            }
+        }
+    }
+    if (fullscreen) {
+        HuangguoPostVideoFullscreen(player, failure, onClose = { fullscreen = false }, onRetry = { failure = null; onRetry() })
+    }
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable private fun HuangguoPostVideoFullscreen(
+    player: ExoPlayer,
+    failure: String?,
+    onClose: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.huangguoActivity() }
+    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = LocalView.current
+        val window = (view.parent as? DialogWindowProvider)?.window
+        DisposableEffect(window, view) {
+            val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+            val original = activity?.requestedOrientation
+            window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            controller?.isAppearanceLightStatusBars = false
+            controller?.isAppearanceLightNavigationBars = false
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+                if (original != null) activity?.requestedOrientation = original
+            }
+        }
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            AndroidView(factory = { PlayerView(it).apply {
+                this.player = player; useController = false; keepScreenOn = true
+                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            } }, modifier = Modifier.fillMaxSize(), update = { it.player = player })
+            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(.78f), Color.Transparent)))
+                .padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClose) { Icon(Icons.Outlined.Close, "退出全屏", tint = Color.White) }
+                Text("帖子视频", Modifier.weight(1f), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            failure?.let { message ->
+                Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(message, color = Color.White)
+                    TextButton(onClick = onRetry) { Text("重新获取地址并重试", color = HuangguoAccent) }
+                }
+            }
+            IconButton(onClose, Modifier.align(Alignment.TopEnd).padding(top = 54.dp, end = 8.dp)
+                .background(Color.Black.copy(alpha = .5f), RoundedCornerShape(20.dp))) {
+                Icon(Icons.Outlined.Close, "退出全屏", tint = Color.White)
             }
         }
     }
