@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -97,11 +98,17 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val context = LocalContext.current
     val imageLoader = remember(context) { huangguoImageLoader(context) }
     DisposableEffect(imageLoader) { onDispose { imageLoader.shutdown() } }
+    val state = ui.huangguo
+    val browseGrid = rememberLazyGridState()
+    // 列表状态放在详情分支之外：从详情返回时复用原位置，仅在切换分类或筛选时回到顶部。
+    LaunchedEffect(
+        state.selectedCategory, state.selectedFilter,
+        state.selectedTagGroup, state.selectedTag, state.searchKeyword,
+    ) { browseGrid.scrollToItem(0) }
     if (ui.huangguoBlog.visible) {
         HuangguoBlogScreen(ui.huangguoBlog, vm, imageLoader)
         return
     }
-    val state = ui.huangguo
     BackHandler(state.visible) {
         when {
             state.playerVisible -> vm.closeHuangguoPlayer()
@@ -123,16 +130,15 @@ private val HuangguoMuted = Color(0xFF746B5F)
             Button(vm::closeHuangguoDetail) { Text("返回") }
         }
         detail != null -> HuangguoDetailPage(state, vm, imageLoader)
-        else -> HuangguoBrowsePage(state, vm, imageLoader, query, { query = it })
+        else -> HuangguoBrowsePage(state, vm, imageLoader, browseGrid, query, { query = it })
     }
 }
 
 /** 黄果首页：一级频道 + 二级题材筛选，结构与红果 TV 排行榜页一致。 */
 @Composable private fun HuangguoBrowsePage(
-    state: HuangguoState, vm: HuluwaViewModel, imageLoader: ImageLoader,
+    state: HuangguoState, vm: HuluwaViewModel, imageLoader: ImageLoader, grid: LazyGridState,
     query: String, onQueryChange: (String) -> Unit,
 ) {
-    val grid = rememberLazyGridState()
     val searching = state.searchKeyword.isNotBlank()
     val cards = if (searching) state.search else state.browse
     val selectedGroup = state.tagGroups.data.firstOrNull { it.code == state.selectedTagGroup }
