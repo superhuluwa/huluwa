@@ -590,43 +590,77 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 一级分类和二级题材同时读取；配置失败不影响已经显示的列表。 */
+    /** 一级分类和当前频道筛选同时读取；题材列表另异步加载，失败不影响首屏。 */
     fun loadHuangguoFilters(force: Boolean = false) {
         val current = mutable.value.huangguo
-        if (!force && current.categories.loaded && current.tagGroups.loaded) return
-        if (!force && (current.categories.loading || current.tagGroups.loading)) return
+        if (!force && current.categories.loaded && current.filters.loaded) return
+        if (!force && (current.categories.loading || current.filters.loading)) return
         mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
             categories = state.huangguo.categories.copy(loading = true, error = null),
+            filters = state.huangguo.filters.copy(loading = true, error = null),
             tagGroups = state.huangguo.tagGroups.copy(loading = true, error = null),
         )) }
         viewModelScope.launch {
             val categories = async { runCatching { repository.huangguoCategories() } }
-            val tags = async { runCatching { repository.huangguoTags() } }
+            val filters = async { runCatching { repository.huangguoFilters(current.selectedCategory) } }
             val categoryResult = categories.await()
-            val tagResult = tags.await()
+            val filterResult = filters.await()
             mutable.update { state ->
                 state.copy(huangguo = state.huangguo.copy(
                     categories = categoryResult.fold(
                         { LoadState(it, loaded = true) },
                         { state.huangguo.categories.copy(loading = false, error = it.userMessage()) },
                     ),
-                    tagGroups = tagResult.fold(
+                    filters = filterResult.fold(
                         { LoadState(it, loaded = true) },
-                        { state.huangguo.tagGroups.copy(loading = false, error = it.userMessage()) },
+                        { state.huangguo.filters.copy(loading = false, error = it.userMessage()) },
                     ),
                 ))
             }
+            val tags = runCatching { repository.huangguoTags() }
+            mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
+                tagGroups = tags.fold(
+                    { LoadState(it, loaded = true) },
+                    { state.huangguo.tagGroups.copy(loading = false, error = it.userMessage()) },
+                ),
+            )) }
         }
     }
 
-    /** 切换一级分类时清空二级题材，回到该分类的全量列表。 */
+    /** 切换一级分类时重新读取该频道的二级筛选，并回到官网默认列表。 */
     fun selectHuangguoCategory(route: String) {
         val state = mutable.value.huangguo
-        if (state.selectedCategory == route && state.selectedTag.isBlank()) return
+        if (state.selectedCategory == route && state.selectedFilter.isBlank() && state.selectedTag.isBlank()) return
         huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
         mutable.update { value -> value.copy(huangguo = value.huangguo.copy(
-            selectedCategory = route, selectedTagGroup = "", selectedTag = "", browse = LoadState(emptyList()),
-            browsePage = 1, browsePages = 1, browseLoadingMore = false,
+            selectedCategory = route, selectedFilter = "", selectedTagGroup = "", selectedTag = "",
+            filters = value.huangguo.filters.copy(loading = true, error = null),
+            browse = LoadState(emptyList()), browsePage = 1, browsePages = 1, browseLoadingMore = false,
+        )) }
+        viewModelScope.launch {
+            val filters = runCatching { repository.huangguoFilters(route) }
+            mutable.update { value ->
+                // 连续快速切频道时，旧频道晚到的筛选配置不能覆盖当前菜单。
+                if (value.huangguo.selectedCategory != route) value
+                else value.copy(huangguo = value.huangguo.copy(
+                    filters = filters.fold(
+                        { LoadState(it, loaded = true) },
+                        { value.huangguo.filters.copy(loading = false, error = it.userMessage()) },
+                    ),
+                ))
+            }
+            if (mutable.value.huangguo.selectedCategory == route) refreshHuangguoBrowse()
+        }
+    }
+
+    /** 频道内的二级筛选：原创页对应全部/短剧/漫剧，普通频道对应用排序。 */
+    fun selectHuangguoFilter(value: String) {
+        val state = mutable.value.huangguo
+        if (state.selectedFilter == value && state.selectedTag.isBlank()) return
+        huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
+        mutable.update { item -> item.copy(huangguo = item.huangguo.copy(
+            selectedFilter = value, selectedTagGroup = "", selectedTag = "",
+            browse = LoadState(emptyList()), browsePage = 1, browsePages = 1, browseLoadingMore = false,
         )) }
         refreshHuangguoBrowse()
     }
@@ -638,7 +672,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         if (mutable.value.huangguo.selectedTagGroup == code && mutable.value.huangguo.selectedTag == first.slug) return
         huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
         mutable.update { value -> value.copy(huangguo = value.huangguo.copy(
-            selectedCategory = "", selectedTagGroup = code, selectedTag = first.slug,
+            selectedFilter = "", selectedTagGroup = code, selectedTag = first.slug,
             browse = LoadState(emptyList()), browsePage = 1, browsePages = 1, browseLoadingMore = false,
         )) }
         refreshHuangguoBrowse()
@@ -650,8 +684,8 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val group = state.tagGroups.data.firstOrNull { group -> group.tags.any { it.slug == slug } }
         huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
         mutable.update { value -> value.copy(huangguo = value.huangguo.copy(
-            // 二级题材是跨频道筛选；保留当前一级分类会导致与题材组合后可能为空。
-            selectedCategory = "", selectedTagGroup = group?.code.orEmpty(), selectedTag = slug,
+            // 题材是跨频道筛选；保留当前频道会导致与题材组合后可能为空。
+            selectedFilter = "", selectedTagGroup = group?.code.orEmpty(), selectedTag = slug,
             browse = LoadState(emptyList()), browsePage = 1, browsePages = 1,
             browseLoadingMore = false,
         )) }
@@ -670,19 +704,29 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         refreshHuangguoBrowse()
     }
 
+    /** 当前请求值：题材优先走 tag:，否则走频道筛选；空筛选由后端使用官网默认排序。 */
+    private fun huangguoFilter(ui: HuangguoState) =
+        if (ui.selectedTag.isNotBlank()) "tag:${ui.selectedTag}" else ui.selectedFilter.ifBlank {
+            ui.filters.data.firstOrNull()?.value.orEmpty()
+        }
+
+    /** 请求返回时核对完整筛选条件，避免快速切频道或筛选时旧结果覆盖新界面。 */
+    private fun HuangguoState.matches(category: String, filter: String): Boolean =
+        selectedCategory == category && huangguoFilter(this) == filter
+
     fun refreshHuangguoBrowse() {
         val current = mutable.value.huangguo
         huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
         val category = current.selectedCategory
-        val tag = current.selectedTag
+        val filter = huangguoFilter(current)
         mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
             browse = state.huangguo.browse.copy(loading = true, error = null), browseLoadingMore = false,
         )) }
         huangguoBrowseJob = viewModelScope.launch {
             try {
-                val page = repository.huangguoBrowse(category, tag, 1)
+                val page = repository.huangguoBrowse(category, filter, 1)
                 mutable.update { state ->
-                    if (state.huangguo.selectedCategory != category || state.huangguo.selectedTag != tag) state
+                    if (!state.huangguo.matches(category, filter)) state
                     else state.copy(huangguo = state.huangguo.copy(
                         browse = LoadState(page.items, loaded = true, updatedAt = System.currentTimeMillis()),
                         browsePage = page.page, browsePages = page.pages,
@@ -691,7 +735,7 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
             } catch (error: CancellationException) { throw error }
             catch (error: Throwable) {
                 mutable.update { state ->
-                    if (state.huangguo.selectedCategory != category || state.huangguo.selectedTag != tag) state
+                    if (!state.huangguo.matches(category, filter)) state
                     else state.copy(huangguo = state.huangguo.copy(
                         browse = state.huangguo.browse.copy(loading = false, error = error.userMessage(), loaded = true),
                     ))
@@ -705,14 +749,14 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         val current = mutable.value.huangguo
         if (current.browseLoadingMore || current.browse.loading || current.browsePage >= current.browsePages) return
         val category = current.selectedCategory
-        val tag = current.selectedTag
+        val filter = huangguoFilter(current)
         val next = current.browsePage + 1
         mutable.update { state -> state.copy(huangguo = state.huangguo.copy(browseLoadingMore = true)) }
         huangguoBrowseAppendJob = viewModelScope.launch {
             try {
-                val page = repository.huangguoBrowse(category, tag, next)
+                val page = repository.huangguoBrowse(category, filter, next)
                 mutable.update { state ->
-                    if (state.huangguo.selectedCategory != category || state.huangguo.selectedTag != tag) state
+                    if (!state.huangguo.matches(category, filter)) state
                     else {
                         val merged = (state.huangguo.browse.data + page.items).distinctBy { it.id }
                         state.copy(huangguo = state.huangguo.copy(

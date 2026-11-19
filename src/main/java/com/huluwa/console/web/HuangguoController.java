@@ -32,18 +32,23 @@ public class HuangguoController {
         return ApiResult.ok(service.categories());
     }
 
+    @GetMapping("/filters")
+    public ApiResult<Map<String, Object>> filters(@RequestParam(defaultValue = "") String category) {
+        return ApiResult.ok(service.filters(category));
+    }
+
     @GetMapping("/tags")
     public ApiResult<Map<String, Object>> tags() {
         return ApiResult.ok(service.tagGroups());
     }
 
-    /** 一级分类或二级题材列表；两者都为空时默认展示短剧分类。 */
+    /** 一级频道、频道筛选或题材列表；筛选为空时按官网默认展示。 */
     @GetMapping("/browse")
     public ApiResult<Map<String, Object>> browse(@RequestParam(defaultValue = "") String category,
-                                                  @RequestParam(defaultValue = "") String tag,
+                                                  @RequestParam(defaultValue = "") String filter,
                                                   @RequestParam(defaultValue = "1") int page,
                                                   @RequestParam(defaultValue = "20") int size) {
-        return ApiResult.ok(service.browse(category, tag, page, size));
+        return ApiResult.ok(service.browse(category, filter, page, size));
     }
 
     @GetMapping("/search")

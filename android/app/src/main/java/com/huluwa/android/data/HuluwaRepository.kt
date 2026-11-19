@@ -48,12 +48,16 @@ class HuluwaRepository(val api: ApiClient, private val chatCache: ChatCache) {
     suspend fun huangguoCategories(): List<HuangguoCategory> =
         api.get("huangguo", "categories").asObject().rows("items").map { HuangguoCategory.from(it.asObject()) }
 
+    suspend fun huangguoFilters(category: String): List<HuangguoFilter> =
+        api.get("huangguo", "filters", query = mapOf("category" to category))
+            .asObject().rows("items").map { HuangguoFilter.from(it.asObject()) }
+
     suspend fun huangguoTags(): List<HuangguoTagGroup> =
         api.get("huangguo", "tags").asObject().rows("items").map { HuangguoTagGroup.from(it.asObject()) }
 
-    suspend fun huangguoBrowse(category: String, tag: String, page: Int = 1, size: Int = 20): HuangguoBrowsePage =
+    suspend fun huangguoBrowse(category: String, filter: String, page: Int = 1, size: Int = 20): HuangguoBrowsePage =
         HuangguoBrowsePage.from(api.get("huangguo", "browse", query = mapOf(
-            "category" to category, "tag" to tag, "page" to page.toString(), "size" to size.toString(),
+            "category" to category, "filter" to filter, "page" to page.toString(), "size" to size.toString(),
         )).asObject())
 
     suspend fun huangguoSearch(keyword: String, page: Int = 1, size: Int = 20): List<HuangguoCard> =

@@ -69,8 +69,11 @@ public class HuangguoClient {
     public record Playback(String id, int ep, String url, String hevc, String preview,
                            Map<String, Object> cdn) { }
 
-    /** 黄果官网的一级分类，route 直接对应 /api/videos/category/{route}。 */
+    /** 黄果官网的一级分类；original 使用独立原创筛选，其余 route 对应分类接口。 */
     public record Category(String name, String route) { }
+
+    /** 官网分类页的二级标签；value 为空表示该频道全量。 */
+    public record Filter(String name, String value) { }
 
     /** 黄果官网题材页的分组；具体题材通过 /tag/{slug}/ 页面读取。 */
     public record TagGroup(String code, String name, List<Tag> tags) { }
@@ -115,12 +118,35 @@ public class HuangguoClient {
 
     /** 一级分类与题材分组来自官网公开配置接口，避免客户端自行维护菜单。 */
     public List<Category> categories() {
+        // 官网导航新增了“黄果原创”，它不是 /api/site/categories/video 中的普通频道。
+        // 仍以配置接口为准，再按官网导航顺序合并原创与可用频道。
         JsonNode root = getJson("/api/site/categories/video");
-        List<Category> list = new ArrayList<>();
+        List<Category> configured = new ArrayList<>();
         for (JsonNode item : root.path("data").path("items")) {
-            addCategory(list, item.path("name").asText(""), item.path("route").asText(""));
+            addCategory(configured, item.path("name").asText(""), item.path("route").asText(""));
+        }
+        List<Category> list = new ArrayList<>();
+        addCategory(list, "黄果原创", "original");
+        for (String route : List.of("ai-duanju", "ai-manju")) {
+            configured.stream().filter(item -> item.route().equals(route)).findFirst()
+                    .ifPresent(item -> addCategory(list, item.name(), item.route()));
+        }
+        for (Category item : configured) {
+            if (!item.route().equals("ai-mogai") && !item.route().equals("ai-huanlian")) {
+                addCategory(list, item.name(), item.route());
+            }
         }
         return list;
+    }
+
+    /** 官网原创页的三个入口；cate_id 为官网原创短剧/漫剧的实际分类 ID。 */
+    public List<Filter> originalFilters() {
+        return List.of(new Filter("全部原创", ""), new Filter("原创漫剧", "25"), new Filter("原创短剧", "24"));
+    }
+
+    /** 普通频道当前可稳定分页的二级菜单；官网页面的“精选推荐”不返回可翻页数据。 */
+    public List<Filter> channelFilters() {
+        return List.of(new Filter("最近更新", "latest"), new Filter("当前热播", "hot_window"));
     }
 
     public List<TagGroup> tagGroups() {
@@ -142,6 +168,20 @@ public class HuangguoClient {
     /** 分类列表；sort=hot 是官网分类页使用的排序参数。 */
     public Page category(String route, int page, int size) {
         JsonNode root = getJson("/api/videos/category/" + encode(route) + "?page=" + page + "&size=" + size + "&sort=hot");
+        return page(root.path("data"), page);
+    }
+
+    /** 分类页的最近更新、当前热播；均使用官网分类页实际请求的排序参数。 */
+    public Page category(String route, String sort, int page, int size) {
+        JsonNode root = getJson("/api/videos/category/" + encode(route) + "?page=" + page + "&size=" + size + "&sort=" + encode(sort));
+        return page(root.path("data"), page);
+    }
+
+    /** 原创频道由 /api/videos 的 is_original 与 cate_id 过滤，顺序与官网原创页一致。 */
+    public Page original(String cateId, int page, int size) {
+        String query = "/api/videos?is_original=1&page=" + page + "&size=" + size + "&sort=new";
+        if (cateId != null && !cateId.isBlank()) query += "&cate_id=" + encode(cateId);
+        JsonNode root = getJson(query);
         return page(root.path("data"), page);
     }
 

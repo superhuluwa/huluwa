@@ -65,6 +65,13 @@ data class HuangguoCategory(val name: String, val route: String, val available: 
     }
 }
 
+/** 当前一级频道下的二级筛选；value 为空或 tag: 前缀由客户端和后端约定。 */
+data class HuangguoFilter(val name: String, val value: String) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoFilter(raw.text("name"), raw.text("value"))
+    }
+}
+
 data class HuangguoTag(val name: String, val slug: String) {
     companion object {
         fun from(raw: JsonObject) = HuangguoTag(raw.text("name"), raw.text("slug"))
@@ -100,7 +107,9 @@ data class HuangguoState(
     val recommend: LoadState<List<HuangguoCard>> = LoadState(emptyList()),
     val categories: LoadState<List<HuangguoCategory>> = LoadState(emptyList()),
     val tagGroups: LoadState<List<HuangguoTagGroup>> = LoadState(emptyList()),
+    val filters: LoadState<List<HuangguoFilter>> = LoadState(emptyList()),
     val selectedCategory: String = "",
+    val selectedFilter: String = "",
     val selectedTagGroup: String = "",
     val selectedTag: String = "",
     val browse: LoadState<List<HuangguoCard>> = LoadState(emptyList()),

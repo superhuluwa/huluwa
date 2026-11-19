@@ -37,7 +37,7 @@ public class HuangguoService {
         });
     }
 
-    /** 黄果官网一级分类；额外提供“全部”，由客户端作为默认首页。 */
+    /** 黄果官网一级导航；额外提供“全部”，由客户端作为默认首页。 */
     public Map<String, Object> categories() {
         return cached("categories", CACHE_TTL_MS, () -> {
             List<Map<String, Object>> items = new ArrayList<>();
@@ -45,6 +45,19 @@ public class HuangguoService {
             for (HuangguoClient.Category category : client.categories()) {
                 items.add(Map.of("name", category.name(), "route", category.route(),
                         "available", !category.route().equals("ai-mogai") && !category.route().equals("ai-huanlian")));
+            }
+            return Map.of("items", items);
+        });
+    }
+
+    /** 每个一级频道自己的二级菜单；原创与普通频道的筛选口径不同。 */
+    public Map<String, Object> filters(String category) {
+        return cached("filters:" + category, CACHE_TTL_MS, () -> {
+            List<HuangguoClient.Filter> source = "original".equals(category)
+                    ? client.originalFilters() : client.channelFilters();
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (HuangguoClient.Filter item : source) {
+                items.add(Map.of("name", item.name(), "value", item.value()));
             }
             return Map.of("items", items);
         });
@@ -65,19 +78,24 @@ public class HuangguoService {
         });
     }
 
-    /** 一级分类或二级题材列表，返回统一下一页状态。 */
-    public Map<String, Object> browse(String category, String tag, int page, int size) {
+    /** 一级频道、频道筛选或题材列表，返回统一下一页状态。 */
+    public Map<String, Object> browse(String category, String filter, int page, int size) {
         String route = category == null ? "" : category.trim();
-        String slug = tag == null ? "" : tag.trim();
+        String value = filter == null ? "" : filter.trim();
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 50);
-        String key = "browse:" + route + ":" + slug + ":" + safePage + ":" + safeSize;
+        String key = "browse:" + route + ":" + value + ":" + safePage + ":" + safeSize;
         return cached(key, CACHE_TTL_MS, () -> {
-            HuangguoClient.Page result = !slug.isBlank()
-                    ? client.tag(slug, safePage, safeSize)
-                    : route.isBlank() ? client.category("ai-duanju", safePage, safeSize)
-                    : client.category(route, safePage, safeSize);
-            return pageBody(result, route, slug);
+            HuangguoClient.Page result;
+            if (value.startsWith("tag:")) {
+                result = client.tag(value.substring(4), safePage, safeSize);
+            } else if ("original".equals(route)) {
+                result = client.original(value, safePage, safeSize);
+            } else {
+                result = client.category(route.isBlank() ? "ai-duanju" : route,
+                        value.isBlank() ? "latest" : value, safePage, safeSize);
+            }
+            return pageBody(result, route, value);
         });
     }
 
@@ -86,7 +104,7 @@ public class HuangguoService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("items", items);
         body.put("category", category);
-        body.put("tag", tag);
+        body.put("filter", tag);
         body.put("page", result.page());
         body.put("pages", result.pages());
         body.put("total", result.total());

@@ -163,27 +163,44 @@ private val HuangguoMuted = Color(0xFF746B5F)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val categories = state.categories.data.ifEmpty { listOf(HuangguoCategory("全部", "")) }
+            val categories = state.categories.data.ifEmpty { listOf(HuangguoCategory("黄果原创", "original")) }
             categories.forEach { category ->
                 HuangguoFilterChip(if (category.available) category.name else "${category.name} · 暂不可用",
-                    state.selectedTag.isBlank() && state.selectedCategory == category.route,
+                    state.selectedTag.isBlank() && state.selectedFilter.isBlank() && state.selectedCategory == category.route,
                     { if (category.available) vm.selectHuangguoCategory(category.route) },
                     enabled = category.available)
             }
         }
         if (!searching) {
+            // 官网的一级频道各自带二级菜单：原创是全部/短剧/漫剧，普通频道是最近更新/当前热播。
+            val channelFilters = state.filters.data
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HuangguoFilterChip("全部题材", selectedGroup == null, { vm.clearHuangguoTag() })
-                state.tagGroups.data.forEach { group ->
-                    if (group.name.startsWith("成人")) return@forEach
-                    HuangguoFilterChip(group.name, selectedGroup?.code == group.code,
-                        { vm.selectHuangguoTagGroup(group.code) })
+                channelFilters.forEach { filter ->
+                    HuangguoFilterChip(
+                        filter.name,
+                        state.selectedTag.isBlank() && (state.selectedFilter == filter.value ||
+                            (state.selectedFilter.isBlank() && channelFilters.firstOrNull() == filter)),
+                        { vm.selectHuangguoFilter(filter.value) },
+                    )
+                }
+            }
+            // 原创频道只对应官网的三种原创内容，不叠加普通短剧题材，避免点击后频道跳回全站。
+            if (!state.selectedCategory.isBlank() && state.selectedCategory != "original") {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HuangguoFilterChip("全部题材", state.selectedTag.isBlank(), { vm.clearHuangguoTag() })
+                    state.tagGroups.data.forEach { group ->
+                        if (group.name.startsWith("成人")) return@forEach
+                        HuangguoFilterChip(group.name, selectedGroup?.code == group.code,
+                            { vm.selectHuangguoTagGroup(group.code) })
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(selectedGroup?.name ?: "题材分类", color = HuangguoMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                val channelTitle = state.filters.data.firstOrNull { it.value == state.selectedFilter }?.name
+                Text(selectedGroup?.name ?: channelTitle ?: "频道分类", color = HuangguoMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 Text("第 ${state.browsePage}/${state.browsePages} 页", color = HuangguoMuted, fontSize = 12.sp)
             }
