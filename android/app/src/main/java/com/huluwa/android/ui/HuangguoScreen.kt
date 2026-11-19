@@ -148,6 +148,9 @@ private val HuangguoMuted = Color(0xFF746B5F)
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(vm::closeHuangguo) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = HuangguoInk) }
             Text("黄果短剧", Modifier.weight(1f), color = HuangguoInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            IconButton({ vm.openHuangguoBlog() }) {
+                Icon(Icons.Outlined.Article, "黄果博客", tint = HuangguoInk)
+            }
             IconButton({ if (searching) vm.searchHuangguo(state.searchKeyword) else vm.refreshHuangguoBrowse() }) {
                 Icon(Icons.Outlined.Refresh, "刷新", tint = HuangguoMuted)
             }
