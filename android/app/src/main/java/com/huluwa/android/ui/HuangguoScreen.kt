@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
@@ -512,10 +513,9 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val resumeMs = state.resumePositionMs
     val player = remember(url) {
         if (url.isBlank()) null else {
-            val headers = state.playback?.cdn.orEmpty().let { cdn ->
-                HuangguoPlaybackHeaders.of(cdn["authKey"]?.toString().orEmpty(), cdn["authValue"]?.toString().orEmpty(), cdn["app"]?.toString().orEmpty())
-            }
-            val source = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
+            val source = DefaultHttpDataSource.Factory().setDefaultRequestProperties(
+                HuangguoPlaybackHeaders.of("", "", "")
+            )
             ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(source)).build().apply {
                 setMediaItem(MediaItem.fromUri(url)); prepare(); playWhenReady = true
             }
