@@ -20,8 +20,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -90,6 +94,10 @@ private val HuangguoMuted = Color(0xFF746B5F)
     val context = LocalContext.current
     val imageLoader = remember(context) { huangguoImageLoader(context) }
     DisposableEffect(imageLoader) { onDispose { imageLoader.shutdown() } }
+    if (ui.huangguoBlog.visible) {
+        HuangguoBlogScreen(ui.huangguoBlog, vm, imageLoader)
+        return
+    }
     val state = ui.huangguo
     BackHandler(state.visible) {
         when {
@@ -229,7 +237,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(cards.data, key = { it.id }) { card ->
+            gridItems(cards.data, key = { it.id }) { card ->
                 HuangguoCardView(card, imageLoader,
                     onClick = { vm.openHuangguoDetail(card) },
                     onPlay = { vm.openHuangguoDetail(card, playImmediately = true) })
@@ -246,6 +254,136 @@ private val HuangguoMuted = Color(0xFF746B5F)
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
+    }
+}
+
+
+/** 黄果博客：博客全量、黑料吃瓜、短剧剧评共用文章列表与详情。 */
+@Composable private fun HuangguoBlogScreen(state: HuangguoBlogState, vm: HuluwaViewModel, imageLoader: ImageLoader) {
+    BackHandler(state.visible) {
+        when {
+            state.detail != null -> vm.closeHuangguoPost()
+            else -> vm.closeHuangguoBlog()
+        }
+    }
+    val detail = state.detail
+    if (state.detailLoading) {
+        Box(Modifier.fillMaxSize().background(HuangguoPaper), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = HuangguoAccent) }
+    } else if (state.detailError != null && detail == null) {
+        Column(Modifier.fillMaxSize().background(HuangguoPaper), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text(state.detailError, color = HuluwaColors.Danger)
+            Spacer(Modifier.height(12.dp)); Button(vm::closeHuangguoPost) { Text("返回") }
+        }
+    } else if (detail != null) {
+        HuangguoPostDetailPage(state, detail, vm, imageLoader)
+    } else {
+        HuangguoPostListPage(state, vm, imageLoader)
+    }
+}
+
+@Composable private fun HuangguoPostListPage(state: HuangguoBlogState, vm: HuluwaViewModel, imageLoader: ImageLoader) {
+    val list = rememberLazyListState()
+    LaunchedEffect(state.channel) { list.scrollToItem(0) }
+    LaunchedEffect(state.posts.data.size, state.page) {
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index }.distinctUntilChanged().collect { last ->
+            val lastIndex = state.posts.data.lastIndex
+            if (lastIndex >= 0 && last != null && last >= lastIndex - 3) vm.loadMoreHuangguoBlog()
+        }
+    }
+    Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(vm::closeHuangguoBlog) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = HuangguoInk) }
+            Text("黄果博客", Modifier.weight(1f), color = HuangguoInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            IconButton(vm::refreshHuangguoBlog) { Icon(Icons.Outlined.Refresh, "刷新", tint = HuangguoMuted) }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("" to "博客", "gossip" to "黑料吃瓜", "reviews" to "短剧剧评").forEach { (value, label) ->
+                HuangguoFilterChip(label, state.channel == value, { vm.selectHuangguoBlogChannel(value) })
+            }
+        }
+        when {
+            state.posts.loading && state.posts.data.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = HuangguoAccent) }
+            state.posts.error != null && state.posts.data.isEmpty() -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(state.posts.error, color = HuluwaColors.Danger); Spacer(Modifier.height(12.dp)); Button(vm::refreshHuangguoBlog) { Text("重试") }
+            }
+            else -> LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(state.posts.data, key = { it.id }) { post ->
+                    HuangguoPostCard(post, imageLoader) { vm.openHuangguoPost(post.id) }
+                }
+                if (state.loadingMore) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp), color = HuangguoAccent) }
+                if (!state.loadingMore && state.page >= state.pages && state.posts.data.isNotEmpty()) item {
+                    Text("已经到底了", Modifier.fillMaxWidth().padding(16.dp), color = HuangguoMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun HuangguoPostCard(post: HuangguoPost, imageLoader: ImageLoader, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.width(132.dp).height(88.dp).background(Color(0xFFE8DED0), RoundedCornerShape(10.dp))) {
+                AsyncImage(post.cover, post.title, imageLoader, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(post.title, color = HuangguoInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(post.meta, color = HuangguoMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(post.tags.take(3).joinToString(" · "), color = HuangguoMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable private fun HuangguoPostDetailPage(state: HuangguoBlogState, detail: HuangguoPostDetail, vm: HuluwaViewModel, imageLoader: ImageLoader) {
+    val post = detail.post
+    Column(Modifier.fillMaxSize().background(HuangguoPaper).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(vm::closeHuangguoPost) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = HuangguoInk) }
+            Text("文章", Modifier.weight(1f), color = HuangguoInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                Text(post.title, color = HuangguoInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(30.dp).background(Color(0xFFE8DED0), RoundedCornerShape(50))) {
+                        AsyncImage(detail.authorAvatar, post.author, imageLoader, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    Text(post.meta, color = HuangguoMuted, fontSize = 12.sp)
+                }
+            }
+            itemsIndexed(detail.blocks) { index, block ->
+                when (block.type) {
+                    "heading" -> Text(block.text, color = HuangguoInk, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    "image" -> AsyncImage(block.text, "文章图片", imageLoader, Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 560.dp), contentScale = ContentScale.Fit)
+                    "video" -> HuangguoPostVideoBlock(state, post.id, block.index, vm, imageLoader)
+                    else -> Text(block.text, color = HuangguoInk, fontSize = 16.sp, lineHeight = 26.sp)
+                }
+            }
+            if (detail.tagLinks.isNotEmpty()) item { Text(detail.tagLinks.joinToString("  "), color = HuangguoMuted, fontSize = 12.sp) }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable private fun HuangguoPostVideoBlock(state: HuangguoBlogState, id: String, index: Int, vm: HuluwaViewModel, imageLoader: ImageLoader) {
+    val url = state.videos[index].orEmpty()
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("帖子视频", color = HuangguoInk, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        if (state.activeVideoIndex == index && url.isNotBlank() && !state.videoLoading) {
+            InlineVideoBubble(url, "", active = true, onPlay = {}, onStop = { vm.stopHuangguoPostVideo() },
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        } else {
+            Surface(onClick = { vm.playHuangguoPostVideo(id, index) }, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                color = Color.Black, shape = RoundedCornerShape(10.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.PlayArrow, "播放文章视频", Modifier.size(54.dp), tint = Color.White)
+                    if (state.videoLoading && state.activeVideoIndex == index) CircularProgressIndicator(Modifier.size(42.dp), color = Color.White)
+                }
+            }
+        }
+        state.videoError?.takeIf { state.activeVideoIndex == index }?.let { Text(it, color = HuluwaColors.Danger, fontSize = 12.sp) }
     }
 }
 
@@ -301,7 +439,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
         LazyVerticalGrid(columns = GridCells.Fixed(5), modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp),
             contentPadding = PaddingValues(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp), userScrollEnabled = false) {
-            items(detail.episodes, key = { it.ep }) { episode ->
+            gridItems(detail.episodes, key = { it.ep }) { episode ->
                 Surface(onClick = { vm.playHuangguo(episode.ep) }, shape = RoundedCornerShape(10.dp),
                     color = if (episode.ep == state.selectedEp) HuangguoAccent else Color.White) {
                     Text("${episode.ep}", Modifier.fillMaxWidth().padding(vertical = 12.dp), color = HuangguoInk,
@@ -498,7 +636,7 @@ private val HuangguoMuted = Color(0xFF746B5F)
         LazyVerticalGrid(columns = GridCells.Fixed(5), modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
             contentPadding = PaddingValues(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(detail.episodes, key = { it.ep }) { episode ->
+            gridItems(detail.episodes, key = { it.ep }) { episode ->
                 Surface(onClick = { showEpisodes = false; vm.playHuangguo(episode.ep) }, shape = RoundedCornerShape(9.dp),
                     color = if (episode.ep == state.selectedEp) Color(0xFFE44B40) else Color(0xFF292929)) {
                     Text("${episode.ep}", Modifier.fillMaxWidth().padding(vertical = 13.dp),

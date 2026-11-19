@@ -109,6 +109,8 @@ data class AppState(
     /** 黄果竖版短剧：推荐流、详情与播放地址都由服务端解析。 */
     val huangguo: HuangguoState = HuangguoState(),
     val huangguoResume: HuangguoPreferences.Progress? = null,
+    /** 黄果博客：博客、黑料吃瓜、短剧剧评共用一套文章浏览状态。 */
+    val huangguoBlog: HuangguoBlogState = HuangguoBlogState(),
 ) {
     fun build(project: AndroidBuildProject) = when (project) {
         AndroidBuildProject.Huluwa -> androidBuild
@@ -310,6 +312,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     private var generation = 0
     private var sheetGeneration = 0
     private var processingStarted = 0L
+    private var huangguoBlogJob: Job? = null
+    private var huangguoBlogMoreJob: Job? = null
+    private var huangguoPostJob: Job? = null
+    private var huangguoPostVideoJob: Job? = null
     private var huangguoPlaybackJob: Job? = null
     private var huangguoBrowseJob: Job? = null
     private var huangguoBrowseAppendJob: Job? = null
@@ -558,12 +564,16 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
         upgradeDownloadJob?.cancel(); upgradeDownloadJob = null
         mutable.update { it.copy(realtime = false) }
     }
-    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false)) }; refreshCurrent(false) }
+    fun selectTab(tab: MainTab) { closeChat(); dismissSheet(); mutable.update { it.copy(tab = tab, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false), huangguoBlog = it.huangguoBlog.copy(fromEntry = false, visible = false)) }; refreshCurrent(false) }
     // ------------------------------------------------------------------ 黄果竖版
 
     fun openHuangguo() {
         closeChat(); dismissSheet()
-        mutable.update { it.copy(serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = true, fromFunctions = true)) }
+        mutable.update { state -> state.copy(
+            serverStatusVisible = false, reader = null,
+            huangguo = state.huangguo.copy(visible = true, fromFunctions = true),
+            huangguoBlog = state.huangguoBlog.copy(fromEntry = false, visible = false),
+        ) }
         mutable.update { it.copy(huangguoResume = huangguoPreferences.last()) }
         loadHuangguoFilters()
         if (!mutable.value.huangguo.browse.loaded) refreshHuangguoBrowse()
@@ -571,8 +581,10 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
 
     fun closeHuangguo() {
         huangguoBrowseJob?.cancel(); huangguoBrowseAppendJob?.cancel()
-        mutable.update { it.copy(huangguo = it.huangguo.copy(visible = false, fromFunctions = false, playerVisible = false,
-            playback = null, playerError = null, resumePositionMs = 0L, browseLoadingMore = false)) }
+        mutable.update { state -> state.copy(huangguo = state.huangguo.copy(
+            visible = false, fromFunctions = false, playerVisible = false,
+            playback = null, playerError = null, resumePositionMs = 0L, browseLoadingMore = false,
+        )) }
     }
 
     fun refreshHuangguoRecommend() {
@@ -895,8 +907,154 @@ class HuluwaViewModel(application: Application) : AndroidViewModel(application) 
     }
 
 
+    // ------------------------------------------------------------------ 黄果博客
+
+    fun openHuangguoBlog(channel: String = "") {
+        closeChat(); dismissSheet()
+        val reusePosts = mutable.value.huangguoBlog.channel == channel && mutable.value.huangguoBlog.posts.loaded
+        mutable.update { state -> state.copy(
+            serverStatusVisible = false, reader = null,
+            huangguo = state.huangguo.copy(visible = false, fromFunctions = false),
+            huangguoBlog = state.huangguoBlog.copy(channel = channel, visible = true, fromEntry = true),
+        ) }
+        if (!reusePosts) refreshHuangguoBlog()
+    }
+
+    fun closeHuangguoBlog() {
+        huangguoBlogJob?.cancel(); huangguoBlogMoreJob?.cancel(); huangguoPostJob?.cancel(); huangguoPostVideoJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            fromEntry = false, visible = false, detail = null, detailError = null,
+            videos = emptyMap(), videoLoading = false, videoError = null, activeVideoIndex = null,
+        )) }
+    }
+
+    fun selectHuangguoBlogChannel(channel: String) {
+        if (mutable.value.huangguoBlog.channel == channel && mutable.value.huangguoBlog.posts.loaded) return
+        huangguoBlogJob?.cancel(); huangguoBlogMoreJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            channel = channel, posts = LoadState(emptyList()), page = 1, pages = 1, loadingMore = false,
+            detail = null, detailError = null, videos = emptyMap(), videoLoading = false,
+            videoError = null, activeVideoIndex = null,
+        )) }
+        refreshHuangguoBlog()
+    }
+
+    fun refreshHuangguoBlog() {
+        val channel = mutable.value.huangguoBlog.channel
+        huangguoBlogJob?.cancel(); huangguoBlogMoreJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            posts = state.huangguoBlog.posts.copy(loading = true, error = null), loadingMore = false,
+        )) }
+        huangguoBlogJob = viewModelScope.launch {
+            try {
+                val page = repository.huangguoPosts(channel, 1)
+                mutable.update { state ->
+                    if (state.huangguoBlog.channel != channel) state
+                    else state.copy(huangguoBlog = state.huangguoBlog.copy(
+                        posts = LoadState(page.items, loaded = true, updatedAt = System.currentTimeMillis()),
+                        page = page.page, pages = page.pages, loadingMore = false,
+                    ))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state ->
+                    if (state.huangguoBlog.channel != channel) state
+                    else state.copy(huangguoBlog = state.huangguoBlog.copy(
+                        posts = state.huangguoBlog.posts.copy(loading = false, error = error.userMessage(), loaded = true),
+                    ))
+                }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun loadMoreHuangguoBlog() {
+        val current = mutable.value.huangguoBlog
+        if (current.loadingMore || current.posts.loading || current.page >= current.pages) return
+        val channel = current.channel
+        val next = current.page + 1
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(loadingMore = true)) }
+        huangguoBlogMoreJob = viewModelScope.launch {
+            try {
+                val page = repository.huangguoPosts(channel, next)
+                mutable.update { state ->
+                    if (state.huangguoBlog.channel != channel) state
+                    else state.copy(huangguoBlog = state.huangguoBlog.copy(
+                        posts = state.huangguoBlog.posts.copy(data = (state.huangguoBlog.posts.data + page.items).distinctBy { it.id }),
+                        page = page.page, pages = page.pages, loadingMore = false,
+                    ))
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(loadingMore = false)) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun openHuangguoPost(id: String) {
+        huangguoPostJob?.cancel(); huangguoPostVideoJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            detail = null, detailLoading = true, detailError = null, videos = emptyMap(),
+            videoLoading = false, videoError = null, activeVideoIndex = null,
+        )) }
+        huangguoPostJob = viewModelScope.launch {
+            try {
+                val detail = repository.huangguoPost(id)
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(detail = detail, detailLoading = false)) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(detailLoading = false, detailError = error.userMessage())) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun closeHuangguoPost() {
+        huangguoPostJob?.cancel(); huangguoPostVideoJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            detail = null, detailError = null, videos = emptyMap(), videoLoading = false, videoError = null, activeVideoIndex = null,
+        )) }
+    }
+
+    /** 文章正文视频按需获取短时地址；同一文章只请求一次，切回已加载的视频不重复握手。 */
+    fun playHuangguoPostVideo(id: String, index: Int = 0) {
+        val current = mutable.value.huangguoBlog
+        current.videos[index]?.let { url ->
+            if (url.isNotBlank()) {
+                huangguoPostVideoJob?.cancel()
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(activeVideoIndex = index, videoError = null)) }
+                return
+            }
+        }
+        if (current.videoLoading && current.activeVideoIndex == index) return
+        huangguoPostVideoJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+            videoLoading = true, videoError = null, activeVideoIndex = index,
+        )) }
+        huangguoPostVideoJob = viewModelScope.launch {
+            try {
+                val videos = repository.huangguoPostVideos(id).associate { it.index to it.url }
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+                    videos = state.huangguoBlog.videos + videos, videoLoading = false, activeVideoIndex = index,
+                )) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Throwable) {
+                mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(
+                    videoLoading = false, videoError = error.userMessage(),
+                )) }
+                if (error is ApiException && error.code == 401) handleError(error)
+            }
+        }
+    }
+
+    fun stopHuangguoPostVideo() {
+        huangguoPostVideoJob?.cancel()
+        mutable.update { state -> state.copy(huangguoBlog = state.huangguoBlog.copy(activeVideoIndex = null)) }
+    }
+
     /** 隐藏浏览器：在「我的」页连续点击标题 10 次后由界面层打开，计数与连击节奏放在界面层。 */
-    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false)) } }
+    fun openHiddenBrowser() { closeChat(); dismissSheet(); mutable.update { it.copy(browserVisible = true, browserUrl = "", browserBookmarksEnabled = true, serverStatusVisible = false, reader = null, huangguo = it.huangguo.copy(visible = false, fromFunctions = false), huangguoBlog = it.huangguoBlog.copy(visible = false, fromEntry = false)) } }
     fun closeHiddenBrowser() = mutable.update { it.copy(browserVisible = false, browserUrl = "", browserBookmarksEnabled = false) }
     fun refreshCurrent(silent: Boolean = false) {
         val current = mutable.value

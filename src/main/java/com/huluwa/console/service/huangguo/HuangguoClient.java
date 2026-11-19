@@ -83,6 +83,20 @@ public class HuangguoClient {
     /** 分类列表的下一页状态；黄果分类接口返回分页对象。 */
     public record Page(List<Catalog> items, int page, int pages, int total) { }
 
+    /** 博客卡片；博客列表与短剧列表字段完全不同，单独建模。 */
+    public record Post(String id, String title, String cover, String description, String author,
+                       String publishedAt, long hot, List<String> tags) { }
+
+    public record PostPage(List<Post> items, int page, int pages, int total) { }
+
+    /** 文章正文块：正文 HTML 由服务端拆成原生可渲染的段落、标题、图片和视频。 */
+    public record PostBlock(String type, String text, int index) { }
+
+    public record PostDetail(Post post, String authorAvatar, int reads,
+                             List<PostBlock> blocks, List<String> tagLinks) { }
+
+    public record PostVideo(String id, int index, String url) { }
+
     /** 搜索；参数名必须是 q，keyword 会被源站忽略。 */
     public List<Catalog> search(String keyword, int page, int size) {
         String query = encode(keyword);
@@ -183,6 +197,136 @@ public class HuangguoClient {
         if (cateId != null && !cateId.isBlank()) query += "&cate_id=" + encode(cateId);
         JsonNode root = getJson(query);
         return page(root.path("data"), page);
+    }
+
+    /** 博客频道：blog=全量，gossip=黑料吃瓜，reviews=短剧剧评。 */
+    public PostPage posts(String channel, int page, int size) {
+        String category = switch (channel == null ? "" : channel) {
+            case "gossip" -> "9002";
+            case "reviews" -> "9001";
+            default -> "";
+        };
+        String query = "/api/posts?page=" + page + "&size=" + size + "&sort=new";
+        if (!category.isBlank()) query += "&cate_id=" + category;
+        JsonNode root = getJson(query);
+        JsonNode data = root.path("data");
+        List<Post> items = new ArrayList<>();
+        for (JsonNode item : data.path("items")) items.add(post(item));
+        JsonNode pagination = data.path("pagination");
+        return new PostPage(items, pagination.path("page").asInt(page),
+                Math.max(pagination.path("pages").asInt(1), 1), pagination.path("total").asInt(items.size()));
+    }
+
+    /** 文章详情；正文中的站内相对图片需要转成源站绝对地址。 */
+    public PostDetail postDetail(String id) {
+        JsonNode root = getJson("/api/posts/" + encode(id));
+        JsonNode data = root.path("data");
+        if (data.isMissingNode() || data.isNull()) throw new HuangguoException("黄果源站没有返回该文章");
+        List<String> tags = new ArrayList<>();
+        for (JsonNode tag : data.path("tags")) tags.add(tag.asText(""));
+        Post post = new Post(data.path("id").asText(""), data.path("title").asText(""),
+                absoluteUrl(data.path("cover").asText("")), data.path("desc").asText(data.path("description").asText("")),
+                data.path("author").path("name").asText("黄果短剧"),
+                data.path("publish_time").asText(data.path("created_at").asText("")),
+                data.path("counts").path("hot").asLong(0), tags);
+        List<PostBlock> blocks = parsePostBlocks(data.path("content").asText(""));
+        List<String> tagLinks = new ArrayList<>();
+        for (JsonNode tag : data.path("tag_links")) tagLinks.add(tag.path("name").asText(""));
+        return new PostDetail(post, absoluteUrl(data.path("author").path("avatar").asText("")),
+                data.path("counts").path("hot").asInt(0), blocks, tagLinks);
+    }
+
+    /** 文章视频地址同样有短时签名，不能缓存。 */
+    public List<PostVideo> postVideos(String id) {
+        JsonNode root = postJson("/api/posts/" + encode(id) + "/playback", "{}");
+        if (root.path("status").asInt(0) != 1) throw new HuangguoException("黄果文章视频接口返回失败");
+        List<PostVideo> videos = new ArrayList<>();
+        for (JsonNode item : root.path("data").path("videos")) {
+            videos.add(new PostVideo(id, item.path("index").asInt(videos.size()), item.path("url").asText("")));
+        }
+        return videos;
+    }
+
+    private Post post(JsonNode item) {
+        List<String> tags = new ArrayList<>();
+        for (JsonNode tag : item.path("tags")) tags.add(tag.asText(""));
+        return new Post(item.path("id").asText(""), item.path("title").asText(""),
+                absoluteUrl(item.path("cover").asText("")), item.path("desc").asText(""),
+                "", item.path("publish_time").asText(item.path("created_at").asText("")),
+                item.path("hot").asLong(0), tags);
+    }
+
+    private static String absoluteUrl(String value) {
+        if (value == null || value.isBlank()) return "";
+        if (value.startsWith("//")) return "https:" + value;
+        if (value.startsWith("/")) return SITE + value;
+        return value;
+    }
+
+    private static List<PostBlock> parsePostBlocks(String html) {
+        List<PostBlock> blocks = new ArrayList<>();
+        if (html == null || html.isBlank()) return blocks;
+        Pattern tag = Pattern.compile("<\\s*(h[1-6]|p|img|div)\\b([^>]*)>", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = tag.matcher(html);
+        while (matcher.find()) {
+            String name = matcher.group(1).toLowerCase();
+            String attrs = matcher.group(2);
+            if ("img".equals(name)) {
+                String src = attr(attrs, "data-src");
+                if (src.isBlank()) src = attr(attrs, "src");
+                if (!src.isBlank() && !src.contains("cover-placeholder")) blocks.add(new PostBlock("image", absoluteUrl(src), 0));
+                continue;
+            }
+            if ("div".equals(name)) {
+                if (attrs.contains("post-video-player")) {
+                    int videoIndex = 0;
+                    Matcher indexMatcher = Pattern.compile("data-video-index=\"([0-9]+)\"").matcher(attrs);
+                    if (indexMatcher.find()) videoIndex = Integer.parseInt(indexMatcher.group(1));
+                    blocks.add(new PostBlock("video", "", videoIndex));
+                }
+                continue;
+            }
+            int end = html.toLowerCase().indexOf("</" + name + ">", matcher.end());
+            if (end < 0) continue;
+            String text = html.substring(matcher.end(), end)
+                    .replaceAll("<[^>]+>", "")
+                    .replace("&nbsp;", " ").replace("&amp;", "&")
+                    .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+                    .trim();
+            if (!text.isBlank()) blocks.add(new PostBlock(name.startsWith("h") ? "heading" : "paragraph", text, 0));
+        }
+        return blocks;
+    }
+
+    private static String attr(String attrs, String name) {
+        Matcher matcher = Pattern.compile(name + "\\s*=\\s*[\"']([^\"']*)", Pattern.CASE_INSENSITIVE).matcher(attrs);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    /** 文章详情和播放接口是 POST 公共接口，不经过视频加密握手。 */
+    private JsonNode postJson(String path, String body) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(SITE + path))
+                    .timeout(Duration.ofSeconds(25))
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", SITE + "/blog/")
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() != 200) throw new HuangguoException("黄果文章接口 HTTP " + response.statusCode());
+            JsonNode root = mapper.readTree(response.body());
+            if (root.path("status").asInt(0) != 1) throw new HuangguoException("黄果文章接口返回：" + root.path("msg").asText("请求失败"));
+            return root;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new HuangguoException("黄果文章请求被中断", error);
+        } catch (HuangguoException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new HuangguoException("黄果文章请求失败：" + error.getMessage(), error);
+        }
     }
 
     /** 题材页按官网服务端渲染页面读取，兼容官网当前没有公开的题材 JSON 列表接口。 */

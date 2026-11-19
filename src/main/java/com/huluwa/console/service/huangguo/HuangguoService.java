@@ -18,6 +18,7 @@ public class HuangguoService {
     /** 播放签名是短时的；同一集在几秒内切回时复用，超过 8 秒必须重新换取。 */
     private static final long PLAYBACK_TTL_MS = 8_000L;
     private static final int RECOMMEND_SIZE = 30;
+    private static final String DEFAULT_AVATAR = "https://huangguoai.com/static/web/images/avatar-default.png";
 
     private final HuangguoClient client;
     private final Map<String, CacheValue> cache = new ConcurrentHashMap<>();
@@ -110,6 +111,70 @@ public class HuangguoService {
         body.put("total", result.total());
         body.put("source", "huangguo");
         return body;
+    }
+
+    /** 博客列表：blog=全量，gossip=黑料吃瓜，reviews=短剧剧评。 */
+    public Map<String, Object> posts(String channel, int page, int size) {
+        String route = channel == null ? "" : channel.trim();
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 50);
+        return cached("posts:" + route + ":" + safePage + ":" + safeSize, CACHE_TTL_MS, () -> {
+            HuangguoClient.PostPage result = client.posts(route, safePage, safeSize);
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (HuangguoClient.Post item : result.items()) items.add(postCard(item));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("items", items);
+            body.put("channel", route);
+            body.put("page", result.page());
+            body.put("pages", result.pages());
+            body.put("total", result.total());
+            body.put("source", "huangguo");
+            return body;
+        });
+    }
+
+    /** 文章详情；正文只用服务端拆好的安全内容块，避免安卓端直接渲染源站 HTML。 */
+    public Map<String, Object> postDetail(String id) {
+        return cached("post-detail:" + id, CACHE_TTL_MS, () -> {
+            HuangguoClient.PostDetail detail = client.postDetail(id);
+            Map<String, Object> body = new LinkedHashMap<>(postCard(detail.post()));
+            body.put("authorAvatar", detail.authorAvatar().isBlank() ? DEFAULT_AVATAR : detail.authorAvatar());
+            body.put("reads", detail.reads());
+            List<Map<String, Object>> blocks = new ArrayList<>();
+            for (HuangguoClient.PostBlock block : detail.blocks()) {
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("type", block.type());
+                value.put("text", block.text());
+                value.put("index", block.index());
+                blocks.add(value);
+            }
+            body.put("blocks", blocks);
+            body.put("tagLinks", detail.tagLinks());
+            body.put("source", "huangguo");
+            return body;
+        });
+    }
+
+    /** 文章正文视频地址短时有效，每次播放都重新请求，不做缓存。 */
+    public Map<String, Object> postPlayback(String id) {
+        List<Map<String, Object>> videos = new ArrayList<>();
+        for (HuangguoClient.PostVideo video : client.postVideos(id)) {
+            videos.add(Map.of("index", video.index(), "url", video.url()));
+        }
+        return Map.of("id", id, "videos", videos, "source", "huangguo");
+    }
+
+    private Map<String, Object> postCard(HuangguoClient.Post item) {
+        Map<String, Object> card = new LinkedHashMap<>();
+        card.put("id", item.id());
+        card.put("title", item.title());
+        card.put("cover", item.cover());
+        card.put("description", item.description());
+        card.put("author", item.author());
+        card.put("publishedAt", item.publishedAt());
+        card.put("hot", item.hot());
+        card.put("tags", item.tags());
+        return card;
     }
 
     public Map<String, Object> search(String keyword, int page, int size) {

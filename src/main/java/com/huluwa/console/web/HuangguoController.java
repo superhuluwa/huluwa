@@ -51,6 +51,25 @@ public class HuangguoController {
         return ApiResult.ok(service.browse(category, filter, page, size));
     }
 
+    /** 博客列表：blog / gossip / reviews。 */
+    @GetMapping("/posts")
+    public ApiResult<Map<String, Object>> posts(@RequestParam(defaultValue = "") String channel,
+                                                 @RequestParam(defaultValue = "1") int page,
+                                                 @RequestParam(defaultValue = "20") int size) {
+        return ApiResult.ok(service.posts(channel, page, size));
+    }
+
+    @GetMapping("/post")
+    public ApiResult<Map<String, Object>> post(@RequestParam String id) {
+        return ApiResult.ok(service.postDetail(id));
+    }
+
+    /** 文章正文视频地址短时有效，需要按文章重新获取。 */
+    @GetMapping("/post/play")
+    public ApiResult<Map<String, Object>> postPlay(@RequestParam String id) {
+        return ApiResult.ok(service.postPlayback(id));
+    }
+
     @GetMapping("/search")
     public ApiResult<Map<String, Object>> search(@RequestParam String keyword,
                                                   @RequestParam(defaultValue = "1") int page,

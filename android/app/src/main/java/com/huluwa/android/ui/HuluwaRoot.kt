@@ -87,7 +87,7 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo }
         val activeSession = ui.chat.session
         val page = when {
             ui.serverStatusVisible -> RootPage.ServerStatus
-            ui.huangguo.visible -> RootPage.Huangguo
+            ui.huangguo.visible || ui.huangguoBlog.visible -> RootPage.Huangguo
             activeSession != null -> RootPage.Chat
             else -> RootPage.Home
         }
@@ -124,6 +124,9 @@ private enum class RootPage { Home, Chat, ServerStatus, Huangguo }
                                     if (ui.tab == MainTab.Downloads) DownloadsHeaderActions(ui, vm)
                                     if (ui.tab == MainTab.Mine) {
                                         HeaderAction(Icons.Outlined.Settings, "连接与账户", { vm.showSheet(AppSheet.Account) })
+                                    }
+                                    if (ui.tab == MainTab.Functions) {
+                                        HeaderAction(Icons.Outlined.Article, "黄果博客", vm::openHuangguoBlog)
                                     }
                                 }
                             }

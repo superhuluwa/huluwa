@@ -128,3 +128,87 @@ data class HuangguoState(
     val playerError: String? = null,
     val resumePositionMs: Long = 0L,
 )
+
+/** 黄果博客卡片；与影视剧卡片分开，避免把文章当成可直接播放的剧集。 */
+data class HuangguoPost(
+    val id: String,
+    val title: String,
+    val cover: String,
+    val description: String,
+    val author: String,
+    val publishedAt: String,
+    val hot: Long,
+    val tags: List<String>,
+) {
+    val date: String get() = publishedAt.take(10)
+    val meta: String get() = listOf(author.takeIf { it.isNotBlank() }, date.takeIf { it.isNotBlank() }).filterNotNull().joinToString(" · ")
+
+    companion object {
+        fun from(raw: JsonObject) = HuangguoPost(
+            id = raw.text("id"), title = raw.text("title"), cover = raw.text("cover"),
+            description = raw.text("description"), author = raw.text("author"),
+            publishedAt = raw.text("publishedAt"), hot = raw.number("hot")?.toLong() ?: 0L,
+            tags = raw.rows("tags").mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+        )
+    }
+}
+
+data class HuangguoPostBlock(val type: String, val text: String, val index: Int) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoPostBlock(raw.text("type"), raw.text("text"), raw.number("index")?.toInt() ?: 0)
+    }
+}
+
+data class HuangguoPostDetail(
+    val post: HuangguoPost,
+    val authorAvatar: String,
+    val reads: Int,
+    val blocks: List<HuangguoPostBlock>,
+    val tagLinks: List<String>,
+) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoPostDetail(
+            HuangguoPost.from(raw), raw.text("authorAvatar"), raw.number("reads")?.toInt() ?: 0,
+            raw.rows("blocks").map { HuangguoPostBlock.from(it.asObject()) },
+            raw.rows("tagLinks").mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+        )
+    }
+}
+
+data class HuangguoPostVideo(val index: Int, val url: String) {
+    companion object {
+        fun rows(raw: JsonObject) = raw.rows("videos").map { element ->
+            val item = element.asObject()
+            HuangguoPostVideo(item.number("index")?.toInt() ?: 0, item.text("url"))
+        }
+    }
+}
+
+data class HuangguoPostPage(val items: List<HuangguoPost>, val page: Int, val pages: Int, val total: Int) {
+    companion object {
+        fun from(raw: JsonObject) = HuangguoPostPage(
+            raw.rows("items").map { HuangguoPost.from(it.asObject()) },
+            raw.number("page")?.toInt() ?: 1,
+            (raw.number("pages")?.toInt() ?: 1).coerceAtLeast(1),
+            raw.number("total")?.toInt() ?: 0,
+        )
+    }
+}
+
+data class HuangguoBlogState(
+    val channel: String = "",
+    val posts: LoadState<List<HuangguoPost>> = LoadState(emptyList()),
+    val page: Int = 1,
+    val pages: Int = 1,
+    val loadingMore: Boolean = false,
+    val detail: HuangguoPostDetail? = null,
+    val detailLoading: Boolean = false,
+    val detailError: String? = null,
+    /** 点击顶部博客入口时显示博客列表；为 false 时显示影视浏览。 */
+    val fromEntry: Boolean = false,
+    val visible: Boolean = false,
+    val videos: Map<Int, String> = emptyMap(),
+    val videoLoading: Boolean = false,
+    val videoError: String? = null,
+    val activeVideoIndex: Int? = null,
+)
