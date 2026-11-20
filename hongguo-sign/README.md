@@ -76,7 +76,7 @@ curl -X POST http://192.168.3.83:8901/sign \
 
 Compose 只读挂载 `signer/sign_server.py`，更新 Python 服务后重新创建 signer 即可生效，无需重新构建镜像。
 
-红果 TV 默认经飞牛 frpc 的 `http://123.57.172.104:8901` 访问本服务，对应映射转发到 `192.168.3.83:8901`。
+红果 TV 的远程计算-frida 默认经飞牛 `frpc-caiji` 的 `http://taihe.678120.cn:8056` 访问本服务，对应映射转发到 `192.168.3.83:8901`。旧的 `123.57.172.104:8901` 已不再对应本服务，排障时以 App 当前的 `FridaSigner.DEFAULT_ENDPOINT` 和飞牛 `frpc-caiji/frpc.ini` 为准。
 
 `/sign` 返回 `X-Gorgon`、`X-Khronos`、`X-Argus`、`X-Ladon`、`X-Medusa`、`X-Helios`。签名绑定完整 URL，改变任何查询参数都需要重新生成。
 
