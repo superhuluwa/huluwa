@@ -23,7 +23,7 @@ COPY --from=toolbox /bin/busybox /busybox
 # Android 继续使用 Bionic；Python、ADB 和 Frida 客户端在独立的 glibc 根目录运行。
 COPY --from=signer / /signer-rootfs/
 COPY single/entrypoint.sh single/start-signer.sh single/watchdog.sh /hongguo/
-COPY single/hongguo-signer.rc /system/etc/init/hongguo-signer.rc
+COPY --chmod=0644 single/hongguo-signer.rc /system/etc/init/hongguo-signer.rc
 ENV PORT=8901 BOOT_TIMEOUT=300 APP_WARMUP=30 APP_START_MODE=provider \
     SIGN_READY_TIMEOUT=120 STARTUP_TIMEOUT=600 RECOVERY_TIMEOUT=300
 EXPOSE 8901

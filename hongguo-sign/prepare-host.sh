@@ -39,7 +39,7 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now hongguo-binder.service
 
-# 保留双容器回退方案使用的网络和原有设备数据卷。
+# 保留双容器回退方案使用的网络，新部署使用独立数据卷。
 docker network inspect hongguo-native >/dev/null 2>&1 || docker network create hongguo-native >/dev/null
-docker volume create hongguo-native-data >/dev/null
+docker volume create hongguo-frida-data >/dev/null
 echo '宿主机配置完成。'

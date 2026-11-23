@@ -19,6 +19,9 @@ done
 /busybox mkdir -p /signer-rootfs/run
 /busybox env -0 > /signer-rootfs/run/container.env
 /busybox chmod 600 /signer-rootfs/run/container.env
+# 在 Android 切换挂载命名空间之前保存 Docker 的 DNS 和主机映射。
+/busybox cp /etc/resolv.conf /signer-rootfs/etc/resolv.conf
+/busybox cp /etc/hosts /signer-rootfs/etc/hosts
 : > /hongguo/runtime.conf
 for name in PORT BOOT_TIMEOUT APP_WARMUP SIGN_READY_TIMEOUT STARTUP_TIMEOUT RECOVERY_TIMEOUT; do
     case "$name" in
@@ -44,6 +47,10 @@ if [ "$PORT" -gt 65535 ] || [ "$STARTUP_TIMEOUT" -le "$((BOOT_TIMEOUT + APP_WARM
     exit 1
 fi
 
+# Android init 会将自己的标准输出改为 /dev/null；提前保留独立的 Docker 日志转发进程。
+/busybox rm -f /hongguo/log.pipe
+/busybox mkfifo -m 600 /hongguo/log.pipe
+/busybox sh -c 'exec 3<> /hongguo/log.pipe; exec /busybox cat <&3' &
 echo '[hongguo] 启动 Android；完成引导后自动启动 App、Frida 和签名接口'
 # Android init 必须保留为 PID 1，由它管理 zygote 和签名服务的进程组。
 exec /init qemu=1 androidboot.hardware=redroid "$@"

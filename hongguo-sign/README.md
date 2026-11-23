@@ -1,6 +1,6 @@
 # 红果 Frida 签名服务：单容器
 
-默认 Compose 只启动一个 `hongguo-frida` 容器，镜像包含 Android 14、ARM64 翻译层、Python、Frida 客户端和服务端，以及构建时放入的红果 APK。对外仍是 HTTP `8901`，`/info`、`/sign` 和请求体签名协议保持兼容。
+默认 Compose 只启动一个 `hongguo-frida` 容器，镜像包含 Android 14、ARM64 翻译层、Python、Frida 客户端和服务端，以及构建时放入的红果 APK。默认对外为 HTTP `8902`（容器内 `8901`），`/info`、`/sign` 和请求体签名协议保持兼容。
 
 ```text
 Debian x86_64
@@ -42,16 +42,22 @@ docker compose build hongguo
 # 旧容器都必须停止，避免同时写同一份 Android 数据或争用 8901 端口。
 docker compose -f compose.legacy.yaml stop signer android
 
-# 可在此时对停止写入的数据卷做快照或备份；不要清空或删除该卷。
+# 独立复制现有设备资料；新卷必须为空，原卷保留用于回退。
+docker volume create hongguo-frida-data
+cp -a /var/lib/docker/volumes/hongguo-native-data/_data/. /var/lib/docker/volumes/hongguo-frida-data/_data/
 docker compose up -d hongguo
 ```
 
-默认直接复用外部卷 `hongguo-native-data`，设备身份和已经完成的 App 初始化保留；Compose 不负责删除该卷。旧容器停止后继续保留，回退时先停止新容器，再恢复旧方案：
+默认使用独立的外部卷 `hongguo-frida-data`，从原卷复制后保留设备身份和 App 初始化状态，原卷 `hongguo-native-data` 不变。Compose 不负责删除外部卷。完成新端口播放取址、容器重启和再次取址检查后，再将飞牛 `frpc-caiji` 的公网 `8056` 映射改为 `192.168.3.83:8902`。公网取址再次成功后才删除旧的两个容器，原数据卷继续保留。
+
+旧容器删除前可先停止新容器，再恢复旧方案；若已迁移公网映射，还应将目标端口恢复为 `8901`：
 
 ```bash
 docker compose stop hongguo
 docker compose -f compose.legacy.yaml up -d
 ```
+
+这台 Debian 内核未启用 BinderFS，多个 Android 共用 `/dev/binder`、`/dev/hwbinder`、`/dev/vndbinder` 会发生服务注册冲突。签名 Android 与 TV 的 `redroid` 也不能同时运行；需要并存时，先在宿主机配置独立的 Binder 设备或启用 BinderFS。
 
 不要同时运行新旧方案。`compose.legacy.yaml` 是原来的双容器配置，仍使用旧镜像和宿主机 APK 挂载，保留用于迁移回退。
 
@@ -76,8 +82,8 @@ docker run -d --name hongguo-frida --restart unless-stopped \
   --device /dev/binder --device /dev/hwbinder --device /dev/vndbinder \
   --device /dev/kmsg --device /dev/fuse \
   --cpus 6 --memory 5g --shm-size 512m \
-  -p 8901:8901 -v hongguo-native-data:/data \
-  hongguo-sign:single-amd64
+  -p 8902:8901 -v hongguo-frida-data:/data \
+  hongguo-frida:single-amd64
 ```
 
 初次使用全新数据卷时会自动安装 APK。App 自身的首次隐私确认和引导仍可能需要完成一次；可临时设置 `APP_START_MODE=activity`，通过容器内 ADB 操作，完成后恢复 `provider`。迁移现有数据卷时不需要重新完成引导。不能把“镜像包含 APK”当成已经包含注册完成的设备数据。
@@ -102,16 +108,16 @@ Android 保持非特权容器，使用私有 cgroup，只将本容器的 cgroup 
 ## 接口与定位
 
 ```bash
-curl http://192.168.3.83:8901/info
-curl http://192.168.3.83:8901/health
-curl -X POST http://192.168.3.83:8901/sign \
+curl http://192.168.3.83:8902/info
+curl http://192.168.3.83:8902/health
+curl -X POST http://192.168.3.83:8902/sign \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/search/tab/v?aid=8662&query=test"}'
 ```
 
 `/info.deviceProfile` 提供 App 的设备参数和 `user_agent`，调用端应使用相同身份。`supportsBodySigning=true` 表示 `POST /sign` 支持 `body_base64` 原始请求字节，也兼容 UTF-8 `body`。`/sign` 返回 `X-Gorgon`、`X-Khronos`、`X-Argus`、`X-Ladon`、`X-Medusa`、`X-Helios`；改变 URL 或请求体后应重新签名。原 `/verify` 接口保留。
 
-红果 TV 仍经 `taihe.678120.cn:8056` → 飞牛 `192.168.3.77` 上的 `frpc-caiji` → `192.168.3.83:8901` 访问，无需修改客户端或公网转发。
+红果 TV 仍经 `taihe.678120.cn:8056` → 飞牛 `192.168.3.77` 上的 `frpc-caiji` → `192.168.3.83:8902` 访问，无需修改客户端或公网转发。
 
 ```bash
 docker exec hongguo-frida getprop sys.boot_completed
@@ -121,6 +127,17 @@ docker inspect --format '{{json .State.Health}}' hongguo-frida
 ```
 
 所有启动、恢复和 HTTP 日志均写入容器标准输出。Python 服务打包在镜像内，更新源码后需要重新构建镜像。
+
+## 播放取址检查
+
+检查脚本使用 Python 标准库，读取当前设备档案、请求六头签名、调用与客户端相同的 `video_tab/video_model/v` 单集路由，并从 CDN 读取 1024 字节。应选取仍然有效的普通短剧分集 ID；历史下架内容返回错误码不能作为容器可用性的判断。
+
+```bash
+python3 tools/verify-playback.py --endpoint http://127.0.0.1:8902 --episode <有效分集ID> --count 3
+docker compose restart hongguo
+# 等待容器健康后，再执行同样的取址检查。
+python3 tools/verify-playback.py --endpoint http://127.0.0.1:8902 --episode <有效分集ID> --count 3
+```
 
 ## 历史部署
 

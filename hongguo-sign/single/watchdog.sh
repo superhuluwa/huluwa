@@ -1,6 +1,6 @@
 #!/busybox sh
 set -eu
-exec > /proc/1/fd/1 2> /proc/1/fd/2
+exec > /hongguo/log.pipe 2>&1
 . /hongguo/runtime.conf
 
 uptime_seconds() {
@@ -11,7 +11,7 @@ uptime_seconds() {
 last_ready="$(uptime_seconds)"
 budget="$STARTUP_TIMEOUT"
 while :; do
-    if /busybox timeout 45 /busybox wget -q -T 40 -O /hongguo/health.json "http://127.0.0.1:$PORT/health" &&
+    if /busybox timeout 45 /busybox wget -q -T 40 -O /hongguo/health.json "http://127.0.0.1:$PORT/health" 2>/dev/null &&
         /busybox grep -q '"ok": *true' /hongguo/health.json; then
         last_ready="$(uptime_seconds)"
         budget="$RECOVERY_TIMEOUT"

@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: single/Dockerfile
-    image: hongguo-sign:single-amd64
+    image: hongguo-frida:single-amd64
     platform: linux/amd64
     container_name: hongguo-frida
     restart: unless-stopped
@@ -29,7 +29,7 @@ services:
       - /dev/kmsg:/dev/kmsg
       - /dev/fuse:/dev/fuse
     ports:
-      - '${SIGN_BIND:-0.0.0.0}:${SIGN_PORT:-8901}:8901'
+      - '${SIGN_BIND:-0.0.0.0}:${SIGN_PORT:-8902}:8901'
     volumes:
       - android-data:/data
     environment:
@@ -47,5 +47,5 @@ services:
 
 volumes:
   android-data:
-    name: '${ANDROID_DATA_VOLUME:-hongguo-native-data}'
+    name: '${ANDROID_DATA_VOLUME:-hongguo-frida-data}'
     external: true
