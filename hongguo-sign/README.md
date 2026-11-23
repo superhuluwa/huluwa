@@ -1,10 +1,10 @@
 # 红果 Frida 签名服务：单容器
 
-默认 Compose 只启动一个 `hongguo-sign` 容器，镜像包含 Android 14、ARM64 翻译层、Python、Frida 客户端和服务端，以及构建时放入的红果 APK。对外仍是 HTTP `8901`，`/info`、`/sign` 和请求体签名协议保持兼容。
+默认 Compose 只启动一个 `hongguo-frida` 容器，镜像包含 Android 14、ARM64 翻译层、Python、Frida 客户端和服务端，以及构建时放入的红果 APK。对外仍是 HTTP `8901`，`/info`、`/sign` 和请求体签名协议保持兼容。
 
 ```text
 Debian x86_64
-  └─ hongguo-sign（一个容器、一份 Android 数据卷）
+  └─ hongguo-frida（一个容器、一份 Android 数据卷）
        ├─ Android init（PID 1）→ Android 14 → 红果 App → Frida 服务端
        ├─ Android init 管理的 Python + Frida 客户端 → HTTP :8901
        └─ 独立看门狗 → 整条签名链持续失效时重启容器
@@ -68,7 +68,7 @@ docker compose logs -f --tail 100 hongguo
 也可只用已有镜像启动：
 
 ```bash
-docker run -d --name hongguo-sign --restart unless-stopped \
+docker run -d --name hongguo-frida --restart unless-stopped \
   --cgroupns private \
   --cap-add ALL --cap-drop SYS_BOOT --cap-drop SYS_MODULE \
   --cap-drop SYS_RAWIO --cap-drop SYS_TIME \
@@ -114,10 +114,10 @@ curl -X POST http://192.168.3.83:8901/sign \
 红果 TV 仍经 `taihe.678120.cn:8056` → 飞牛 `192.168.3.77` 上的 `frpc-caiji` → `192.168.3.83:8901` 访问，无需修改客户端或公网转发。
 
 ```bash
-docker exec hongguo-sign getprop sys.boot_completed
-docker exec hongguo-sign getprop init.svc.hongguo-signer
-docker exec hongguo-sign /busybox chroot /signer-rootfs /usr/bin/adb -s 127.0.0.1:5555 shell pidof com.phoenix.read
-docker inspect --format '{{json .State.Health}}' hongguo-sign
+docker exec hongguo-frida getprop sys.boot_completed
+docker exec hongguo-frida getprop init.svc.hongguo-signer
+docker exec hongguo-frida /busybox chroot /signer-rootfs /usr/bin/adb -s 127.0.0.1:5555 shell pidof com.phoenix.read
+docker inspect --format '{{json .State.Health}}' hongguo-frida
 ```
 
 所有启动、恢复和 HTTP 日志均写入容器标准输出。Python 服务打包在镜像内，更新源码后需要重新构建镜像。

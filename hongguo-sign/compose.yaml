@@ -7,7 +7,7 @@ services:
       dockerfile: single/Dockerfile
     image: hongguo-sign:single-amd64
     platform: linux/amd64
-    container_name: hongguo-sign
+    container_name: hongguo-frida
     restart: unless-stopped
     stop_grace_period: 30s
     privileged: false
