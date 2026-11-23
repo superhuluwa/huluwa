@@ -1,20 +1,16 @@
 #!/bin/sh
-# 容器健康检查：签名服务能否真正返回签名头
-# 注意：签名依赖 App 在线，失败也可能只是 App 未就绪
-
-set -e
-
+# 完整设备身份和六个签名头都就绪后，才将容器标记为健康。
+set -eu
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 PORT="${PORT:-8901}"
 
-if ! curl -sf --max-time 40 "http://127.0.0.1:${PORT}/health" -o /tmp/hc.json; then
-    echo "health endpoint unreachable"
+if ! result="$(curl -fsS --max-time 40 "http://127.0.0.1:${PORT}/health")"; then
+    echo '签名链路尚未就绪'
     exit 1
 fi
-
-if grep -q '"ok": *true' /tmp/hc.json; then
-    echo "ok"
+if printf '%s' "$result" | grep -q '"ok": *true'; then
+    echo '签名和设备档案已就绪'
     exit 0
 fi
-
-echo "sign not ready: $(cat /tmp/hc.json 2>/dev/null)"
+printf '签名链路未就绪：%s\n' "$result"
 exit 1

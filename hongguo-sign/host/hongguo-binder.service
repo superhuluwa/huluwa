@@ -1,0 +1,12 @@
+[Unit]
+Description=准备红果 Android 容器的 Binder 设备
+After=systemd-modules-load.service systemd-udev-trigger.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/hongguo-prepare-binder
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

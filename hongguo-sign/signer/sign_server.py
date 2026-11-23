@@ -121,6 +121,22 @@ Java.perform(function () {
             return out;
         },
 
+        // 一次 RPC 同时检查设备档案和六头签名，避免健康检查把半就绪状态当成可用。
+        health: function (url) {
+            var info = rpc.exports.info();
+            var profile = info.deviceProfile || {};
+            var params = profile.params || {};
+            var deviceReady = Boolean(params.device_id && params.iid && params.cdid && profile.user_agent);
+            var signatures = rpc.exports.sign(url, null);
+            var headers = SIG_KEYS.filter(function (key) { return Boolean(signatures[key]); });
+            return {
+                ok: deviceReady && headers.length === SIG_KEYS.length,
+                deviceReady: deviceReady,
+                headers: headers,
+                error: signatures.__error || info.deviceProfileError || null
+            };
+        },
+
         sign: function (url, bodyMd5) {
             try {
                 var NP = Java.use('com.bytedance.frameworks.baselib.network.http.NetworkParams');
@@ -320,6 +336,9 @@ class Signer:
     def info(self):
         return self._call("info", timeout=20)
 
+    def health(self):
+        return self._call("health", build_verify_url(), timeout=30)
+
     def sign(self, url, timeout=30, body=None):
         # 必须使用线上原始字节；包括空请求体和已经 gzip 的账号请求。
         body_md5 = hashlib.md5(body).hexdigest().upper() if body is not None else None
@@ -478,13 +497,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/health":
             try:
-                s = self.signer.sign(build_verify_url(), timeout=40)
-                good = (bool(s) and bool(s.get("X-Medusa"))
-                        and bool(s.get("X-Helios")))
-                self._send(200 if good else 503,
-                           {"ok": good,
-                            "headers": sorted((s or {}).keys()),
-                            "ts": int(time.time())})
+                health = self.signer.health()
+                health["ts"] = int(time.time())
+                self._send(200 if health.get("ok") else 503, health)
             except Exception as e:
                 self._send(503, {"ok": False, "error": str(e),
                                  "ts": int(time.time())})

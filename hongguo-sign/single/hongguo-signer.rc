@@ -1,0 +1,23 @@
+# Android 引导结束后启动签名服务；退出时由 init 清理进程组并重新拉起。
+service hongguo-signer /busybox sh /hongguo/start-signer.sh
+    class late_start
+    user root
+    group root shell inet
+    disabled
+    seclabel u:r:su:s0
+    restart_period 5
+
+# 独立监控整个调用链，避免 Android 自身卡死后只重启 Python。
+service hongguo-watchdog /busybox sh /hongguo/watchdog.sh
+    class core
+    user root
+    group root inet
+    disabled
+    seclabel u:r:su:s0
+    restart_period 5
+
+on init
+    start hongguo-watchdog
+
+on property:sys.boot_completed=1
+    start hongguo-signer

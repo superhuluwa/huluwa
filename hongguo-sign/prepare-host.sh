@@ -6,6 +6,8 @@ if [[ $EUID != 0 || $(uname -m) != x86_64 ]]; then
     exit 1
 fi
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 # 显式设备模式来自 Redroid 官方 Debian 文档，不要求重新编译 binderfs。
 install -d /etc/modprobe.d /etc/modules-load.d /etc/udev/rules.d
 printf '%s\n' 'binder_linux' > /etc/modules-load.d/hongguo-binder.conf
@@ -25,6 +27,19 @@ if (( $(cat /proc/sys/vm/max_map_count) < 262144 )); then
     printf '%s\n' 'vm.max_map_count=262144' > /etc/sysctl.d/99-hongguo.conf
     sysctl -p /etc/sysctl.d/99-hongguo.conf
 fi
+# 确保宿主机重启时先恢复 Binder，再由 Docker 自动恢复容器；不重启 Docker。
+install -d /usr/local/libexec /etc/systemd/system/docker.service.d
+install -m 755 "$script_dir/host/prepare-binder.sh" /usr/local/libexec/hongguo-prepare-binder
+install -m 644 "$script_dir/host/hongguo-binder.service" /etc/systemd/system/hongguo-binder.service
+cat > /etc/systemd/system/docker.service.d/hongguo-binder.conf <<'UNIT'
+[Unit]
+Wants=hongguo-binder.service
+After=hongguo-binder.service
+UNIT
+systemctl daemon-reload
+systemctl enable --now hongguo-binder.service
+
+# 保留双容器回退方案使用的网络和原有设备数据卷。
 docker network inspect hongguo-native >/dev/null 2>&1 || docker network create hongguo-native >/dev/null
 docker volume create hongguo-native-data >/dev/null
 echo '宿主机配置完成。'

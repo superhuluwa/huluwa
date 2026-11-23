@@ -19,4 +19,4 @@ ENV PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 PORT=8901
 EXPOSE 8901
 HEALTHCHECK --interval=30s --timeout=45s --start-period=180s --retries=5 \
     CMD ["/app/docker-healthcheck.sh"]
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/app/entrypoint.sh"]

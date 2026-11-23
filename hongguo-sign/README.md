@@ -1,68 +1,105 @@
-# 红果签名服务：Debian x86 部署
+# 红果 Frida 签名服务：单容器
 
-采用 Windows 模拟器已跑通的调用方式：让红果 App 自己生成签名，通过 Frida 调用 Java 方法 `NetworkParams.tryAddSecurityFactor()`。签名服务监听 `8901`，Android 和 ADB 仅在容器网络内访问。
-
-## 技术方案与原部署包的区别
+默认 Compose 只启动一个 `hongguo-sign` 容器，镜像包含 Android 14、ARM64 翻译层、Python、Frida 客户端和服务端，以及构建时放入的红果 APK。对外仍是 HTTP `8901`，`/info`、`/sign` 和请求体签名协议保持兼容。
 
 ```text
 Debian x86_64
-  ├─ Android 14 x86_64（仅 64 位）+ libndk_translation：运行 ARM64 红果 App
-  └─ Python + Frida x86_64：调用 App 的 Java 签名入口 → HTTP :8901
+  └─ hongguo-sign（一个容器、一份 Android 数据卷）
+       ├─ Android init（PID 1）→ Android 14 → 红果 App → Frida 服务端
+       ├─ Android init 管理的 Python + Frida 客户端 → HTTP :8901
+       └─ 独立看门狗 → 整条签名链持续失效时重启容器
 ```
 
-原 `hongguo-docker.zip` 中的 HTTP 服务和 Java 调用代码保留在 `signer/sign_server.py`。整个 Android 改用宿主机原生的 x86_64 架构，ARM64 库交给镜像已包含的 `libndk_translation`。Frida 的架构与 Android ART 进程一致，使用 x86_64。Android 使用仅 64 位的官方镜像；红果 APK 只含 ARM64 库，不需要 32 位 zygote。双 ABI 镜像中曾捕获 Frida 32 位 agent 在 zygote 内超时并触发 SIGTRAP，导致整个 Android 框架重启，因此不保留该路径。
+Android 使用 Bionic，Python、ADB 和 Frida 客户端在镜像内的 Debian 根目录 `/signer-rootfs` 中运行。双方共用进程和网络命名空间，ADB 直接连接 `127.0.0.1:5555`，Frida 直接连接 `127.0.0.1:27042`，不再依赖两个容器之间的 DNS、启动顺序或端口转发。Android 必须保持为 PID 1，签名服务通过 Android init 的服务机制启动和恢复。
 
-原部署说明把“无法直接 Hook 翻译后的 ARM native 库”推导成“必须仿真整个 ARM64 Android”，这不适用于现有 Java 调用入口。本方案通过 Java 方法进入 App 内部算法，不需要 Frida 对 ARM native 指令执行 Hook。
+## 首次准备
 
-参考官方文档：
-
-- [Redroid ARM 翻译层说明](https://github.com/remote-android/redroid-doc#native-bridge-support)
-- [Redroid Debian 显式 Binder 设备部署](https://github.com/remote-android/redroid-doc/blob/master/deploy/debian.md)
-
-## Debian 环境适配
-
-Debian 自带的内核有 `binder_linux`，即使没有启用 `CONFIG_ANDROID_BINDERFS`，也可以通过显式设备模式运行：
-
-- 创建并挂载 `/dev/binder`、`/dev/hwbinder`、`/dev/vndbinder` 三个设备。
-- 使用模块参数和 udev 规则，让设备在开机时恢复，并允许 Android 系统用户访问。
-- 保留 Docker 的独立 cgroup 命名空间，只把容器自己的 cgroup2 挂载调整为可写。
-- 使用非特权容器，保留 `/proc/sys`、`/proc/sysrq-trigger` 的只读挂载。Android 入口发现 SysRq 保护缺失时会拒绝启动。
-- 移除 `SYS_BOOT`、`SYS_MODULE`、`SYS_RAWIO`、`SYS_TIME` 权限，避免 Android 的重启、模块、硬件和时间操作影响 Debian。
-- Android 限制为 4 核、4 GB；签名服务限制为 2 核、1 GB。
-
-Android 不需要 KVM，也不需要宿主机的 `qemu-aarch64` 或 `qemu-arm` 注册项。
-
-## 部署
-
-需要 x86_64 Debian、Docker Engine 和 Compose。以 root 操作：
+宿主机需要 x86_64 Debian、Docker Engine 和 Compose，不需要 KVM 或 QEMU。首次以 root 执行：
 
 ```bash
 cd hongguo-sign
 bash prepare-host.sh
-```
-
-如果旧的 Binder 模块已经加载，但缺少两个额外设备，脚本会保存配置并退出，提示正常重启后重新执行。脚本不强制卸载模块，也不自动重启机器。
-
-放置已使用的红果单 APK，包名 `com.phoenix.read`、版本 `7.3.9.32`：
-
-```bash
 mkdir -p apk
 cp /已有路径/base.apk apk/base.apk
 cp .env.example .env
-docker compose up -d --build
 ```
 
-也可以在 `.env` 中将 `APK_DIR` 指向现有的 APK 目录。APK、Android 用户数据和运行配置不提交到 Git。Android 数据保存在外部卷 `hongguo-native-data` 中，重新创建容器不会清空它。
+使用当前已兼容的 `com.phoenix.read` 单 APK，版本 `7.3.9.32`。APK 不提交到 Git；构建时放入镜像，运行时无需挂载宿主机源码或 APK 目录。构建后可将镜像导出到另一台已经准备好 Binder 的 x86_64 主机。
 
-首次启动红果时，需要在 App 中完成初始引导，签名组件才会初始化。可临时在 `.env` 中设置 `APP_START_MODE=activity`，通过同一 Docker 网络内的 ADB 获取画面和操作；完成后改回 `provider` 并重新创建 signer。后续启动复用数据卷。
+`prepare-host.sh` 会保存 Binder 模块和设备权限配置，并配置 `hongguo-binder.service` 在 Docker 启动前准备设备，避免宿主机重启后的设备创建顺序问题。它不会重启 Docker 或宿主机。如果已加载的 Binder 模块缺少额外设备，按提示正常重启后重新执行。
 
-正式运行默认使用 `APP_START_MODE=provider`：通过红果自带的 `FileProvider` 执行空的 `call`，让 Android 初始化 Application 和签名组件，全程不打开视频界面，避免无 GPU 环境的 HWUI 纹理崩溃。`activity` 模式使用解析出的 Activity 启动 App，避免依赖 `monkey`。签名服务重启时清理目标 App 和 Frida 的旧进程，保留 App 数据。进程选择优先查找由 zygote 创建的 App 主进程，排除 ARM 翻译层中同名的子进程。
+## 从现有双容器迁移
 
-Frida 连接超时采用异步清理，避免 HTTP 超时响应被阻塞。签名服务连续三次不可用时，容器会重新初始化 App 和 Frida，以便从 Android 框架重启或运行时失联中恢复。
+旧部署位于 `192.168.3.83:/opt/hongguo-sign`，设备数据卷为 `hongguo-native-data`，APK 位于 `/opt/hongguo-docker/apk/base.apk`。更新本目录后，先构建镜像，成功后再停止旧服务：
 
-启动顺序：Android 完成启动 → 安装 App（已安装则跳过）→ 启动 x86_64 Frida → 启动红果 → 等待初始化 → 启动 HTTP 服务。两个容器使用 `unless-stopped`，Docker 随系统启动后自动恢复。
+```bash
+cd /opt/hongguo-sign
+mkdir -p apk
+cp /opt/hongguo-docker/apk/base.apk apk/base.apk
+bash prepare-host.sh
+docker compose build hongguo
 
-## 接口
+# 旧容器都必须停止，避免同时写同一份 Android 数据或争用 8901 端口。
+docker compose -f compose.legacy.yaml stop signer android
+
+# 可在此时对停止写入的数据卷做快照或备份；不要清空或删除该卷。
+docker compose up -d hongguo
+```
+
+默认直接复用外部卷 `hongguo-native-data`，设备身份和已经完成的 App 初始化保留；Compose 不负责删除该卷。旧容器停止后继续保留，回退时先停止新容器，再恢复旧方案：
+
+```bash
+docker compose stop hongguo
+docker compose -f compose.legacy.yaml up -d
+```
+
+不要同时运行新旧方案。`compose.legacy.yaml` 是原来的双容器配置，仍使用旧镜像和宿主机 APK 挂载，保留用于迁移回退。
+
+## 日常启动
+
+镜像已构建、宿主机已准备好以后：
+
+```bash
+docker compose up -d
+docker compose restart hongguo
+docker compose logs -f --tail 100 hongguo
+```
+
+也可只用已有镜像启动：
+
+```bash
+docker run -d --name hongguo-sign --restart unless-stopped \
+  --cgroupns private \
+  --cap-add ALL --cap-drop SYS_BOOT --cap-drop SYS_MODULE \
+  --cap-drop SYS_RAWIO --cap-drop SYS_TIME \
+  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+  --device /dev/binder --device /dev/hwbinder --device /dev/vndbinder \
+  --device /dev/kmsg --device /dev/fuse \
+  --cpus 6 --memory 5g --shm-size 512m \
+  -p 8901:8901 -v hongguo-native-data:/data \
+  hongguo-sign:single-amd64
+```
+
+初次使用全新数据卷时会自动安装 APK。App 自身的首次隐私确认和引导仍可能需要完成一次；可临时设置 `APP_START_MODE=activity`，通过容器内 ADB 操作，完成后恢复 `provider`。迁移现有数据卷时不需要重新完成引导。不能把“镜像包含 APK”当成已经包含注册完成的设备数据。
+
+## 启动与故障恢复
+
+启动顺序为 Android 完成引导 → ADB 就绪 → 安装或复用 App → Frida 协议可用 → 启动 App → 初始化 → 完整设备档案与六头签名可用。
+
+- 每条 ADB 命令都有超时；启动时清除旧连接并重连，防止卡在离线会话。
+- 单容器直接访问 Frida，不执行会与同一端口冲突的 ADB 转发。
+- 使用真实 Frida 调用等待就绪，替代固定等待三秒后直接注入。
+- `/health` 在一次 RPC 中检查 `device_id`、`iid`、`cdid`、User-Agent 和六个签名头。只返回部分签名或设备注册未完成时返回 503。
+- 签名服务连续三次检查失败后退出，由 Android init 清理其进程组并重新初始化 App 和 Frida。
+- 独立看门狗覆盖首次引导失败和 Android 自身卡死。启动后默认允许 600 秒就绪；正常工作后，持续 300 秒不可用会终止本容器 PID 1，由 Docker 的重启策略恢复整个环境。Docker 的 `unhealthy` 状态本身不会自动触发重启。
+
+如修改 `ANDROID_DATA_VOLUME`，需要先通过 `docker volume create <卷名>` 创建对应的外部卷。
+
+`.env` 中可以调整 `BOOT_TIMEOUT`、`APP_WARMUP`、`SIGN_READY_TIMEOUT`、`STARTUP_TIMEOUT`、`RECOVERY_TIMEOUT`、对外地址和端口。`STARTUP_TIMEOUT` 必须大于 `BOOT_TIMEOUT + APP_WARMUP + SIGN_READY_TIMEOUT`；较慢的首次安装可增大这个值。
+
+Android 保持非特权容器，使用私有 cgroup，只将本容器的 cgroup 挂载改为可写。保留 Docker 对 `/proc/sys`、`/proc/sysrq-trigger` 的只读保护，并移除 `SYS_BOOT`、`SYS_MODULE`、`SYS_RAWIO` 和 `SYS_TIME`。不要改用 `--privileged`、宿主机 PID 或宿主机 cgroup 命名空间。
+
+## 接口与定位
 
 ```bash
 curl http://192.168.3.83:8901/info
@@ -72,28 +109,21 @@ curl -X POST http://192.168.3.83:8901/sign \
   -d '{"url":"https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/search/tab/v?aid=8662&query=test"}'
 ```
 
-`/info.deviceProfile` 提供当前 App 的设备参数和 `user_agent`，调用端必须与这些身份字段保持一致，不能混用本机算法注册的设备。`supportsBodySigning=true` 声明请求体签名能力；`POST /sign` 可额外传入 `body_base64`（原始请求字节的 Base64），也兼容 UTF-8 字符串字段 `body`。服务按原始字节的 MD5 向 App 传入 `x-ss-stub`，包含空请求体和 gzip 请求体，调用端发送上游时须使用同一份字节。
+`/info.deviceProfile` 提供 App 的设备参数和 `user_agent`，调用端应使用相同身份。`supportsBodySigning=true` 表示 `POST /sign` 支持 `body_base64` 原始请求字节，也兼容 UTF-8 `body`。`/sign` 返回 `X-Gorgon`、`X-Khronos`、`X-Argus`、`X-Ladon`、`X-Medusa`、`X-Helios`；改变 URL 或请求体后应重新签名。原 `/verify` 接口保留。
 
-Compose 只读挂载 `signer/sign_server.py`，更新 Python 服务后重新创建 signer 即可生效，无需重新构建镜像。
-
-红果 TV 的远程计算-frida 默认经飞牛 `frpc-caiji` 的 `http://taihe.678120.cn:8056` 访问本服务，对应映射转发到 `192.168.3.83:8901`。旧的 `123.57.172.104:8901` 已不再对应本服务，排障时以 App 当前的 `FridaSigner.DEFAULT_ENDPOINT` 和飞牛 `frpc-caiji/frpc.ini` 为准。
-
-`/sign` 返回 `X-Gorgon`、`X-Khronos`、`X-Argus`、`X-Ladon`、`X-Medusa`、`X-Helios`。签名绑定完整 URL，改变任何查询参数都需要重新生成。
-
-`/health` 会实际调用签名入口，只有具备 `X-Medusa` 和 `X-Helios` 才会报告就绪。原 HTTP 协议和 `/verify` 接口保持兼容；部署过程不自动执行额外的端到端验证脚本。
-
-查看状态和日志：
+红果 TV 仍经 `taihe.678120.cn:8056` → 飞牛 `192.168.3.77` 上的 `frpc-caiji` → `192.168.3.83:8901` 访问，无需修改客户端或公网转发。
 
 ```bash
-docker compose ps
-docker compose logs --tail 100 signer
-docker exec hongguo-android-native getprop sys.boot_completed
+docker exec hongguo-sign getprop sys.boot_completed
+docker exec hongguo-sign getprop init.svc.hongguo-signer
+docker exec hongguo-sign /busybox chroot /signer-rootfs /usr/bin/adb -s 127.0.0.1:5555 shell pidof com.phoenix.read
+docker inspect --format '{{json .State.Health}}' hongguo-sign
 ```
 
-## 旧 ARM 容器迁移
+所有启动、恢复和 HTTP 日志均写入容器标准输出。Python 服务打包在镜像内，更新源码后需要重新构建镜像。
 
-2026-11-04 的失联记录显示：旧 ARM Android 容器出现架构执行错误、Binder 缺失、Android 重启流程和看门狗截止时间，随后 ESXi 记录客体 CPU 停止。旧容器使用 `privileged: true`，失去了默认的 SysRq 只读保护。
+## 历史部署
 
-Debian 上保留原 `/opt/hongguo-docker`、旧容器和旧数据卷，旧容器自动重启已关闭。新的原生部署位于 `/opt/hongguo-sign`，使用独立的 `hongguo-native-data` 数据卷。恢复配置和故障日志保存在 `/root/hongguo-recovery/20261104-190731`。
+2026-11-04 的旧 ARM 全系统仿真容器曾出现架构执行错误、Binder 缺失、Android 重启流程和看门狗截止时间，随后 ESXi 记录客体 CPU 停止。因此继续采用 Android 原生 x86_64 加 `libndk_translation`，通过 Java `NetworkParams.tryAddSecurityFactor()` 进入 ARM64 App 的算法，不使用 ARM 系统仿真或 native 指令 Hook。
 
-不要同时启动旧 ARM Compose 与本目录的新部署；两者使用相同的对外端口。新方案不依赖旧数据卷或 ARM 仿真进程。
+Debian 上旧的 `/opt/hongguo-docker`、旧 ARM 容器和旧数据卷作为存档保留，自动重启已关闭。恢复记录位于 `/root/hongguo-recovery/20261104-190731`，不要恢复旧 ARM 容器与当前端口争用。
