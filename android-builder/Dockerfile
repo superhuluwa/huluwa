@@ -19,6 +19,7 @@ ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/build-tools
 # SDK licenses are accepted once while provisioning this dedicated build environment.
 RUN yes | sdkmanager --licenses >/dev/null \
     && sdkmanager "platforms;android-36" "build-tools;36.0.0" "build-tools;35.0.0" \
+       "ndk;27.1.12297006" "cmake;3.22.1" \
     && groupadd --gid 10001 huluwa \
     && useradd --uid 10001 --gid 10001 --no-create-home huluwa \
     && mkdir -p /workspace /build-data/tasks /signing /credentials /opt/builder \
