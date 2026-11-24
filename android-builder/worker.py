@@ -326,8 +326,17 @@ class Job:
             self.run(command, cwd=android, env=env)
             self.stage('VERIFYING', '读取 APK 信息并校验 Release 签名……')
             if DUAL_APK_BUILD:
-                candidates = artifact_outputs(
-                    android / 'app/build/outputs/apk', {'standard': 'standardRelease', 'android5': 'android5Release'})
+                output = android / 'app/build/outputs/apk'
+                candidates = {
+                    'standard': output / 'standard/release/app-standard-release.apk',
+                    'android5': output / 'android5/release/app-android5-release.apk',
+                }
+                # 兼容 Gradle 曾使用的 buildType/flavor 目录顺序。
+                for variant, path in list(candidates.items()):
+                    if not path.is_file():
+                        fallback = output / 'release' / variant / path.name
+                        if fallback.is_file():
+                            candidates[variant] = fallback
             else:
                 output_root = android / 'app/build/outputs/apk/release'
                 candidates = list(output_root.glob('*.apk'))
@@ -446,28 +455,6 @@ def file_sha256(path):
             digest.update(chunk)
         return digest.hexdigest()
 
-
-def artifact_outputs(root, variants):
-    """按 Gradle output-metadata.json 定位 APK，避免依赖 flavor 目录层数。"""
-    found = {}
-    for path in root.rglob('output-metadata.json'):
-        try:
-            metadata = json.loads(path.read_text(encoding='utf-8'))
-            variant = metadata.get('variantName')
-            outputs = metadata.get('elements') or []
-            if len(outputs) != 1:
-                continue
-            output = outputs[0].get('outputFile')
-            if variant in variants and isinstance(output, str) and output.endswith('.apk'):
-                candidate = path.parent / output
-                if candidate.is_file():
-                    found[variant] = candidate
-        except (OSError, ValueError):
-            continue
-    missing = [variant for variant in variants if variant not in found]
-    if missing:
-        raise RuntimeError(f'未找到 Release APK 变体：{", ".join(missing)}')
-    return {name: found[variant] for name, variant in variants.items()}
 
 
 def android_tool(name):
