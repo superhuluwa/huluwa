@@ -239,6 +239,11 @@ public class AndroidBuildService {
     }
 
     public synchronized Path download(long id, boolean fullLog) {
+        return download(id, fullLog, "standard");
+    }
+
+    /** 下载指定渠道；旧调用默认标准包，避免改变葫芦娃和 TerminalBuddy 的行为。 */
+    public synchronized Path download(long id, boolean fullLog, String variant) {
         refresh();
         Map<String, Object> task = requireTask(id);
         String filename;
@@ -248,7 +253,18 @@ public class AndroidBuildService {
             if (!"SUCCESS".equals(task.get("status")) || !"BUILD".equals(task.get("type")) || task.get("artifactName") == null) {
                 throw new BusinessException(404, "本次任务没有可下载的 APK");
             }
-            filename = String.valueOf(task.get("artifactName"));
+            if (!"standard".equals(variant) && !"android5".equals(variant)) throw new BusinessException("未知安装包渠道");
+            if ("android5".equals(variant)) {
+                Map<String, Object> manifest = readJson(taskDirectory(id).resolve("dual-apks.json"));
+                if (!(manifest.get("android5") instanceof Map<?, ?> raw)) throw new BusinessException(404, "本次任务没有 Android 5 兼容包");
+                Map<String, Object> legacy = json.convertValue(raw, JSON_MAP);
+                // 只取下载所需的文件名；完整的大小、摘要和最低系统校验在结果提交时执行。
+                Object artifactName = legacy.get("artifactName");
+                if (artifactName == null) artifactName = manifest.get("android5ArtifactName");
+                filename = String.valueOf(artifactName);
+            } else {
+                filename = String.valueOf(task.get("artifactName"));
+            }
         }
         Path directory = taskDirectory(id);
         Path file = directory.resolve(filename).normalize();
@@ -464,20 +480,14 @@ public class AndroidBuildService {
                     Map<String, Object> result = json.convertValue(raw, JSON_MAP);
                     if (!TERMINAL.contains(String.valueOf(result.get("status")))) throw new BusinessException("任务结果无效");
                     if ("SUCCESS".equals(result.get("status")) && "BUILD".equals(task.get("type"))) {
-                        String filename = String.valueOf(result.get("artifactName"));
-                        if (!filename.matches(java.util.regex.Pattern.quote(artifactPrefix) + "-[A-Za-z0-9._-]+\\.apk")) throw new BusinessException("APK 文件名无效");
-                        Path apk = directory.resolve(filename);
-                        if (!Files.isRegularFile(apk) || Files.size(apk) != number(result.get("apkSize"), -1)) throw new BusinessException("APK 尚未完整回传");
-                        String digest;
-                        try (var input = Files.newInputStream(apk)) {
-                            var sha = java.security.MessageDigest.getInstance("SHA-256");
-                            byte[] buffer = new byte[65536]; int count;
-                            while ((count = input.read(buffer)) != -1) sha.update(buffer, 0, count);
-                            digest = java.util.HexFormat.of().formatHex(sha.digest());
-                        } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
-                        if (!digest.equals(result.get("sha256")) || !String.valueOf(result.get("signatureSha256")).matches("[a-f0-9]{64}")
-                                || number(task.get("versionCode"), -1) != number(result.get("versionCode"), -2)
-                                || !task.get("versionName").equals(result.get("versionName"))) throw new BusinessException("APK 校验失败");
+                        if (number(task.get("versionCode"), -1) != number(result.get("versionCode"), -2)
+                                || !task.get("versionName").equals(result.get("versionName")))
+                            throw new BusinessException("APK 校验失败");
+                        verifyArtifact(directory, result, artifactPrefix);
+                        if (Files.isRegularFile(directory.resolve("dual-apks.json"))) {
+                            Map<String, Object> manifest = readJson(directory.resolve("dual-apks.json"));
+                            verifyDualArtifacts(directory, result, manifest, artifactPrefix);
+                        }
                     }
                     writeJson(directory.resolve("result.json"), result);
                 }
@@ -497,7 +507,8 @@ public class AndroidBuildService {
     public synchronized void uploadAgent(String serverId, String token, long id, String name, java.io.InputStream input) throws IOException {
         authenticateAgent(serverId, token);
         requireAgentTask(serverId, id);
-        if (!name.matches(java.util.regex.Pattern.quote(artifactPrefix) + "-[A-Za-z0-9._-]+\\.apk") && !"mapping.txt".equals(name)) throw new BusinessException("文件名无效");
+        if (!name.matches(java.util.regex.Pattern.quote(artifactPrefix) + "-[A-Za-z0-9._-]+\\.apk")
+                && !"mapping.txt".equals(name) && !"dual-apks.json".equals(name)) throw new BusinessException("文件名无效");
         Path target = taskDirectory(id).resolve(name);
         Path temporary = target.resolveSibling(name + ".upload");
         try {
@@ -511,6 +522,63 @@ public class AndroidBuildService {
             }
             Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temporary); }
+    }
+
+    /** 单包与双包共用同一套文件校验，避免只信 worker 返回的摘要。 */
+    private void verifyArtifact(Path directory, Map<String, Object> result, String prefix) throws IOException {
+        String filename = String.valueOf(result.get("artifactName"));
+        if (!filename.matches(java.util.regex.Pattern.quote(prefix) + "-[A-Za-z0-9._-]+\\.apk")) throw new BusinessException("APK 文件名无效");
+        Path apk = directory.resolve(filename);
+        if (!Files.isRegularFile(apk) || Files.size(apk) != number(result.get("apkSize"), -1)) throw new BusinessException("APK 尚未完整回传");
+        if (!fileDigest(apk).equals(result.get("sha256")) || !String.valueOf(result.get("signatureSha256")).matches("[a-f0-9]{64}"))
+            throw new BusinessException("APK 校验失败");
+    }
+
+    /** 双包清单必须引用另一份真实 APK，并与标准包的版本、提交和签名保持一致。 */
+    private void verifyDualArtifacts(Path directory, Map<String, Object> result,
+                                     Map<String, Object> manifest, String prefix) throws IOException {
+        if (!"SUCCESS".equals(manifest.get("status"))) throw new BusinessException("双包清单状态无效");
+        for (String key : List.of("versionName", "versionCode", "packageName", "commit", "signatureSha256")) {
+            Object value = manifest.containsKey(key) ? manifest.get(key) : result.get(key);
+            if (!String.valueOf(result.get(key)).equals(String.valueOf(value)))
+                throw new BusinessException("双包清单与标准包的 " + key + " 不一致");
+        }
+        Object raw = manifest.get("android5");
+        if (!(raw instanceof Map<?, ?> android5)) throw new BusinessException("双包清单缺少 Android 5 兼容包");
+        Map<String, Object> legacy = json.convertValue(android5, JSON_MAP);
+        applyLegacyArtifactFallbacks(legacy, manifest);
+        long minimum = number(legacy.get("minSdk"), -1);
+        if (minimum != 21 && minimum != 22) throw new BusinessException("Android 5 兼容包最低系统版本无效");
+        for (String key : List.of("versionName", "versionCode", "commit", "signatureSha256")) {
+            Object value = legacy.containsKey(key) ? legacy.get(key) : result.get(key);
+            if (!String.valueOf(result.get(key)).equals(String.valueOf(value)))
+                throw new BusinessException("Android 5 兼容包的 " + key + " 与标准包不一致");
+        }
+        // 旧清单没有重复记录签名摘要时沿用标准包签名；文件摘要仍由下方逐包校验。
+        if (!legacy.containsKey("signatureSha256")) legacy.put("signatureSha256", result.get("signatureSha256"));
+        if (String.valueOf(result.get("artifactName")).equals(String.valueOf(legacy.get("artifactName")))
+                || String.valueOf(result.get("sha256")).equals(String.valueOf(legacy.get("sha256"))))
+            throw new BusinessException("Android 5 兼容包不能是标准包的副本");
+        verifyArtifact(directory, legacy, prefix);
+    }
+
+    /** 兼容早期清单：兼容包字段可能直接平铺在根节点，而不是完整写入 android5 节点。 */
+    private void applyLegacyArtifactFallbacks(Map<String, Object> legacy, Map<String, Object> manifest) {
+        for (String field : List.of("artifactName", "apkSize", "sha256", "minSdk")) {
+            if (!legacy.containsKey(field) && manifest.containsKey("android5" + Character.toUpperCase(field.charAt(0)) + field.substring(1)))
+                legacy.put(field, manifest.get("android5" + Character.toUpperCase(field.charAt(0)) + field.substring(1)));
+        }
+    }
+
+    private String fileDigest(Path file) throws IOException {
+        try (var input = Files.newInputStream(file)) {
+            var sha = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[65536]; int count;
+            while ((count = input.read(buffer)) != -1) sha.update(buffer, 0, count);
+            return java.util.HexFormat.of().formatHex(sha.digest());
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IllegalStateException(error);
+        }
     }
 
     private boolean workerOnline(Map<String, Object> worker) {

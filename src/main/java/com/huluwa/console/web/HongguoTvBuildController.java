@@ -95,17 +95,20 @@ public class HongguoTvBuildController {
         return ApiResult.ok(builds.logs(id, cursor));
     }
 
-    public record DownloadRequest(boolean logFile) {}
+    public record DownloadRequest(boolean logFile, String variant) {}
 
     @PostMapping("/tasks/{id}/download-ticket")
     public ApiResult<Map<String, Object>> downloadTicket(@PathVariable long id,
                                                         @RequestBody(required = false) DownloadRequest request) {
-        return ApiResult.ok(downloads.create(builds, id, request != null && request.logFile()));
+        boolean logFile = request != null && request.logFile();
+        String variant = request == null ? "standard" : request.variant();
+        return ApiResult.ok(downloads.create(builds, id, logFile, variant, "/api/public/android-downloads/"));
     }
 
     @GetMapping("/tasks/{id}/apk")
-    public ResponseEntity<Resource> apk(@PathVariable long id) throws IOException {
-        Path path = builds.download(id, false);
+    public ResponseEntity<Resource> apk(@PathVariable long id,
+                                        @RequestParam(defaultValue = "standard") String variant) throws IOException {
+        Path path = builds.download(id, false, variant);
         return file(path, path.getFileName().toString(), MediaType.parseMediaType("application/vnd.android.package-archive"));
     }
 

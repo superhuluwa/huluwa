@@ -35,7 +35,7 @@ public class HongguoTvPublicBuildController {
     private static final String DOWNLOAD_PATH = "/api/public/hongguotv/android/downloads/";
     /** 客户端需要的发布字段；签名摘要、大小和校验和在安装前核对。 */
     private static final List<String> RELEASE_FIELDS = List.of("taskId", "versionName", "versionCode",
-            "packageName", "apkSize", "sha256", "signatureSha256", "minSdk", "publishedAt");
+            "packageName", "apkSize", "sha256", "signatureSha256", "minSdk", "publishedAt", "variant");
     private final AndroidBuildService builds;
     private final AndroidDownloadService downloads;
 
@@ -67,13 +67,15 @@ public class HongguoTvPublicBuildController {
         return ApiResult.ok(Map.of("available", true, "release", view));
     }
 
-    public record DownloadRequest(boolean logFile) {}
+    public record DownloadRequest(boolean logFile, String variant) {}
 
     /** 短时票据；匿名入口只能兑换红果 TV 自己的产物，借票据下载不到其他 App 的文件。 */
     @PostMapping("/tasks/{id}/download-ticket")
     public ApiResult<Map<String, Object>> downloadTicket(@PathVariable long id,
                                                         @RequestBody(required = false) DownloadRequest request) {
-        return ApiResult.ok(downloads.create(builds, id, request != null && request.logFile(), DOWNLOAD_PATH));
+        boolean logFile = request != null && request.logFile();
+        String variant = request == null ? "standard" : request.variant();
+        return ApiResult.ok(downloads.create(builds, id, logFile, variant, DOWNLOAD_PATH));
     }
 
     @GetMapping("/downloads/{ticket}")

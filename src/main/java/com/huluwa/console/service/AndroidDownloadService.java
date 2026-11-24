@@ -20,7 +20,7 @@ public class AndroidDownloadService {
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Grant> grants = new ConcurrentHashMap<>();
 
-    private record Grant(AndroidBuildService builds, long taskId, boolean logFile, String filename, Instant expiresAt) {}
+    private record Grant(AndroidBuildService builds, long taskId, boolean logFile, String variant, String filename, Instant expiresAt) {}
     public record Download(Path path, String filename, boolean logFile) {}
 
     public AndroidDownloadService(AndroidBuildService builds) { this.builds = builds; }
@@ -34,7 +34,14 @@ public class AndroidDownloadService {
     }
 
     public synchronized Map<String, Object> create(AndroidBuildService project, long taskId, boolean logFile, String downloadPath) {
-        Path file = project.download(taskId, logFile);
+        return create(project, taskId, logFile, "standard", downloadPath);
+    }
+
+    public synchronized Map<String, Object> create(AndroidBuildService project, long taskId, boolean logFile,
+                                                   String variant, String downloadPath) {
+        String selected = variant == null || variant.isBlank() ? "standard" : variant;
+        if (!"standard".equals(selected) && !"android5".equals(selected)) throw new BusinessException("未知安装包渠道");
+        Path file = project.download(taskId, logFile, selected);
         removeExpired();
         if (grants.size() >= MAX_GRANTS) throw new BusinessException(429, "下载请求较多，请稍后重试");
         byte[] bytes = new byte[32];
@@ -42,7 +49,7 @@ public class AndroidDownloadService {
         String ticket = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         String filename = logFile ? "android-task-" + taskId + ".log" : file.getFileName().toString();
         Instant expiresAt = Instant.now().plusSeconds(LIFETIME_SECONDS);
-        grants.put(ticket, new Grant(project, taskId, logFile, filename, expiresAt));
+        grants.put(ticket, new Grant(project, taskId, logFile, selected, filename, expiresAt));
         // The frontend resolves this path against the actual public Huluwa origin.
         return Map.of("path", downloadPath + ticket,
                 "filename", filename, "expiresAt", expiresAt.toString());
@@ -60,7 +67,7 @@ public class AndroidDownloadService {
         if (expectedProject != null && grant.builds() != expectedProject)
             throw new BusinessException(404, "下载链接不属于 TerminalBuddy 更新服务");
         // Grants remain reusable until expiry for browser HEAD, Range and retry requests.
-        return new Download(grant.builds().download(grant.taskId(), grant.logFile()), grant.filename(), grant.logFile());
+        return new Download(grant.builds().download(grant.taskId(), grant.logFile(), grant.variant()), grant.filename(), grant.logFile());
     }
 
     @Scheduled(fixedDelay = 60000)

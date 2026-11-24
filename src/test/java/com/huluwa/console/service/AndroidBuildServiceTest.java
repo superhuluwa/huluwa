@@ -108,6 +108,46 @@ class AndroidBuildServiceTest {
         assertArrayEquals(apk, Files.readAllBytes(service.download(id, false)));
     }
 
+    @Test void publishesVerifiedDualArtifactsAndDownloadsSelectedVariant() throws Exception {
+        var task = service.submit("BUILD", "admin", node);
+        long id = ((Number)task.get("id")).longValue();
+        byte[] standard = "standard-fixture".getBytes(StandardCharsets.UTF_8);
+        byte[] android5 = "android5-fixture".getBytes(StandardCharsets.UTF_8);
+        String signature = "b".repeat(64);
+        var result = new LinkedHashMap<String, Object>(Map.of(
+                "status", "SUCCESS", "stage", "DONE", "versionCode", task.get("versionCode"),
+                "versionName", task.get("versionName"), "packageName", "com.huluwa.nativeapp",
+                "commit", "a".repeat(40), "artifactName", "huluwa-dual.apk",
+                "apkSize", standard.length, "sha256", digest(standard), "signatureSha256", signature,
+                "minSdk", 24, "completedAt", java.time.Instant.now().toString()));
+        var manifest = new LinkedHashMap<String, Object>(Map.of(
+                "status", "SUCCESS", "packageName", "com.huluwa.nativeapp",
+                "versionName", task.get("versionName"), "versionCode", task.get("versionCode"),
+                "commit", "a".repeat(40), "artifactName", "huluwa-dual.apk",
+                "apkSize", standard.length, "sha256", digest(standard), "signatureSha256", signature,
+                "minSdk", 24,
+                "android5", Map.of("artifactName", "huluwa-dual-android5.apk", "apkSize", android5.length,
+                        "sha256", digest(android5), "signatureSha256", signature, "minSdk", 21,
+                        "versionName", task.get("versionName"), "versionCode", task.get("versionCode"),
+                        "commit", "a".repeat(40), "packageName", "com.huluwa.nativeapp")));
+        var payload = new LinkedHashMap<>(heartbeat);
+        payload.putAll(Map.of("taskId", id, "result", result));
+        service.pollAgent(node, token, payload);
+        var directory = directory.resolve("mailbox").resolve("remote-tasks").resolve(String.valueOf(id));
+        var mapper = new ObjectMapper();
+        mapper.writeValue(directory.resolve("dual-apks.json").toFile(), manifest);
+        service.uploadAgent(node, token, id, "huluwa-dual.apk", new ByteArrayInputStream(standard));
+        service.uploadAgent(node, token, id, "huluwa-dual-android5.apk", new ByteArrayInputStream(android5));
+        service.pollAgent(node, token, payload);
+        assertArrayEquals(standard, Files.readAllBytes(service.download(id, false)));
+        assertArrayEquals(android5, Files.readAllBytes(service.download(id, false, "android5")));
+        assertThrows(BusinessException.class, () -> service.download(id, false, "arm64"));
+    }
+
+    private String digest(byte[] value) throws Exception {
+        return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value));
+    }
+
     @Test void versionSequenceSurvivesNodeSwitchAndFailedBuild() throws Exception {
         long id = ((Number)service.submit("BUILD", "admin", node).get("id")).longValue();
         service.pollAgent(node, token, Map.of("taskId", id, "result", Map.of("status", "FAILED", "stage", "DONE")));

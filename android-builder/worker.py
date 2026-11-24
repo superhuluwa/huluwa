@@ -30,6 +30,8 @@ ARTIFACT_PREFIX = os.environ.get('HULUWA_ANDROID_ARTIFACT_PREFIX', 'huluwa')
 # 源码根目录与应用名解耦：huluwa 位于仓库根，红果 TV 位于 kotlin-tv 子目录。
 APP_DIRECTORY = os.environ.get('HULUWA_ANDROID_APP_DIRECTORY', 'android')
 APP_NAME = os.environ.get('HULUWA_ANDROID_APP_NAME', '')
+# 红果 TV 的单次构建固定产出标准版和 Android 5 兼容版；其他应用保持单包流程。
+DUAL_APK_BUILD = APP_NAME == 'hongguotv'
 # 源码未固定 Gradle 发行包校验值时，用节点配置补充期望值（校验下载与已有缓存）。
 GRADLE_SHA256 = os.environ.get('HULUWA_ANDROID_GRADLE_SHA256', '').lower()
 STOP = threading.Event()
@@ -310,9 +312,11 @@ class Job:
             (android / 'keystore.properties').unlink(missing_ok=True)
             init_script = 'hongguotv.init.gradle' if APP_NAME == 'hongguotv' else 'android.init.gradle'
             command = ([str(android / 'gradlew.bat')] if os.name == 'nt' else ['bash', './gradlew'])
-            if APP_NAME == 'hongguotv':
-                # 红果 TV 额外编译 :core 模块并执行测试与 Release lint，与官方发布流程一致。
-                command += [':core:test', ':app:lintRelease', ':app:assembleRelease']
+            if DUAL_APK_BUILD:
+                # 同一 Gradle 调用生成两个变体，保证版本号、提交和签名完全一致。
+                command += ['-PHONGGUOTV_BUILD_ANDROID5=true',
+                            ':core:test', ':app:lintRelease',
+                            ':app:assembleStandardRelease', ':app:assembleAndroid5Release']
             else:
                 command += [':app:assembleRelease']
             command += ['--no-daemon', '--console=plain', '--stacktrace', '--build-cache', f'--max-workers={workers}',
@@ -321,14 +325,20 @@ class Job:
                         '--init-script', str(BUILDER / init_script)]
             self.run(command, cwd=android, env=env)
             self.stage('VERIFYING', '读取 APK 信息并校验 Release 签名……')
-            candidates = list((android / 'app/build/outputs/apk/release').glob('*.apk'))
-            if len(candidates) != 1:
-                raise RuntimeError('预期生成一个 Release APK，实际产物数量不符。')
-            apk = candidates[0]
-            signature_output = self.run([android_tool('apksigner'), 'verify', '--print-certs', str(apk)], capture=True)
-            digest = re.search(r'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)', signature_output)
-            if not digest:
-                raise RuntimeError('APK 未通过签名校验。')
+            if DUAL_APK_BUILD:
+                output_root = android / 'app/build/outputs/apk/release'
+                candidates = {
+                    'standard': output_root / 'standard' / 'app-standard-release.apk',
+                    'android5': output_root / 'android5' / 'app-android5-release.apk',
+                }
+            else:
+                output_root = android / 'app/build/outputs/apk/release'
+                candidates = list(output_root.glob('*.apk'))
+                if len(candidates) != 1:
+                    raise RuntimeError('预期生成一个 Release APK，实际产物数量不符。')
+                candidates = {'standard': candidates[0]}
+            if DUAL_APK_BUILD and not all(path.is_file() for path in candidates.values()):
+                raise RuntimeError('预期生成标准版和 Android 5 兼容版两个 Release APK，实际产物数量不符。')
             key_output = self.run(['keytool', '-exportcert', '-rfc', '-keystore', str(keystore),
                                    '-alias', signing['keyAlias'], '-storepass:env', password_env],
                                   env=env, capture=True)
@@ -337,33 +347,64 @@ class Job:
             if not certificate:
                 raise RuntimeError('无法读取 Release 签名证书。')
             expected = hashlib.sha256(base64.b64decode(certificate.group(1))).hexdigest()
-            if digest.group(1).lower() != expected:
-                raise RuntimeError('APK 签名与配置的 Release 证书不一致。')
-            badging = self.run([android_tool('aapt'), 'dump', 'badging', str(apk)], capture=True)
-            package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
-            if (not package or package.group(1) != PACKAGE_NAME
-                    or int(package.group(2)) != self.request['versionCode']
-                    or package.group(3) != self.request['versionName']):
-                raise RuntimeError('APK 包名、版本号或版本代码不符合本次自动分配的构建参数。')
+            records = {}
+            for variant, apk in candidates.items():
+                signature_output = self.run([android_tool('apksigner'), 'verify', '--print-certs', str(apk)], capture=True)
+                digest = re.search(r'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)', signature_output)
+                if not digest:
+                    raise RuntimeError(f'{variant} APK 未通过签名校验。')
+                if digest.group(1).lower() != expected:
+                    raise RuntimeError(f'{variant} APK 签名与配置的 Release 证书不一致。')
+                badging = self.run([android_tool('aapt'), 'dump', 'badging', str(apk)], capture=True)
+                package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
+                minimum = re.search(r"(?m)^sdkVersion:'(\d+)'", badging)
+                if (not package or not minimum or package.group(1) != PACKAGE_NAME
+                        or int(package.group(2)) != self.request['versionCode']
+                        or package.group(3) != self.request['versionName']):
+                    raise RuntimeError(f'{variant} APK 包名、版本号或版本代码不符合本次自动分配的构建参数。')
+                records[variant] = {
+                    'versionName': package.group(3), 'minSdk': int(minimum.group(1)),
+                    'apkSize': apk.stat().st_size, 'sha256': file_sha256(apk),
+                    'signatureSha256': expected,
+                }
+            if DUAL_APK_BUILD and (records['standard']['minSdk'] <= 22 or records['android5']['minSdk'] not in (21, 22)):
+                raise RuntimeError('双包的最低系统版本不符合标准版 API 24+、兼容版 API 21/22 的约定。')
             self.stage('ARCHIVING', '归档已签名 APK……')
-            version = re.sub(r'[^A-Za-z0-9._-]', '_', package.group(3))[:60]
-            filename = f'{ARTIFACT_PREFIX}-{version}-{self.request["versionCode"]}-{commit[:8]}.apk'
-            temporary = self.directory / (filename + '.tmp')
-            shutil.copyfile(apk, temporary)
-            self.check()
-            os.replace(temporary, self.directory / filename)
+            version = re.sub(r'[^A-Za-z0-9._-]', '_', records['standard']['versionName'])[:60]
+            base = f'{ARTIFACT_PREFIX}-{version}-{self.request["versionCode"]}-{commit[:8]}'
+            archived = {}
+            for variant, apk in candidates.items():
+                suffix = '-android5' if variant == 'android5' else ''
+                filename = base + suffix + '.apk'
+                temporary = self.directory / (filename + '.tmp')
+                shutil.copyfile(apk, temporary)
+                self.check()
+                os.replace(temporary, self.directory / filename)
+                archived[variant] = {**records[variant], 'artifactName': filename}
+                log(self.directory, f'{filename} 已归档\nSHA-256：{records[variant]["sha256"]}\n')
+            standard = archived['standard']
             self.meta.update({
-                'versionName': package.group(3), 'artifactName': filename,
-                'packageName': package.group(1),
-                'minSdk': int(re.search(r"(?m)^sdkVersion:'(\d+)'", badging).group(1)),
-                'apkSize': apk.stat().st_size, 'sha256': file_sha256(apk),
-                'signatureSha256': expected,
+                'versionName': standard['versionName'], 'artifactName': standard['artifactName'],
+                'packageName': PACKAGE_NAME, 'minSdk': standard['minSdk'],
+                'apkSize': standard['apkSize'], 'sha256': standard['sha256'],
+                'signatureSha256': standard['signatureSha256'],
             })
+            if DUAL_APK_BUILD:
+                atomic_json(self.directory / 'dual-apks.json', {
+                    'status': 'SUCCESS', 'packageName': PACKAGE_NAME,
+                    'versionName': standard['versionName'], 'versionCode': self.request['versionCode'],
+                    'commit': commit, 'artifactName': standard['artifactName'],
+                    'minSdk': standard['minSdk'], 'apkSize': standard['apkSize'],
+                    'sha256': standard['sha256'], 'signatureSha256': standard['signatureSha256'],
+                    'android5': {
+                        **archived['android5'], 'packageName': PACKAGE_NAME,
+                        'versionCode': self.request['versionCode'], 'commit': commit,
+                    },
+                })
             # Retain the R8 mapping for diagnosing crashes in this minified release.
             mapping = android / 'app/build/outputs/mapping/release/mapping.txt'
             if mapping.is_file():
                 shutil.copyfile(mapping, self.directory / 'mapping.txt')
-            log(self.directory, f'APK 已归档：{filename}\nSHA-256：{self.meta["sha256"]}\n')
         finally:
             # Only disposable worktrees are removed; Git and Gradle caches persist.
             subprocess.run(['git', '-C', str(REPO), 'worktree', 'remove', '--force', str(source)],
@@ -395,6 +436,7 @@ class Job:
             # Incomplete or cancelled files never become downloadable.
             for path in self.directory.glob('*.apk*'):
                 path.unlink(missing_ok=True)
+            (self.directory / 'dual-apks.json').unlink(missing_ok=True)
             result.pop('artifactName', None)
         atomic_json(self.directory / 'result.json', result)
         SECRET_VALUES.clear()

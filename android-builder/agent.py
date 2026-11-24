@@ -75,13 +75,27 @@ class Bridge:
                     source.seek(offset)
                     payload['log'] = base64.b64encode(source.read(65536)).decode()
                     remaining = source.tell() < log.stat().st_size
-            result = worker.read_json(directory / 'result.json')
-            if result and not remaining:
-                for name in (result.get('artifactName'), 'mapping.txt'):
-                    if name and (directory / name).is_file() and (task_id, name) not in self.uploaded:
-                        self.upload(task_id, directory / name)
-                        self.uploaded.add((task_id, name))
-                payload['result'] = result
+            if not remaining:
+                # 双包清单最后回传；它到达时两个 APK 已全部上传，后端可原子校验。
+                result = worker.read_json(directory / 'result.json')
+                if result:
+                    manifest = worker.read_json(directory / 'dual-apks.json')
+                    names = [result.get('artifactName'), 'mapping.txt']
+                    if manifest:
+                        names.append((manifest.get('android5') or {}).get('artifactName'))
+                    # 只等待磁盘上真实存在的文件；关闭混淆时可能没有 mapping.txt。
+                    names = [name for name in names if name and (directory / name).is_file()]
+                    for name in names:
+                        if (task_id, name) not in self.uploaded:
+                            self.upload(task_id, directory / name)
+                            self.uploaded.add((task_id, name))
+                    complete = not manifest or all((task_id, name) in self.uploaded for name in names)
+                    if complete:
+                        # 清单必须最后上传，避免后端先看到清单而兼容包尚未到齐。
+                        if manifest and (task_id, 'dual-apks.json') not in self.uploaded:
+                            self.upload(task_id, directory / 'dual-apks.json')
+                            self.uploaded.add((task_id, 'dual-apks.json'))
+                        payload['result'] = result
             break  # The central mailbox serializes builds and version allocation.
         tasks = self.poll(payload)
         self.pending = tasks
