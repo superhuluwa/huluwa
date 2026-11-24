@@ -39,7 +39,7 @@ ENV JAVA_HOME=/opt/java/openjdk \
     LANG=C.UTF-8
 ENV PATH="/opt/java/openjdk/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/build-tools/36.0.0:${PATH}"
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 git unzip ca-certificates curl bash libstdc++6 zlib1g \
+    && apt-get install -y --no-install-recommends python3 git unzip ca-certificates curl bash libstdc++6 zlib1g make pkg-config \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 huluwa \
     && useradd --uid 10001 --gid 10001 --home-dir /workspace --no-create-home huluwa \
